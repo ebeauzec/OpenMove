@@ -1,8 +1,8 @@
 {
-  "version": "0.1.0",
+  "version": "0.1.1",
   "major": 0,
   "minor": 1,
-  "patch": 0,
+  "patch": 1,
   "date": "2026-11-02",
-  "notes": "Project scaffold"
+  "notes": "Product requirements"
 }

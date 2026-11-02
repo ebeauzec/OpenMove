@@ -6,7 +6,9 @@ Architecture and project state. Updated with every change that alters either.
 
 OpenMove is a GUI-driven tool that automates the audit, reporting and migration of OpenStack Cinder volumes. It integrates directly with OpenStack and carries out its work by calling OpenStack services and clients.
 
-The functional specification is supplied by the owner and is stored in `docs/`. Where this file and the specification disagree, the specification wins and this file is corrected.
+Product requirements are in `docs/REQUIREMENTS.md`: a standalone application deployable on site, communicating only with OpenStack, with maximum control over migration, extensive reporting and checks, resilience to any failure, and rollback of every action.
+
+The functional specification (the playbook) is supplied by the owner and is stored in `docs/`. Where this file and the specification disagree, the specification wins and this file is corrected.
 
 ## 2. Architecture
 
@@ -24,6 +26,7 @@ Not yet defined. To be written from the specification. It will describe the inte
 | `LEGAL.md` | Ownership and intellectual property declaration. |
 | `THIRD_PARTY_NOTICES.md` | Third-party licences and trademark notices. Updated whenever a dependency is added. |
 | `docs/README.md` | Index of the documents in `docs/`. |
+| `docs/REQUIREMENTS.md` | Product requirements R1-R6 from the owner. |
 | `docs/DEVELOPMENT.md` | Development workflow, hooks, guard and release steps. |
 | `tools/guard_sensitive.py` | Blocks credentials, cloud data and disallowed wording at commit and push. |
 | `tools/dev/release.py` | Version bump and changelog entry. |
