@@ -1,0 +1,195 @@
+OpenMove (OpenStack Cinder volume audit, reporting and migration tool)
+Proprietary Software License
+
+Copyright (c) 2026 Eugene Beauzec and Obi1 - FZCO. All Rights Reserved.
+
+================================================================================
+OWNERSHIP, INTELLECTUAL PROPERTY RIGHTS AND INDEPENDENT DEVELOPMENT
+================================================================================
+
+This software application, including without limitation its source code, object
+code, documentation, technical specifications, architecture, designs, workflows,
+configurations, scripts, build materials, databases, user interfaces, and all
+related materials, content and developments, whether existing now or created in
+the future, is the sole and exclusive intellectual property of Eugene Beauzec
+and Obi1 - FZCO (together, the "Author").
+
+All rights, title and interest in and to the software, including all copyright,
+economic rights, moral rights to the extent applicable, neighbouring rights,
+database rights, know-how, trade secrets, inventions, improvements, derivative
+works, updates, enhancements and all other intellectual property rights, are and
+shall remain exclusively vested in the Author, unless expressly transferred by
+the Author under a separate written agreement signed by the Author.
+
+The software was independently conceived, authored, developed, tested and
+assembled by the Author on the Author's own time and using independent tools,
+resources and development environments. The software was not created as a
+work-for-hire, commissioned work, employment deliverable, client assignment,
+internal project, sponsored project, or contractual obligation for any employer,
+former employer, client, sponsor, platform provider, user, contributor or third
+party.
+
+No employer, former employer, client, sponsor, platform provider, user,
+contributor or third party shall acquire any ownership interest, licence,
+royalty, profit-share, assignment right, benefit, claim, control, or other right
+in or to the software by reason of the Author's past or present engagements,
+sponsorship, administrative status, professional relationship, access to the
+software, use of the software, feedback, contribution, or use of independent
+development tools.
+
+The software does not contain, incorporate, derive from, or rely upon any
+confidential information, proprietary material, customer data, trade secrets,
+private repositories, internal systems, credentials, unpublished documentation,
+business plans, source code, technical materials, employer-provided resources, or
+non-public information belonging to any employer, former employer, client,
+sponsor, platform provider, user, contributor or third party.
+
+If any third-party proprietary material is credibly identified as having been
+inadvertently included in the software, the Author reserves the right to remove,
+replace or remediate such material promptly, without admission of liability and
+without prejudice to the Author's ownership of the remaining software.
+
+Any references to third-party products, services, companies, platforms,
+trademarks, technologies or tools are made solely for identification,
+compatibility, interoperability, technical, or documentation purposes. Such
+references do not imply any affiliation, sponsorship, endorsement, approval,
+authorisation, partnership, licence, or commercial relationship with the
+relevant third-party owner. All third-party trademarks, product names, company
+names and service names remain the property of their respective owners.
+
+================================================================================
+GRANT OF LICENSE
+================================================================================
+
+Subject to the terms and conditions of this License, the Author grants you a
+limited, non-exclusive, non-transferable, revocable license to use this
+Software as follows:
+
+1. NON-COMMERCIAL USE (FREE)
+   You may use, copy, and run this Software, without modification, for personal,
+   educational, research, or other non-commercial purposes at no charge, provided
+   that:
+   (a) This License file and all copyright notices are retained in all copies
+       or substantial portions of the Software; and
+   (b) You do not use the Software in any manner that generates revenue,
+       reduces costs in a commercial context, or forms part of a product or
+       service offered to paying customers.
+
+2. COMMERCIAL USE (REQUIRES PRIOR WRITTEN CONSENT)
+   Any use of the Software - in whole or in part, directly or as part of a
+   derivative work - in a commercial context requires the Author's prior
+   explicit written consent. Commercial use includes, without limitation:
+   (a) Using the Software as part of a product or service sold or licensed to
+       third parties;
+   (b) Using the Software internally within an organisation to generate
+       commercial value, reduce costs, or support revenue-generating activities;
+   (c) Bundling, repackaging, or white-labelling the Software;
+   (d) Using the Software as a managed service offering.
+
+   To request a commercial license, contact the Author directly.
+
+3. MODIFICATION & DERIVATIVE WORKS
+   You may modify the Software for personal, non-commercial use only.
+   Distribution of modified versions, or creation of derivative works for any
+   purpose - commercial or non-commercial - requires the Author's prior explicit
+   written consent. Any authorised derivative work must retain this License and
+   all copyright notices, and must clearly attribute the original Software and
+   its Author.
+
+4. REDISTRIBUTION
+   Redistribution of this Software, in source or compiled form, with or without
+   modification, is not permitted without the Author's prior explicit written
+   consent. Sharing access to a deployed, unmodified instance for non-commercial
+   purposes among colleagues within the same organisation is permitted, provided
+   no charge is levied and this License is made available to all users.
+
+================================================================================
+RESTRICTIONS
+================================================================================
+
+No person or entity may, without the Author's prior explicit written consent:
+
+- Copy, reproduce, modify, adapt, translate, publish, or distribute the
+  Software or any portion thereof;
+- Commercialise, sublicense, sell, rent, lease, lend, assign, transfer, or
+  pledge the Software or any portion thereof;
+- Reverse engineer, decompile, disassemble, or otherwise attempt to derive the
+  source code from a compiled form of the Software;
+- Use the Software, its source code or its documentation to train, fine-tune or
+  evaluate a machine-learning model, or to build a competing product;
+- Remove, alter, or obscure any copyright, trademark, or attribution notice;
+- Claim authorship or ownership of the Software or any derivative thereof;
+- Use the Author's name, likeness, or identity to endorse or promote products
+  derived from this Software;
+- Represent this Software as an official product, tool, or publication of any
+  employer, client, or third party, including the OpenInfra Foundation or the
+  OpenStack project;
+- Use this Software to provide services to third parties for compensation
+  without an authorised commercial license.
+
+================================================================================
+INTELLECTUAL PROPERTY RESERVATION
+================================================================================
+
+All rights not expressly granted in writing by the Author are strictly reserved.
+This License does not transfer any ownership interest in the Software or any
+intellectual property rights therein. The Author retains all moral rights in the
+Software to the fullest extent permitted by applicable law.
+
+Nothing in this License shall be interpreted as granting any implied licence,
+ownership right, commercial right, assignment, waiver, consent, or permission
+beyond what is expressly granted in writing by the Author.
+
+Contributions: no contribution to this Software is accepted unless the
+contributor first assigns all rights in it to the Author by a written agreement
+signed by both parties.
+
+================================================================================
+DISCLAIMER OF WARRANTIES
+================================================================================
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, ACCURACY, OR NON-INFRINGEMENT. THE AUTHOR
+DOES NOT WARRANT THAT THE SOFTWARE WILL BE ERROR-FREE, UNINTERRUPTED, OR THAT
+DEFECTS WILL BE CORRECTED.
+
+================================================================================
+LIMITATION OF LIABILITY
+================================================================================
+
+IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING BUT NOT LIMITED TO
+LOSS OF DATA, LOSS OF VOLUMES, BUSINESS INTERRUPTION, SYSTEM DOWNTIME, OR
+PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES) ARISING OUT OF OR IN CONNECTION WITH
+THE USE OR INABILITY TO USE THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGES.
+
+BY USING THIS SOFTWARE, YOU ACKNOWLEDGE AND AGREE THAT:
+(a) You are solely responsible for verifying the accuracy and suitability of
+    any data, output, or recommendation produced by this Software before acting
+    upon it in any production, operational, or customer-facing context;
+(b) The Author bears no liability for decisions made on the basis of this
+    Software's output, or for any change made to a cloud by this Software,
+    including volume migrations, retypes, detachments and deletions.
+
+================================================================================
+GOVERNING LAW
+================================================================================
+
+This License shall be governed by and construed in accordance with applicable
+law. Any disputes arising under or in connection with this License shall be
+subject to the exclusive jurisdiction of the courts of competent jurisdiction
+in the Author's place of registration at the time of the dispute.
+
+================================================================================
+CONTACT
+================================================================================
+
+For commercial licensing inquiries, permissions requests, or any questions
+regarding this License, contact the Author via the repository's issue tracker
+or through the contact information provided in the project's documentation.
+
+================================================================================
+
+Copyright (c) 2026 Eugene Beauzec and Obi1 - FZCO. All Rights Reserved.

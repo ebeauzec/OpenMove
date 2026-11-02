@@ -1,0 +1,5 @@
+#!/bin/sh
+# Owner's rule: no AI assistant is ever listed as author, co-author or contributor. Remove any such trailer from the commit message.
+f="$1"
+grep -v -i -E '^(co-authored-by|signed-off-by|author|reviewed-by):.*(cl[a]ude|anthrop[i]c)' "$f" | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > "$f.tmp" && mv "$f.tmp" "$f"
+exit 0

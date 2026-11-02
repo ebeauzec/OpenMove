@@ -1,0 +1,3 @@
+#!/bin/sh
+# 1. never commit locally generated data, credentials or build output; 2. never commit customer or other sensitive data.
+python tools/guard_sensitive.py --staged || python3 tools/guard_sensitive.py --staged || { echo "Commit blocked: the sensitive-data check could not run or found something."; exit 1; }

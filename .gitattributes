@@ -1,0 +1,9 @@
+# Documentation: GitHub counts these as documentation, not code
+CHANGELOG.md                 linguist-documentation
+CONTEXT.md                   linguist-documentation
+docs/**                      linguist-documentation
+
+# Line endings: scripts that run under sh must stay LF
+.githooks/* text eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf

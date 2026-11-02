@@ -1,0 +1,12 @@
+#!/bin/sh
+# Scans every commit about to be pushed (files, commit messages, author identity) for customer or sensitive data. Do not bypass.
+python tools/guard_sensitive.py --push || python3 tools/guard_sensitive.py --push || { echo "Push blocked: the sensitive-data check could not run or found something."; exit 1; }
+# Owner's rule: never push a commit that lists an AI assistant as author or co-author.
+while read local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "0000000000000000000000000000000000000000" ] && continue
+  range="$local_sha"; [ "$remote_sha" != "0000000000000000000000000000000000000000" ] && range="$remote_sha..$local_sha"
+  if git log --format='%an <%ae>%n%cn <%ce>%n%B' $range 2>/dev/null | grep -q -i -E 'co-authored-by:.*(cl[a]ude|anthrop[i]c)|noreply@anthrop[i]c|^cl[a]ude '; then
+    echo "Push blocked: a commit lists an AI assistant as author or co-author. Rewrite the commit message without that line."; exit 1
+  fi
+done
+exit 0
