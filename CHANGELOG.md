@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 (2026-11-02)
+
+### Added
+- Requirement R10 (runs on Windows, macOS and Linux); design split into control plane and data mover.
+
 ## 0.2.0 (2026-11-02)
 
 ### Added

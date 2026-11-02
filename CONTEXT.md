@@ -12,7 +12,7 @@ The functional specification (the playbook) is supplied by the owner and is stor
 
 ## 2. Architecture
 
-Proposed in `docs/DESIGN.md` (awaiting the owner's confirmation of the open questions there): a single Python application with an embedded SQLite journal, a local web GUI, connectors for the OpenStack APIs, the Cinder database, SSH and the arrays, back-end adapters with capability profiles, a version-detecting discovery module with per-release profiles (R9), a step engine with write-ahead journal and a recorded inverse for every step, a check framework, and a report model rendered to Word and other formats. The method it automates is summarised in `docs/MIGRATION_METHOD.md`.
+Proposed in `docs/DESIGN.md` (awaiting the owner's confirmation of the open questions there): platform independent (R10), split into a control plane that runs on any operating system and a data mover helper that runs on a Linux migration host over SSH; a single Python code base with an embedded SQLite journal, a local web GUI, connectors for the OpenStack APIs, the Cinder database, SSH and the arrays, back-end adapters with capability profiles, a version-detecting discovery module with per-release profiles (R9), a step engine with write-ahead journal and a recorded inverse for every step, a check framework, and a report model rendered to Word and other formats. The method it automates is summarised in `docs/MIGRATION_METHOD.md`.
 
 ## 3. File Inventory & Purpose
 

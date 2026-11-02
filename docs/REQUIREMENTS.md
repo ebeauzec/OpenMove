@@ -1,6 +1,6 @@
 # Requirements
 
-Product requirements R1-R9 as stated by the owner. They apply to every design decision. The technical playbook (to be added to this folder) defines the detail; where the two differ, the playbook wins and this file is corrected.
+Product requirements R1-R10 as stated by the owner. They apply to every design decision. The technical playbook (to be added to this folder) defines the detail; where the two differ, the playbook wins and this file is corrected.
 
 ## R1. Standalone, deployable on site
 
@@ -81,6 +81,14 @@ Product requirements R1-R9 as stated by the owner. They apply to every design de
 - The detected versions, the profile used, and any difference from the validated build are printed in the plan and in every report.
 - Supporting a new release means adding a profile and its tests. It does not mean changing the engine.
 
+## R10. Platform independent
+
+- OpenMove runs on a local system whatever its operating system: Windows, macOS and Linux, on the same terms. The operator uses the same interface and gets the same results on each.
+- It is delivered the way ARIA is: as a packaged application per operating system that needs nothing installed, as a container, and as source that runs with a plain Python install.
+- No part of the application depends on a particular operating system's shell or tools. Anything that must run on a specific system, such as the block-device copy that needs iSCSI and multipath on Linux, runs on the remote host that has it, through a helper that OpenMove ships and starts there. The operator's machine never needs those tools.
+- File paths, line endings, character encodings, time zones and process handling are handled in one place and tested on every supported system.
+- The reports, the job record and the settings are portable: a job started on one system can be opened and reported on from another.
+
 ## Consequences for the design
 
 | Requirement | Design consequence |
@@ -92,6 +100,7 @@ Product requirements R1-R9 as stated by the owner. They apply to every design de
 | R6 | Each journal entry carries its inverse. Rollback is a plan like any other. |
 | R7 | A before snapshot stored with the job, taken at approval and never changed. An after snapshot taken at the end, and a comparison built from the two. A report model built from the job record, rendered by separate writers per format (Word through the ported ARIA parser/renderer, which also decides how the application can run that code: ARIA's is JavaScript, so the stack decision must allow it or replace it with an equivalent). Report sections are generated from the same check and journal data the engine uses, so a report cannot disagree with what happened. |
 | R9 | A discovery module that builds a platform profile (release, service and client versions) at connection time, and release profiles as data that the engine and connectors consult. Mutating steps check the profile status (validated, untested) before they run. |
+| R10 | Control plane (the application, any OS) separated from the data mover (a helper that runs on a Linux migration host, shipped and started over SSH). All code is Python with no shell scripts. One portability layer for paths, processes and encodings. Build and test on all three systems. |
 | R8 | A back-end adapter interface and a capability profile per back-end. The engine asks the adapter what is possible; it never tests for a vendor name. A support matrix generated from the profiles. |
 
 These are consequences of the requirements, not decisions about technology. The stack is chosen after the playbook is read.
