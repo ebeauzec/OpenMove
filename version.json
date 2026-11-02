@@ -1,8 +1,8 @@
 {
-  "version": "0.1.1",
+  "version": "0.1.2",
   "major": 0,
   "minor": 1,
-  "patch": 1,
+  "patch": 2,
   "date": "2026-11-02",
-  "notes": "Product requirements"
+  "notes": "Reporting and back-end requirements"
 }

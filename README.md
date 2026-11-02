@@ -22,8 +22,10 @@ OpenMove is a GUI-driven tool that automates the audit, reporting and migration 
 | Area | Purpose |
 |---|---|
 | **Audit** | Inventory Cinder volumes across projects and backends, and report their state, attachment, type, size and placement. |
-| **Reporting** | Turn audit results into reports that can be reviewed, kept and shared. |
-| **Migration** | Plan and run volume moves between backends, with checks before and after each move. |
+| **Reporting** | Verbose, enterprise-standard reports: every pre-migration check, the volumes to be moved, and progress and update reports for the operations team. |
+| **Migration** | Plan and run volume moves between back-ends, with checks before and after each move and rollback of every action. |
+
+Back-end support is broad by design, with a focus on moves to and from NetApp SolidFire, NetApp ONTAP and Pure Storage. Each back-end pair is listed in a support matrix with its migration method and verification status.
 
 The detailed behaviour of each area is defined by the specification in `docs/`.
 

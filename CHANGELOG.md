@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 (2026-11-02)
+
+### Added
+- Requirements R7 (verbose enterprise-standard reporting) and R8 (broad back-end support) added.
+
 ## 0.1.1 (2026-11-02)
 
 ### Added

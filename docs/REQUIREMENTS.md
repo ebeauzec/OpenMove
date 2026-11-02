@@ -1,6 +1,6 @@
 # Requirements
 
-Product requirements as stated by the owner. They apply to every design decision. The technical playbook (to be added to this folder) defines the detail; where the two differ, the playbook wins and this file is corrected.
+Product requirements R1-R8 as stated by the owner. They apply to every design decision. The technical playbook (to be added to this folder) defines the detail; where the two differ, the playbook wins and this file is corrected.
 
 ## R1. Standalone, deployable on site
 
@@ -44,6 +44,28 @@ Product requirements as stated by the owner. They apply to every design decision
 - Rollback is itself journaled, checked and repeatable.
 - Where an action cannot be undone, OpenMove says so before it runs and requires an explicit confirmation. This is part of the plan shown under R3.
 
+## R7. Verbose, enterprise-standard reporting
+
+- Reports are verbose. Nothing that was checked, decided or done is left out.
+- A migration report contains: every pre-migration check with its result and evidence, the volumes to be moved (with source, target, size, type, state, attachment and owner), the plan, the risks found, and the rollback plan.
+- The same report series serves as the operations team's progress and update reports: status counts, the state of every volume, what changed since the last report, open issues, and next steps.
+- Format is enterprise standard: a controlled document (title, document identifier, version, date, status, author, distribution), an executive summary, numbered sections, tables with consistent columns, an issues and risks log, an appendix with raw evidence, and a sign-off block. The report carries the copyright notice required by `LEGAL.md`.
+- Reports are produced as documents operations can open without OpenMove (a page-fixed format for hand-over and archive, and an editable office format), and the volume lists are also produced as spreadsheet data. The exact set of formats is confirmed with the owner before the reporting module is built.
+- Reports are generated offline, are reproducible from the stored job record, and name the OpenMove version and the cloud they describe.
+- Reports contain real cloud data, so they stay on the machine (see section 7 of the README); they are never committed.
+
+## R8. As many storage back-ends as possible
+
+- OpenMove migrates volumes between Cinder back-ends and supports as many back-ends as can be done safely, with a focus on moves to and from:
+  - NetApp SolidFire
+  - NetApp ONTAP
+  - Pure Storage
+  - other back-ends, as the playbook and testing allow (for example Ceph RBD, LVM, and the other vendor drivers Cinder supports)
+- Back-end support is data plus a small adapter per back-end, not code scattered through the application. Adding a back-end must not change the migration engine.
+- For each back-end pair OpenMove knows (or discovers from the cloud) which migration method is available, for example a driver-assisted move or a host-assisted copy, and shows the choice, its limits and its risks in the plan.
+- A back-end whose behaviour is not known or not verified is reported as unsupported for that pair, and the operator is told why, instead of being attempted.
+- A support matrix (back-end by back-end, direction by direction, with the method and the verification status) is part of the documentation and of every report.
+
 ## Consequences for the design
 
 | Requirement | Design consequence |
@@ -53,5 +75,7 @@ Product requirements as stated by the owner. They apply to every design decision
 | R4 | Check framework with a result record per check, reused by pre-flight, in-flight and post-migration stages. |
 | R5 | Write-ahead journal and a resumable state machine per volume. Idempotent steps. Fault-injection tests. |
 | R6 | Each journal entry carries its inverse. Rollback is a plan like any other. |
+| R7 | A report model built from the job record, rendered by separate writers per format. Report sections are generated from the same check and journal data the engine uses, so a report cannot disagree with what happened. |
+| R8 | A back-end adapter interface and a capability profile per back-end. The engine asks the adapter what is possible; it never tests for a vendor name. A support matrix generated from the profiles. |
 
 These are consequences of the requirements, not decisions about technology. The stack is chosen after the playbook is read.
