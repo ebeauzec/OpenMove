@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2 (2026-11-02)
+
+### Added
+- Engine build plan
+
 ## 0.4.1 (2026-11-02)
 
 ### Added

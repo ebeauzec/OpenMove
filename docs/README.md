@@ -11,6 +11,7 @@
 | `CLASSES.md` | Each volume class: what is enforced today, what the engine must still do, and why a volume might not be migrated. |
 | `WORKLOAD_RISKS.md` | Workloads that may fail this migration (legacy Windows, clusters, databases and more), how sure we are of each, whether OpenMove can see it, and what it does. |
 | `PLAYBOOK_TRACE.md` | Playbook v1.2 step by step: what OpenMove covers, what is only checked, what is not built, and the gaps. |
+| `ENGINE_PLAN.md` | The plan for building the migration engine for a test environment: milestones, what fakes can prove, what only a lab can prove, and what the environment must provide. |
 | `SAFETY.md` | The safety case: hazards, the control for each, where it is in the code, which test proves it, and what is not yet built. |
 | `DESIGN.md` | Proposed architecture: components, back-end adapters, version detection and release profiles, step contract, open questions. |
 

@@ -29,6 +29,7 @@ Proposed in `docs/DESIGN.md` (awaiting the owner's confirmation of the open ques
 | `docs/REQUIREMENTS.md` | Product requirements R1-R18 from the owner (R13 safety, R14 the order, R15 unmigrated volumes, R16 selection, R17 workload risk, R18 per-volume process). |
 | `docs/CLASSES.md` | What is handled for each volume class, and why a volume may not be migrated. |
 | `docs/WORKLOAD_RISKS.md` | Workloads that may fail the migration and how OpenMove identifies them (check V11). |
+| `docs/ENGINE_PLAN.md` | The plan for the migration engine: milestones E1 to E7, the test environment inputs, the open design decision. |
 | `docs/PLAYBOOK_TRACE.md` | Playbook v1.2 step by step: covered, check only, not built, gaps. |
 | `docs/MIGRATION_METHOD.md` | The migration method (from the owner's playbook): classes, phases, gates, rollback, check catalogue. |
 | `docs/DESIGN.md` | Proposed architecture and open questions. |

@@ -1,8 +1,8 @@
 {
-  "version": "0.4.1",
+  "version": "0.4.2",
   "major": 0,
   "minor": 4,
-  "patch": 1,
+  "patch": 2,
   "date": "2026-11-02",
-  "notes": "Per-volume gates G2, G3 and G4 signed by a second person; wizard Back and Next buttons"
+  "notes": "Engine build plan"
 }
