@@ -15,11 +15,26 @@ import urllib.request
 MAX_BODY = 32 * 1024 * 1024
 
 
+READ_METHODS = ("GET", "HEAD")
+
+
 class ConnectorError(Exception):
-    def __init__(self, message, status=None, url=None):
+    def __init__(self, message, status=None, url=None, outcome_unknown=False):
         super().__init__(message)
         self.status = status
         self.url = url
+        # True when a request that changes something may or may not have been carried out (timeout, dropped
+        # connection). The caller must read the state back before it does anything else; it must never assume.
+        self.outcome_unknown = outcome_unknown
+
+
+class ReadOnlyViolation(ConnectorError):
+    """A request that could change the cloud was attempted without a valid permit. Nothing was sent."""
+
+
+def _is_login(method, url, body):
+    """The Keystone token request is a POST that changes nothing, so it is the one allowed exception."""
+    return method == "POST" and url.split("?", 1)[0].rstrip("/").endswith("/auth/tokens") and isinstance(body, dict) and "auth" in body
 
 
 class Http:
@@ -34,8 +49,21 @@ class Http:
         else:
             self._ctx = ssl.create_default_context()
 
-    def request(self, method, url, headers=None, body=None, expect_json=True):
-        """Return (status, response headers as a dict with lower-case names, parsed body)."""
+    def request(self, method, url, headers=None, body=None, expect_json=True, permit=None):
+        """Return (status, response headers as a dict with lower-case names, parsed body).
+
+        Read-only by construction: anything but GET, HEAD and the login is refused unless a permit
+        (openmove.safety.Permit) says yes right now. Any error while asking the permit is a refusal."""
+        method = (method or "").upper()
+        writes = method not in READ_METHODS and not _is_login(method, url, body)
+        if writes:
+            try:
+                ok = bool(permit is not None and permit.check(method, url))
+                why = "" if ok else "no permit"
+            except Exception as exc:
+                ok, why = False, str(exc) or type(exc).__name__
+            if not ok:
+                raise ReadOnlyViolation("%s %s refused, nothing was sent: %s" % (method, _safe_url(url), why), url=url)
         data = None
         hdrs = {"Accept": "application/json"}
         hdrs.update(headers or {})
@@ -56,7 +84,8 @@ class Http:
                                  status=exc.code, url=url) from None
         except (urllib.error.URLError, OSError, ssl.SSLError) as exc:
             reason = getattr(exc, "reason", exc)
-            raise ConnectorError("%s %s failed: %s" % (method, _safe_url(url), reason), url=url) from None
+            raise ConnectorError("%s %s failed: %s" % (method, _safe_url(url), reason), url=url,
+                                 outcome_unknown=writes) from None
         if len(raw) > MAX_BODY:
             raise ConnectorError("answer from %s is larger than the %d byte limit" % (_safe_url(url), MAX_BODY), url=url)
         parsed = None

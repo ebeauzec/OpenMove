@@ -1,6 +1,6 @@
 # Requirements
 
-Product requirements R1-R11 as stated by the owner. They apply to every design decision. The technical playbook (to be added to this folder) defines the detail; where the two differ, the playbook wins and this file is corrected.
+Product requirements R1-R18 as stated by the owner. They apply to every design decision. The technical playbook (to be added to this folder) defines the detail; where the two differ, the playbook wins and this file is corrected.
 
 ## R1. Standalone, deployable on site
 
@@ -98,10 +98,69 @@ Product requirements R1-R11 as stated by the owner. They apply to every design d
 - Every action the tool takes on the operator's behalf follows the same rules as a migration step (R3 to R6): it is planned, shown, approved, journaled, verified and has a recorded undo. A preparation step such as creating an access group is as reversible and as well documented as a cutover.
 - Where the tool cannot do something itself (for example editing the configuration of the OpenStack services, which it does not own), it says exactly what must be changed, checks that it has been changed, and records the result. It never assumes.
 
+## R12. Works with the existing Cinder hosts alone
+
+- Some customers cannot provide a migration host. OpenMove must be able to complete a migration using only the Cinder hosts that already exist, with no new Linux host added to the site. This is a first-class mode, not a fallback, and it has the same checks, gates, journal and rollback as every other mode.
+- OpenMove discovers the cinder-volume hosts from the Cinder API and proposes how to use them: one host that reaches both arrays, or, where no single host does, a relay in which the host of one back-end reads and the host of the other writes, with the two hosts exchanging the data directly.
+- Production Cinder hosts are changed as little as possible. By default OpenMove installs nothing on them: the data mover is a self-contained script run with the interpreter and tools already on the host, it works in its own temporary folder, it touches only the devices it created, and it leaves no residue. Anything it would need to change on a host (a package, a service, a setting) is shown as a plan step that needs explicit approval, and a site can forbid such changes outright.
+- The cost to the production service is controlled: copy rate and concurrency limits per host, a check that the host's cinder-volume service is healthy before a copy starts, and measured impact in the lab before production use.
+
+## R13. Safe: no failure may cause an outage
+
+- OpenMove runs against production. No failure of OpenMove, the network, a host, an array or a person may cause an outage or lose data. This is the first requirement; where another requirement conflicts with it, this one wins.
+- Reading is separated from changing by construction: audit, inventory, checks and reports cannot change a cloud, even through a bug.
+- Every change needs a permit that is checked again for each change (release validated, gate approved, no halt). If OpenMove cannot decide, it refuses.
+- Until the cutover the source volume is only read. Every failure before the cutover leaves production exactly as it was.
+- An unexpected result, a timeout or a crash is never treated as success. The state is read back before anything else is done.
+- A person can stop all changes at once.
+- What is claimed is stated with the control and the test that proves it (`SAFETY.md`). A control without a test counts as not built. Nothing is released that moves data until the planned controls there are built, fault-injection tested and proven in the lab.
+
+## R14. The order: pre-check, validate, copy, keep in sync, check again, then cut over
+
+- For every volume the order is fixed: pre-checks, validation, copy, keep the target in step with the source until the cutover is possible, recheck, recheck again, and only then the cutover. No step can be skipped.
+- The cutover starts only when everything has been checked and validated again, twice, apart in time, with the newest check recent, nothing left to copy and the source unchanged between the checks. A failed recheck sends the volume back to sync and the count of passes starts again.
+- The gate is asked at the moment of the cutover, not only at the start of the run.
+- The whole process and every call are documented for review (`PROCESS.md`, `API_CALLS.md`), and the documentation is kept in step with the code by a test.
+
+## R15. A volume that is not migrated is explained
+
+- If a volume is not migrated for any reason, all relevant information is captured in a report: what happened, why, how, and what state the source and the target were left in.
+- The report includes proposed steps to resolve each cause and says who should act.
+- Every class (A to E) has its own handling and its own causes, including volumes with snapshots (`CLASSES.md`). Where the handling is not built, the documentation says so.
+- The demonstration set shows it: the simulated run produces stopped and rolled-back volumes of every class, and the report is built from them.
+
+## R16. The operator chooses what moves, and controls how
+
+- Volumes are selected one by one or by group (class, project, attachment, size, snapshots, Cinder host, instance, workload risk) before anything migrates. It is never all or nothing.
+- The default is every admitted volume except the high-risk ones. A volume that is not admitted cannot be selected.
+- The interface offers the settings of a run, each with a default that is already selected: hold before the cutover, number of rechecks, gap between rechecks, soak days, concurrency, rate cap, stop after N failures. A setting can be made stricter than the process minimum, never looser. A value below its floor is refused, not changed.
+- A volume that is admitted but not selected is left alone and listed in the not-migrated report as "not selected".
+- The selection and the settings cannot change while a run is in progress. Every change is recorded in the journal with a name.
+
+## R17. A volume that hosts a workload that may break is not moved
+
+- A volume must not be moved if what it hosts may break, for example a legacy Windows server, a guest without the guest agent, or a guest on an emulated disk bus.
+- The tool looks for these (check V11), says what it can and cannot see, and does not call a volume safe because it found nothing. It cannot look inside a guest.
+- The customer's own knowledge can be recorded as a mark. A marked volume is treated as high risk.
+- A high-risk volume is blocked. It moves only after two different people record a clearance with evidence. A cleared volume is held for a person's release before the cutover and is watched; a failed post-check rolls it back.
+- The workloads that may fail, and how sure we are of each, are in `WORKLOAD_RISKS.md`.
+
+## R18. It is always clear what is happening to each volume
+
+- For every volume the interface and the documents show the steps of its class, which step it is in, what that step does and what it touches, what it waits for, and, for a stopped volume, where and why.
+- The cutover conditions are listed for each volume with the state of each.
+- `PROCESS.md` has the same steps, and a test keeps its table in step with the code.
+
 ## Consequences for the design
 
 | Requirement | Design consequence |
 |---|---|
+| R16 | `selection.py` (groups, defaults, floors, validation), `GET/POST /api/selection`, `POST /api/release`, the Select tab, the hold before the cutover and the automatic halt in the simulation (the engine must call the same rules), journal kinds `selection` and `release`. |
+| R17 | `risk.py` (assessment, marks, clearance), check V11, the `risky_workload` cause, `GET /api/risk`, `POST /api/risk/clear`, `POST /api/risk/mark`, `WORKLOAD_RISKS.md`. The inventory carries image properties and instance metadata for it. |
+| R18 | `handling.steps_for` and `volume_view`, `GET /api/volume`, the volume detail panel, `PROCESS.md` ("One volume, step by step"). |
+| R15 | `handling.py` (class plans, causes, the not-migrated record), class rules in `lifecycle.py`, the `unmigrated` report and `GET /api/unmigrated`, the proposed-steps section of the pre-migration report, `CLASSES.md`. |
+| R13, R14 | `safety.py` (permit, halt), the read-only HTTP client, `lifecycle.py` (the order and the cutover conditions), `SAFETY.md` (hazards, controls, tests), `PROCESS.md` and `API_CALLS.md` (reviewable process and calls), a documentation-sync test. The migration engine is built on these and cannot bypass them. |
+| R12 | The migration-host registry accepts cinder-volume hosts as data mover hosts, pre-filled from the Cinder API. Copy modes: single host, and relay between two hosts. Data mover helper with no install step, shipped over SSH, cleaned up after. A site-level switch that forbids changes on production hosts. Per-host rate caps. Readiness check P8 run per candidate host and per mode. |
 | R1, R2 | Single installable package with bundled dependencies and an embedded local datastore. All network access goes through one OpenStack client module. |
 | R3 | A plan object that is shown, approved, then executed. Settings for each decision point. |
 | R4 | Check framework with a result record per check, reused by pre-flight, in-flight and post-migration stages. |

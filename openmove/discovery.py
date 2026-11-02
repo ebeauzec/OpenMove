@@ -100,6 +100,9 @@ def discover(session, journal=None, profile_table=None):
                     "vendor": cap.get("vendor_name"), "driver_version": cap.get("driver_version"),
                     "protocol": cap.get("storage_protocol"),
                     "total_gb": cap.get("total_capacity_gb"), "free_gb": cap.get("free_capacity_gb"),
+                    "provisioned_gb": cap.get("provisioned_capacity_gb"),
+                    "max_over_subscription_ratio": cap.get("max_over_subscription_ratio"),
+                    "reserved_percentage": cap.get("reserved_percentage"),
                     "replication_enabled": cap.get("replication_enabled"),
                     "multiattach": cap.get("multiattach"), "thin": cap.get("thin_provisioning_support")})
         except ConnectorError as exc:

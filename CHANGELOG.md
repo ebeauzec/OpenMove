@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0 (2026-11-02)
+
+### Added
+- Pre-flight checks and gate, environment audit, demo mode, safety layer, volume selection, workload risk, unmigrated-volume reports
+
 ## 0.3.0 (2026-11-02)
 
 ### Added

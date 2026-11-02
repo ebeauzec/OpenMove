@@ -1,8 +1,8 @@
 {
-  "version": "0.3.0",
+  "version": "0.4.0",
   "major": 0,
-  "minor": 3,
+  "minor": 4,
   "patch": 0,
   "date": "2026-11-02",
-  "notes": "Version detection, read-only inventory and local web interface"
+  "notes": "Pre-flight checks and gate, environment audit, demo mode, safety layer, volume selection, workload risk, unmigrated-volume reports"
 }

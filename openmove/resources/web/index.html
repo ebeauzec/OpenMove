@@ -11,14 +11,28 @@
 <body>
 <header>
   <div class="brand"><span class="logo">OpenMove</span><span class="sub">Cinder volume audit, reporting and migration</span></div>
-  <div class="head-right"><span id="mode" class="chip">not connected</span><span id="ver" class="muted"></span></div>
+  <div class="head-right"><button id="halt-btn" class="halt" title="Stop all changes at once. Needs your name and a reason.">HALT</button><span id="mode" class="chip">not connected</span><span id="ver" class="muted"></span></div>
 </header>
+
+<div id="gprog" class="gprog hidden" title="Overall progress of the migration"><div id="gprog-bar" class="bar"><span id="gprog-fill"></span></div><span id="gprog-text"></span></div>
+
+<div id="halt-banner" class="halt-banner hidden" role="alert"></div>
+
+<div id="demo-banner" class="demo hidden" role="note">
+  <div>DEMONSTRATION MODE: everything on screen is synthetic data from a built-in cloud. No real system is connected or changed.</div>
+  <div class="demo-pick"><label>Scenario <select id="demo-scenario"></select></label> <details class="demo-about"><summary>About this scenario</summary><span id="demo-desc"></span></details></div>
+</div>
 
 <main>
   <nav id="tabs" role="tablist">
     <button role="tab" data-tab="connect" class="active">1. Connect</button>
     <button role="tab" data-tab="platform">2. Platform</button>
     <button role="tab" data-tab="inventory">3. Inventory</button>
+    <button role="tab" data-tab="audit">4. Audit</button>
+    <button role="tab" data-tab="preflight">5. Pre-flight</button>
+    <button role="tab" data-tab="select">6. Select</button>
+    <button role="tab" data-tab="reports">7. Reports</button>
+    <button role="tab" data-tab="live">8. Live</button>
     <button role="tab" data-tab="journal">Journal</button>
   </nav>
 
@@ -59,6 +73,7 @@
       <label>Back-end<select id="inv-backend"><option value="">all back-ends</option></select></label>
       <label>Rotation window (days)<input id="inv-window" type="number" min="1" value="14"></label>
       <button class="primary" id="inv-run">Read from the cloud</button>
+      <button class="secondary hidden" id="inv-demo-export" title="Demonstration only: adds the provider ids and snapshot history that the Cinder database would give">Load the demonstration database export</button>
     </div>
     <details>
       <summary>No database access? Import the playbook's query results instead</summary>
@@ -80,6 +95,118 @@
       <thead><tr><th>Volume</th><th>Class</th><th>Reason</th><th>GiB</th><th>Snapshots</th><th>Status</th><th>Back-end</th><th>Attached to</th></tr></thead>
       <tbody></tbody></table></div>
     <p id="inv-more" class="muted"></p>
+  </section>
+
+  <section id="tab-audit" class="panel hidden">
+    <h2>Environment audit</h2>
+    <p class="muted">A full, read-only audit of the environment as it is now: platform, capacity, every volume, snapshot, backup and instance, and the findings: what is wrong, stuck, orphaned or close to a limit. Needs an administrator account.</p>
+    <div class="actions"><button class="primary" id="audit-run">Run the audit</button></div>
+    <div id="audit-view"></div>
+  </section>
+
+  <section id="tab-preflight" class="panel hidden">
+    <h2>Pre-flight checks and gate</h2>
+    <p class="muted">Every prerequisite is checked before a migration may start. A check that fails blocks the gate and must be fixed. A check that warns or could not be verified needs an attestation: a named person's recorded statement with the evidence. Two different people then sign off. Only an open gate lets a migration start.</p>
+    <div class="actions inline">
+      <label>Source back-end<select id="pf-source"><option value="">choose</option></select></label>
+      <label>Target back-end<select id="pf-target"><option value="">choose</option></select></label>
+      <button class="primary" id="pf-run">Run all pre-flight checks</button>
+      <button class="secondary hidden" id="pf-demo-validate">Record lab validation (demo only)</button>
+      <button class="secondary hidden" id="pf-demo-approve" title="Demonstration only: attests the open items and signs as two made-up people. A failed check still blocks.">Demo: attest and sign the gate</button>
+    </div>
+    <p class="muted">Needs the platform detected and the inventory read.</p>
+    <div id="pf-view"></div>
+  </section>
+
+  <section id="tab-select" class="panel hidden">
+    <h2>Select what to migrate, and how</h2>
+    <p class="muted">Nothing is all or nothing. Choose volumes one by one, by group (class, project, attachment, size, snapshots, host, instance, workload risk), or any mix. Only volumes the pre-flight admitted can be chosen; a held-back volume shows why. By default every admitted volume is selected except those that needed a risk clearance. The settings below start at their safe defaults and can only be made stricter than the process minimum. Project names appear after you run the audit (tab 4).</p>
+    <div id="sel-summary" class="banner ok"></div>
+    <div class="actions inline">
+      <button class="secondary" id="sel-all">Select all eligible</button>
+      <button class="secondary" id="sel-none">Select none</button>
+      <button class="secondary" id="sel-reset">Back to the default selection</button>
+      <label>Your name (recorded with each change)<input id="sel-by" placeholder="optional"></label>
+    </div>
+    <h3>By group</h3>
+    <div class="actions inline"><label>Group by <select id="sel-kind"></select></label></div>
+    <div class="table-wrap"><table id="sel-groups"><thead><tr><th>Group</th><th>Volumes</th><th>Eligible</th><th>GiB</th><th>Choose</th></tr></thead><tbody></tbody></table></div>
+    <h3>Volume by volume</h3>
+    <div class="actions inline"><label>Filter<input id="sel-filter" placeholder="id, name, project, class, instance"></label><span id="sel-count" class="muted"></span></div>
+    <div class="table-wrap"><table id="sel-table"><thead><tr><th>Chosen</th><th>Volume</th><th>Name</th><th>Class</th><th>Project</th><th>GiB</th><th>Snapshots</th><th>Attached to</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+    <p id="sel-more" class="muted"></p>
+    <h3>Settings</h3>
+    <div id="sel-options" class="grid"></div>
+    <div class="actions inline"><button class="secondary" id="opt-reset">Reset all settings to the defaults</button><span id="opt-status" class="muted"></span></div>
+    <h3>Workload risk</h3>
+    <p class="muted">Volumes that host something that may break (for example a legacy Windows server, or no guest agent) are <b>not moved</b> until two different people clear them. The check reads hints only (image properties, instance data, names) and cannot see inside a guest: a volume with no hint is not declared safe. Mark any volume the customer knows to be a risk.</p>
+    <div id="risk-cards" class="cards"></div>
+    <div class="actions inline">
+      <button class="secondary" id="risk-op">Clear ticked as operator</button>
+      <button class="secondary" id="risk-rv">Clear ticked as reviewer</button>
+      <button class="secondary" id="risk-wd">Withdraw clearance of ticked</button>
+      <button class="secondary" id="risk-mark">Mark ticked volumes in the list above as a risk</button>
+      <button class="secondary" id="risk-unmark">Remove the mark</button>
+    </div>
+    <div class="table-wrap"><table id="risk-table"><thead><tr><th>Tick</th><th>Volume</th><th>Name</th><th>Class</th><th>Risk</th><th>Why</th><th>Cleared by</th></tr></thead><tbody></tbody></table></div>
+    <div id="risk-advice"></div>
+  </section>
+
+  <section id="tab-reports" class="panel hidden">
+    <h2>Reports</h2>
+    <p class="muted">Word documents built from the same data the tool holds, so a report cannot disagree with what the tool knows. The pre-migration report lists every pre-flight check, the volumes to move and those held back, the gate and the sign-off, and includes the environment audit as a separate part.</p>
+    <div class="grid">
+      <label>Customer or system name<input id="rep-customer" placeholder="shown on the title page and in the footer"></label>
+      <label>Prepared by<input id="rep-by" placeholder="your name"></label>
+      <label class="check"><input id="rep-audit" type="checkbox" checked> Include the environment audit in the pre-migration report</label>
+    </div>
+    <div class="actions">
+      <button class="primary" id="rep-before">Pre-migration report (Word)</button>
+      <button class="secondary" id="rep-audit-only">Environment audit (Word)</button>
+      <button class="secondary" id="rep-unmigrated">Volumes not migrated (Word)</button>
+    </div>
+    <p id="rep-status" class="muted">The pre-migration report and the not-migrated report need the pre-flight to have run; the audit report needs the audit.</p>
+  </section>
+
+  <section id="tab-live" class="panel hidden">
+    <h2>Live view</h2>
+    <div id="live-note" class="banner warn"></div>
+    <div class="actions inline">
+      <button class="primary hidden" id="live-start">Start the simulated migration</button>
+      <button class="secondary hidden" id="live-stop">Stop the simulation</button>
+      <span id="live-status" class="muted"></span>
+    </div>
+    <div class="live-top">
+      <div><div class="k">Overall progress</div><div class="bar big"><span id="live-fill"></span></div><div id="live-pct" class="v"></div></div>
+      <div id="live-cards" class="cards"></div>
+    </div>
+    <h3>Pipeline: the order every volume follows</h3>
+    <div id="live-pipe" class="pipe"></div>
+    <div class="live-cols">
+      <div>
+        <h3>Safety</h3>
+        <div id="live-safety"></div>
+        <h3>A volume may be cut over only when</h3>
+        <ol id="live-rules" class="rules"></ol>
+      </div>
+      <div>
+        <h3>Event feed</h3>
+        <ul id="live-feed" class="feed"></ul>
+      </div>
+    </div>
+    <h3>Volumes</h3>
+    <div class="actions inline"><button class="primary hidden" id="live-release">Release all ready volumes for cutover</button><span id="live-ready" class="muted"></span></div>
+    <p class="muted">Click a volume to see exactly what is being done to it.</p>
+    <div class="table-wrap"><table id="live-table"><thead><tr><th>Volume</th><th>Name</th><th>Class</th><th>GiB</th><th>Phase</th><th>Progress</th><th>Note</th></tr></thead><tbody></tbody></table></div>
+    <p id="live-more" class="muted"></p>
+    <div id="vd" class="vd hidden"></div>
+    <h3>Volumes not migrated</h3>
+    <p class="muted">Every volume that is not migrated, for whatever reason, with why, how and the proposed steps to resolve it. Held-back volumes (classes D and E, failed checks) appear as soon as the pre-flight has run; stopped and rolled-back volumes appear as they happen.</p>
+    <div class="actions"><button class="secondary" id="um-report">Not-migrated report (Word)</button><span id="um-status" class="muted"></span></div>
+    <div id="um-cards" class="cards"></div>
+    <div id="um-causes"></div>
+    <div class="table-wrap"><table id="um-table"><thead><tr><th>Volume</th><th>Name</th><th>Class</th><th>GiB</th><th>Outcome</th><th>Cause</th><th>How it ended</th></tr></thead><tbody></tbody></table></div>
+    <p id="um-more" class="muted"></p>
   </section>
 
   <section id="tab-journal" class="panel hidden">

@@ -25,7 +25,24 @@ python -m openmove                              # start the application
 python -m unittest discover -s tests -t .       # run the tests
 ```
 
+```bash
+python -m openmove --demo                       # the demonstration (built-in cloud, made-up data)
+python -m pip install pyinstaller               # build machine only
+python tools/build/build_exe.py                 # the standalone program and launchers, in dist/
+                                                 # on a synced folder (a cloud drive) the build can fail with 'permission denied':
+                                                 # set OPENMOVE_BUILD_DIR and OPENMOVE_DIST_DIR to folders that are not synced
+```
+
+`dist/` and `build/` are never committed. Build on the operating system the program is for, then run `dist/OpenMove --demo --no-browser` and open the printed address to check it. After any change to the program or the web files the standalone program must be rebuilt.
+
 The tests need no cloud. `tests/mock_openstack.py` serves a small Keystone, Cinder and Nova on a local port with made-up data, and the tests check that only read calls reach it and that the password never appears in a result, the journal file or an error. New code comes with tests in the same commit.
+
+Tests that guard the rules of the project:
+
+* `tests/test_safety.py`: the client refuses every change without a permit; the permit fails closed; only the connector may name write methods.
+* `tests/test_lifecycle.py`: the order of a migration and the cutover conditions.
+* `tests/test_docs_sync.py`: every outbound call, local route and journal event must be listed in `docs/API_CALLS.md`. Change a call, change that file in the same commit.
+* `tests/test_self_contained.py`: only the standard library is imported and the web files load nothing from outside.
 
 ## Sensitive-data guard
 

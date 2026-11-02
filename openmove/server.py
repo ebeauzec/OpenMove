@@ -14,10 +14,16 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from . import __version__, discovery, exports, inventory, paths
+from . import __version__, discovery, exports, handling, inventory, lifecycle, paths, profiles, safety, selection
+from . import risk as risk_mod
+from . import audit as audit_mod
+from .checks import gate as gate_mod
+from .checks import run as checks_run
 from .connectors.httpclient import ConnectorError
 from .connectors.openstack import OpenStackSession
 from .journal import Journal
+from .reports import build as report_build
+from .reports import docx as report_docx
 
 MAX_REQUEST = 20 * 1024 * 1024
 STATIC = {"/app.js": ("app.js", "application/javascript; charset=utf-8"),
@@ -33,6 +39,19 @@ class AppState:
         self.session = None
         self.platform = None
         self.inventory = None
+        self.servers = {}          # instance states from the last inventory
+        self.roots = ()            # probable root volumes from the last inventory
+        self.previous_ids = None   # volume ids of the inventory before the last one (drift check V10)
+        self.audit = None
+        self.extra = {}            # volume types, QoS, backups and project names from the last audit
+        self.checks = None         # the latest pre-flight run
+        self.demo = False
+        self.demo_cloud = None     # the built-in mock cloud, in demonstration mode
+        self.demo_scenario = None  # id of the scenario it plays
+        self.sim = None            # the simulated migration run, in demonstration mode
+        self.selection = None      # the volumes chosen for the batch; None means every admitted volume (the default)
+        self.options = None        # the operator's options; None means the defaults
+        self.released = set()      # volumes the operator released for cutover
         self.extra_hosts = ()  # Host header values accepted besides loopback; set with --allow-host
         self._raw = None  # last API collection, kept so a back-end filter can be re-applied without calling the cloud
 
@@ -41,6 +60,10 @@ class AppState:
             if self.session:
                 self.session.close()
             self.session = self.platform = self.inventory = self._raw = None
+            self.audit = self.checks = None
+            self.servers, self.roots, self.extra = {}, (), {}
+            self.selection = self.options = None
+            self.released = set()
 
 
 def make_handler(state, port_getter):
@@ -54,7 +77,7 @@ def make_handler(state, port_getter):
             pass
 
         # ---- helpers ----
-        def _send(self, status, body, ctype="application/json; charset=utf-8"):
+        def _send(self, status, body, ctype="application/json; charset=utf-8", extra_headers=None):
             if not isinstance(body, bytes):
                 body = json.dumps(body, default=str).encode("utf-8")
             self.send_response(status)
@@ -63,6 +86,8 @@ def make_handler(state, port_getter):
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
+            for k, v in (extra_headers or {}).items():
+                self.send_header(k, v)
             self.send_header("Content-Security-Policy",
                              "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; "
                              "img-src 'self' data:; frame-ancestors 'none'")
@@ -122,7 +147,11 @@ def make_handler(state, port_getter):
                     return self._send(404, {"error": "not found"})
                 body = self._body() if method == "POST" else {}
                 query = {k: v[0] for k, v in parse_qs(url.query).items()}
-                return self._send(200, handler(state, body, query))
+                result = handler(state, body, query)
+                if isinstance(result, Download):
+                    return self._send(200, result.data, result.ctype, {
+                        "Content-Disposition": 'attachment; filename="%s"' % result.filename})
+                return self._send(200, result)
             except ApiError as exc:
                 return self._send(exc.status, {"error": str(exc)})
             except ConnectorError as exc:
@@ -135,6 +164,12 @@ def make_handler(state, port_getter):
     return Handler
 
 
+class Download:
+    """A handler result that is a file, not JSON."""
+    def __init__(self, data, filename, ctype):
+        self.data, self.filename, self.ctype = data, filename, ctype
+
+
 class ApiError(Exception):
     def __init__(self, message, status=409):
         super().__init__(message)
@@ -145,14 +180,307 @@ class ApiError(Exception):
 
 def api_status(state, body, query):
     with state.lock:
+        g = _gate(state)
         return {"version": __version__, "home": str(state.home), "connected": state.session is not None,
-                "project": state.session.project_name if state.session else None,
+                "project": state.session.project_name if state.session else None, "demo": state.demo,
+                "demo_scenario": _demo_info(state), "halted": safety.halted(state.journal),
                 "platform": state.platform is not None, "inventory": state.inventory is not None,
+                "audit": state.audit is not None, "checks": state.checks is not None, "gate": g["status"] if g else None,
                 "read_only": (state.platform or {}).get("read_only", True),
                 "unresolved_steps": len(state.journal.unresolved_steps())}
 
 
+def api_halt(state, body, query):
+    """Stop all changes at once. Needs a name and a reason; anyone may press it."""
+    safety.halt(state.journal, body.get("by"), body.get("reason"))
+    return {"halted": safety.halted(state.journal)}
+
+
+def api_resume(state, body, query):
+    safety.resume(state.journal, body.get("by"), body.get("reason"))
+    return {"halted": safety.halted(state.journal)}
+
+
+def make_permit(state, scope=""):
+    """What the migration engine calls to get permission to change the cloud. Raises safety.Refused if it may not."""
+    def profile():
+        return (state.platform or {}).get("profile") or {"status": "untested", "reason": "the platform has not been read"}
+    return safety.grant(state.journal, profile, lambda: _gate(state), scope)
+
+
+def _demo_info(state):
+    if not state.demo:
+        return None
+    from .demo import scenarios
+    return dict(scenarios.describe(state.demo_scenario), scenarios=scenarios.listing())
+
+
+def api_demo_approve(state, body, query):
+    """Demo mode only: do the human steps of the gate for a demonstration (attest open items, sign twice), labelled as synthetic.
+    A failed check still blocks: it cannot be waived."""
+    if not state.demo:
+        raise ApiError("not available outside demo mode", 404)
+    c = _need(state, "checks")
+    if (state.platform or {}).get("profile", {}).get("status") != "validated":
+        api_demo_validate(state, {}, {})
+    c = checks_run_again(state, c)
+    g = _gate(state)
+    if g["status"] == "blocked":
+        raise ApiError("the gate is blocked, and a failed check cannot be waived: " + "; ".join(
+            "%s %s" % (b["id"], b["title"]) for b in g["blockers"]), 409)
+    for item in g["open_items"]:
+        gate_mod.attest(state.journal, c["source_backend"], c["target_backend"], item["id"], "Demo operator",
+                        "demonstration: synthetic attestation of an open item")
+    gate_mod.sign(state.journal, c["run_id"], "operator", "Demo operator")
+    gate_mod.sign(state.journal, c["run_id"], "reviewer", "Demo reviewer")
+    return _checks_view(state)
+
+
+def checks_run_again(state, previous):
+    return api_checks_run(state, {"source_backend": previous["source_backend"], "target_backend": previous["target_backend"]}, {})
+
+
+def api_demo_simulate(state, body, query):
+    """Demo mode only: start or stop a simulated migration run (made-up evidence, nothing is sent to any system)."""
+    if not state.demo:
+        raise ApiError("not available outside demo mode", 404)
+    from .demo.simulate import Simulation
+    action = body.get("action")
+    if state.sim:
+        state.sim.stop()
+    if action == "stop":
+        return api_live(state, {}, {})
+    if action != "start":
+        raise ValueError("action must be 'start' or 'stop'")
+    sim = Simulation(state, lambda: _gate(state))
+    try:
+        sim.start()
+    except RuntimeError as exc:
+        raise ApiError(str(exc), 409)
+    state.sim = sim
+    return api_live(state, {}, {})
+
+
+def _event_line(e):
+    d, k = e.get("data") or {}, e["kind"]
+    if k == "phase":
+        extra = d.get("reason") or ("source changed: back to sync" if d.get("regression") else "")
+        return "%s enters %s%s" % (e["subject"][-12:], d.get("phase"), (" (%s)" % extra) if extra else "")
+    if k == "refusal":
+        return "REFUSED %s %s: %s" % (e["subject"][-12:], d.get("attempt"), d.get("reason"))
+    if k in ("halt", "resume"):
+        return "%s by %s: %s" % (k.upper(), d.get("by"), d.get("reason"))
+    return "%s %s" % (k, (e.get("subject") or "")[-24:])
+
+
+def _unmigrated(state):
+    g = _gate(state)
+    names = {p["id"]: p["name"] for p in state.extra.get("projects", [])}
+    return handling.unmigrated(state.journal, _need(state, "inventory"), _need(state, "checks"), state.servers, names,
+                               halted=bool(safety.halted(state.journal)), gate_ok=bool(g and g["status"] == "approved"),
+                               selected=set(selection.selected_ids(state)))
+
+
+def api_unmigrated(state, body, query):
+    """Every volume that is not migrated, with the cause, how it happened and the proposed steps (requirement R15)."""
+    data = _unmigrated(state)
+    causes = {}
+    for r in data["rows"]:
+        c = causes.setdefault(r["cause"], {"code": r["cause"], "title": r["title"], "why": r["why"], "source": r["source"], "target": r["target"],
+                                           "steps": r["steps"], "who": r["who"], "count": 0})
+        c["count"] += 1
+    data = dict(data, causes=sorted(causes.values(), key=lambda c: -c["count"]))
+    data["rows"] = [dict(r, timeline=r["timeline"][-12:]) for r in data["rows"][:400]]
+    data["rows_more"] = max(0, data["total"] - data["migrated"] - len(data["rows"]))
+    return data
+
+
+def _failed_checks(state):
+    failed = {}
+    for c in (state.checks or {}).get("volume", []):
+        for f in c.get("findings", []) or []:
+            if f.get("status") == "fail":
+                failed.setdefault(f["volume"], []).append(c["id"])
+    return failed
+
+
+def api_selection_get(state, body, query):
+    """What is selected for the batch, the groups to select by, the options in force and their defaults (requirement R16)."""
+    inv, checks = _need(state, "inventory"), _need(state, "checks")
+    names = {p["id"]: p["name"] for p in state.extra.get("projects", [])}
+    el = selection.eligible_ids(state)
+    sel = set(selection.selected_ids(state))
+    failed = _failed_checks(state)
+    vols, gib = [], 0
+    for v in inv["volumes"][:3000]:
+        why = ""
+        if v["id"] not in el:
+            why = "class %s: %s" % (v.get("class"), v.get("reason") or "not admitted")
+            if failed.get(v["id"]):
+                why += " (failed check %s)" % ", ".join(failed[v["id"]])
+        if v["id"] in sel:
+            gib += int(v.get("size") or 0)
+        vols.append({"id": v["id"], "name": v.get("name") or "", "class": v.get("class"), "project": names.get(v.get("project_id")) or str(v.get("project_id") or "")[:8],
+                     "size": v.get("size"), "snapshots": v.get("snapshots") or 0, "attached": [(state.servers.get(a.get("server_id")) or {}).get("name") or a.get("server_id") or ""
+                                                                                             for a in v.get("attachments", [])],
+                     "eligible": v["id"] in el, "selected": v["id"] in sel, "why": why})
+    return {"eligible": len(el), "selected": len(sel), "selected_gib": gib, "default": state.selection is None, "total": len(inv["volumes"]),
+            "groups": selection.groups(inv, names, state.servers, state.roots, el, checks.get("risk")), "group_kinds": [list(k) for k in selection.KINDS],
+            "options": selection.options_of(state), "defaults": selection.defaults(state.demo), "options_default": state.options is None,
+            "limits": {k: [lo, hi, text] for k, (lo, hi, text) in selection.LIMITS.items()}, "labels": selection.LABELS,
+            "volumes": vols, "running": bool(state.sim and state.sim.running), "released": len(state.released)}
+
+
+def api_selection_set(state, body, query):
+    """Change what is selected (by volume, by group, all, none or back to the default) and/or the options. Every change is journaled."""
+    inv = _need(state, "inventory")
+    _need(state, "checks")
+    action, refused = body.get("action"), []
+    if state.sim and state.sim.running and action:
+        raise ApiError("a run is in progress: stop it before changing the selection (options can be changed at any time)", 409)
+    by = (body.get("by") or "").strip()
+    record = {"by": by or "operator"}
+    if body.get("reset_options") or body.get("options"):
+        merged = {} if body.get("reset_options") else dict(state.options or {})
+        merged.update(body.get("options") or {})
+        selection.check_options(merged, state.demo)               # raises SelectionError (a bad value is refused, never clamped)
+        state.options = merged or None
+        record["options"] = selection.options_of(state)
+    if action:
+        el = selection.eligible_ids(state)
+        known = {v["id"] for v in inv["volumes"]}
+        names = {p["id"]: p["name"] for p in state.extra.get("projects", [])}
+        ids = list(body.get("ids") or [])
+        grp = body.get("group")
+        if grp:
+            ids += selection.members(inv, names, state.servers, state.roots, grp.get("kind"), grp.get("key"), el, (state.checks or {}).get("risk"))
+            record["group"] = {"kind": grp.get("kind"), "key": grp.get("key")}
+        if action not in ("set", "add", "remove", "reset", "none"):
+            raise ValueError("action must be set, add, remove, reset or none")
+        unknown = [i for i in ids if i not in known]
+        if unknown:
+            raise ValueError("unknown volume id: %s" % unknown[0])
+        if action in ("set", "add"):
+            refused = [{"id": i, "reason": "not admitted by the pre-flight"} for i in ids if i not in el]
+        cur = set(selection.selected_ids(state))
+        new = set() if action == "none" else selection.apply(cur, el, action, ids)
+        state.selection = None if action == "reset" else new
+        record.update({"action": action, "count": len(selection.selected_ids(state)), "ids": ids[:50], "ids_total": len(ids)})
+    state.journal.record("selection", "batch", record)
+    out = api_selection_get(state, {}, {})
+    out["refused"] = refused
+    return out
+
+
+def api_release(state, body, query):
+    """Release volumes that are in sync and checked so that their cutover may be attempted. The cutover rules still all apply."""
+    by = (body.get("by") or "").strip()
+    if len(by) < 3:
+        raise ValueError("releasing needs the name of the person who releases")
+    sel = selection.selected_ids(state)
+    if body.get("all"):
+        ids = list(sel)
+    else:
+        inv = _need(state, "inventory")
+        names = {p["id"]: p["name"] for p in state.extra.get("projects", [])}
+        ids = list(body.get("ids") or [])
+        grp = body.get("group")
+        if grp:
+            ids += selection.members(inv, names, state.servers, state.roots, grp.get("kind"), grp.get("key"), set(sel), (state.checks or {}).get("risk"))
+    ids = [i for i in ids if i in set(sel)]
+    if not ids:
+        raise ValueError("no selected volume to release")
+    state.released |= set(ids)
+    state.journal.record("release", "batch", {"by": by, "count": len(ids), "ids": ids[:50]})
+    return api_live(state, {}, {})
+
+
+def api_volume(state, body, query):
+    """Everything about one volume: its path, where it is on it, what is happening now, what blocks the cutover (requirement R18)."""
+    inv = _need(state, "inventory")
+    vid = query.get("id")
+    vol = next((v for v in inv["volumes"] if v["id"] == vid), None)
+    if not vol:
+        raise ApiError("no such volume in the inventory", 404)
+    gate = _gate(state)
+    opts = selection.options_of(state)
+    sim = state.sim
+    urow = None
+    if state.checks:
+        urow = next((r for r in _unmigrated(state)["rows"] if r["volume"] == vid), None)
+    phase = lifecycle.phase_of(state.journal, vid)
+    cond = []
+    if phase in ("sync", "recheck"):
+        cond = lifecycle.readiness(state.journal, vid, gate, sim.vnow if sim else None, selection.rules(opts))
+    view = handling.volume_view(state.journal, vol, sim.notes.get(vid) if sim else None, urow, cond)
+    risk = ((state.checks or {}).get("risk") or {}).get(vid)
+    view.update({"risk": risk, "selected": vid in set(selection.selected_ids(state)), "released": vid in state.released,
+                 "attached_to": [(state.servers.get(a.get("server_id")) or {}).get("name") or a.get("server_id") or "" for a in vol.get("attachments", [])],
+                 "simulated": bool(sim), "held_for_release": bool(risk and risk["level"] == "high") or opts["hold_before_cutover"]})
+    return view
+
+
+def api_live(state, body, query):
+    """What is happening now: per-phase counts, per-volume progress, the gate, the halt, and the newest journal events."""
+    st = lifecycle.states(state.journal)
+    inv = {v["id"]: v for v in (state.inventory or {}).get("volumes", [])}
+    admitted = selection.selected_ids(state)
+    sim = state.sim
+    opts = selection.options_of(state)
+    ready = {v for v, pl in (sim._plan.items() if sim else ()) if pl.get("stage") == "ready"}
+    copy_pct = sim.progress if sim else {}
+    counts, rows = {}, []
+    for vid, e in st.items():
+        ph = e["phase"]
+        counts[ph] = counts.get(ph, 0) + 1
+        v = inv.get(vid, {})
+        rows.append({"id": vid, "name": v.get("name"), "size": v.get("size"), "class": v.get("class"), "phase": ph,
+                     "progress": lifecycle.progress(ph, copy_pct.get(vid)), "at": e.get("at"), "ready": vid in ready,
+                     "note": (sim.notes.get(vid) if sim and ph not in ("aborted", "rollback") else None) or e.get("reason") or
+                             ("source changed: back to sync" if e.get("regression") else "")})
+    total = len(admitted) or len(st)
+    done = sum(r["progress"] for r in rows)
+    active = [r for r in rows if r["phase"] not in ("soak", "done", "aborted", "rollback")]
+    rows.sort(key=lambda r: (r["phase"] in ("soak", "done", "aborted", "rollback"), -r["progress"], r["id"]))
+    g = _gate(state)
+    unresolved = state.journal.unresolved_steps()
+    events = [{"id": e["id"], "ts": e["ts"], "kind": e["kind"], "line": _event_line(e)} for e in state.journal.events(None, None, 40)
+              if e["kind"] in ("phase", "refusal", "halt", "resume", "preflight", "signoff", "attestation", "demo", "report", "audit", "inventory", "platform")]
+    return {"mode": ("simulation" if sim else "idle") if state.demo else "idle",
+            "engine": "not built" if not state.demo else "simulated, demonstration only",
+            "simulation": {"status": sim.status, "running": sim.running, "throughput_mb_s": round(sim.throughput),
+                           "rate_cap_mb_s": opts["rate_cap_mb_s"], "virtual_time": sim.vnow.strftime("%Y-%m-%d %H:%M"), "ticks": sim.ticks} if sim else None,
+            "total": total, "started": len(st), "active": len(active), "counts": counts, "ready": len(ready), "options": opts,
+            "by_class": {k: sum(1 for v in admitted if inv.get(v, {}).get("class") == k) for k in "ABC"} if admitted else {},
+            "overall": round(done / total, 1) if total else 0, "volumes": rows[:150], "volumes_more": max(0, len(rows) - 150),
+            "gate": {"status": g["status"], "message": g["message"]} if g else None,
+            "halted": safety.halted(state.journal), "unresolved_steps": len(unresolved), "events": events,
+            "cutover_rules": ["two passed rechecks in a row", "at least 5 minutes apart", "newest no older than 15 minutes",
+                              "source unchanged between them", "nothing left to copy", "gate approved right now", "no halt"]}
+
+
+def api_demo_scenario(state, body, query):
+    """Demo mode only: switch to another scenario. Everything read so far is discarded."""
+    if not state.demo:
+        raise ApiError("not available outside demo mode", 404)
+    from . import demo
+    demo.switch(state, body.get("id"))
+    return _demo_info(state)
+
+
+def api_demo_dbexport(state, body, query):
+    """Demo mode only: load a made-up database export (provider ids and snapshot history) as the playbook queries would give it."""
+    if not state.demo or not state.demo_cloud:
+        raise ApiError("not available outside demo mode", 404)
+    from .demo import dbexport, scenarios
+    exp = dbexport.build(state.demo_cloud)
+    exp["backend"] = body.get("backend") or scenarios.get(state.demo_scenario)["source"]
+    return api_inventory_import(state, exp, {})
+
+
 def api_connect(state, body, query):
+    if state.demo:
+        raise ApiError("demo mode is connected to the demonstration cloud and stays connected", 409)
     s = OpenStackSession(
         auth_url=body.get("auth_url"), username=body.get("username"), password=body.pop("password", None),
         project_name=body.get("project_name"), user_domain=body.get("user_domain"),
@@ -192,6 +520,19 @@ def api_platform(state, body, query):
     return state.platform
 
 
+def _remember_inventory(state, result, raw_servers, roots, subject, source):
+    """Keep what the checks and reports need, and journal the inventory (with the volume ids, for the drift check)."""
+    prev = state.journal.latest("inventory")
+    prev_ids = prev["data"].get("ids") if prev and prev["data"].get("backend") == result.get("backend") else None
+    with state.lock:
+        state.inventory = result
+        state.servers, state.roots, state.previous_ids = raw_servers, tuple(roots), prev_ids
+        state.checks = None
+    state.journal.record("inventory", subject, {
+        "backend": result.get("backend"), "total": result["total"], "total_gib": result["total_gib"], "counts": result["counts"],
+        "source": source, "ids": sorted(v["id"] for v in result["volumes"])})
+
+
 def api_inventory_run(state, body, query):
     session = _need_session(state)
     window = float(body.get("window_days") or 14)
@@ -201,10 +542,7 @@ def api_inventory_run(state, body, query):
     result["warnings"] = raw["warnings"]
     with state.lock:
         state._raw = raw
-        state.inventory = result
-    state.journal.record("inventory", session.project_name, {
-        "backend": backend, "total": result["total"], "total_gib": result["total_gib"], "counts": result["counts"],
-        "source": "api"})
+    _remember_inventory(state, result, raw["servers"], raw["root_volumes"], session.project_name, "api")
     return result
 
 
@@ -216,13 +554,20 @@ def api_inventory_import(state, body, query):
     churn = exports.parse_churn(body["a2"]) if body.get("a2") else None
     roots = exports.parse_root_volumes(body["a4"]) if body.get("a4") else ()
     servers = exports.apply_instances(volumes, exports.parse_instances(body["inst"])) if body.get("inst") else {}
+    if state._raw:                                    # the database export has no image hints: keep the ones the API gave (workload risk, V11)
+        api_v = {v["id"]: v for v in state._raw.get("volumes", [])}
+        for v in volumes:
+            for k in ("image_meta", "snapshot_id", "source_volid"):
+                if api_v.get(v["id"], {}).get(k):
+                    v[k] = api_v[v["id"]][k]
+        for sid, sv in (servers or {}).items():
+            for k in ("metadata", "flavor"):
+                if (state._raw.get("servers", {}).get(sid) or {}).get(k):
+                    sv[k] = state._raw["servers"][sid][k]
     result = inventory.build(volumes, servers, roots, churn, body.get("backend") or None,
                              float(body.get("window_days") or 14), snapshot_limit=body.get("snapshot_limit"))
     result["warnings"] = []
-    with state.lock:
-        state.inventory = result
-    state.journal.record("inventory", "export", {"backend": body.get("backend"), "total": result["total"],
-                                                 "counts": result["counts"], "source": "database export"})
+    _remember_inventory(state, result, servers, roots, "export", "database export")
     return result
 
 
@@ -233,14 +578,204 @@ def api_inventory_get(state, body, query):
 
 
 def api_journal(state, body, query):
-    return {"events": state.journal.events(query.get("kind"), query.get("subject"), int(query.get("limit", 100))),
-            "unresolved_steps": state.journal.unresolved_steps()}
+    events = state.journal.events(query.get("kind"), query.get("subject"), int(query.get("limit", 100)))
+    for e in events:  # long id lists would flood the screen; show how many instead
+        d = e.get("data")
+        if isinstance(d, dict):
+            e["data"] = {k: ("%d items" % len(v) if isinstance(v, list) and len(v) > 20 else v) for k, v in d.items()}
+    return {"events": events, "unresolved_steps": state.journal.unresolved_steps()}
 
 
 def api_disconnect(state, body, query):
+    if state.demo:
+        raise ApiError("demo mode stays connected to the demonstration cloud", 409)
     state.disconnect()
     state.journal.record("disconnect", "", {})
     return {"ok": True}
+
+
+def _gate(state):
+    """The gate for the latest pre-flight run, or None before one has run."""
+    c = state.checks
+    if not c:
+        return None
+    att = gate_mod.attestations(state.journal, c["source_backend"], c["target_backend"])
+    return gate_mod.evaluate(c, att, gate_mod.signoffs(state.journal, c["run_id"]))
+
+
+def _need(state, what):
+    if getattr(state, what) is None:
+        raise ApiError({"platform": "detect the platform first", "inventory": "read the inventory first",
+                        "audit": "run the audit first", "checks": "run the pre-flight checks first"}[what], 409)
+    return getattr(state, what)
+
+
+def api_audit_run(state, body, query):
+    session = _need_session(state)
+    if not state.platform:
+        api_discover(state, {}, {})
+    raw = inventory.collect(session)
+    extra = audit_mod.collect_extra(session)
+    result = audit_mod.build(state.platform, raw, extra, body.get("backend") or None, tls_verification=session.verify)
+    with state.lock:
+        state.audit, state.extra, state._raw = result, extra, raw
+    state.journal.record("audit", session.project_name, {
+        "volumes": result["volumes"]["total"], "gib": result["volumes"]["gib"], "snapshots": result["snapshots"]["total"],
+        "findings": result["finding_counts"], "finding_ids": [f["id"] for f in result["findings"]]})
+    return result
+
+
+def api_audit_get(state, body, query):
+    return _need(state, "audit")
+
+
+def api_checks_run(state, body, query):
+    platform, inv = _need(state, "platform"), _need(state, "inventory")
+    src = body.get("source_backend") or inv.get("backend") or None
+    tgt = body.get("target_backend") or None
+    mk = risk_mod.marks(state.journal)
+    cleared = risk_mod.active(state.journal, risk_mod.assess_all(inv["volumes"], state.servers, state.roots, mk))
+    result = checks_run.run_all(platform, inv, state.servers, state.roots, src, tgt, state.previous_ids, cleared, mk)
+    with state.lock:
+        state.checks = result
+    state.journal.record("preflight", result["run_id"], {
+        "source": src, "target": tgt, "counts": result["counts"], "admitted": len(result["admitted"]), "volumes": result["volumes_total"],
+        "fingerprint": result["fingerprint"]})
+    return _checks_view(state)
+
+
+def _checks_view(state):
+    c = _need(state, "checks")
+    return dict(c, gate=_gate(state), attestations=gate_mod.attestations(state.journal, c["source_backend"], c["target_backend"]))
+
+
+def api_checks_get(state, body, query):
+    return _checks_view(state)
+
+
+def api_risk_get(state, body, query):
+    """The volumes that host a workload with a known risk, why, the advice, and who has cleared them (requirement R17)."""
+    inv = _need(state, "inventory")
+    c = state.checks
+    if c is None:
+        raise ApiError("run the pre-flight first: the risk check is part of it", 409)
+    names = {p["id"]: p["name"] for p in state.extra.get("projects", [])}
+    cl = risk_mod.clearances(state.journal)
+    by_id = {v["id"]: v for v in inv["volumes"]}
+    rows = []
+    for vid, a in (c.get("risk") or {}).items():
+        v = by_id.get(vid, {})
+        cur = cl.get(vid) if (cl.get(vid) or {}).get("signature") == a["signature"] else {}
+        rows.append({"id": vid, "name": v.get("name") or "", "class": v.get("class"), "project": names.get(v.get("project_id")) or str(v.get("project_id") or "")[:8],
+                     "size": v.get("size"), "level": a["level"], "reasons": a["reasons"], "advice": a["advice"], "signature": a["signature"], "cleared": a["cleared"],
+                     "operator": (cur.get("operator") or {}).get("by"), "reviewer": (cur.get("reviewer") or {}).get("by"),
+                     "operator_evidence": (cur.get("operator") or {}).get("evidence"), "reviewer_evidence": (cur.get("reviewer") or {}).get("evidence"),
+                     "marked": vid in risk_mod.marks(state.journal)})
+    rows.sort(key=lambda r: (r["level"] != "high", r["cleared"], r["id"]))
+    return {"rows": rows, "high": sum(1 for r in rows if r["level"] == "high"), "medium": sum(1 for r in rows if r["level"] != "high"),
+            "cleared": sum(1 for r in rows if r["cleared"]),
+            "note": "This check reads hints (image properties, instance metadata, names, size). It cannot see inside a guest. A volume with no hint is not declared safe; "
+                    "mark any volume the customer knows to be a risk."}
+
+
+def api_risk_clear(state, body, query):
+    """Record one person's clearance (or withdrawal) of high-risk volumes. Two different people, operator then reviewer, lift the block."""
+    c = _need(state, "checks")
+    ids = list(body.get("ids") or [])
+    if not ids:
+        raise ValueError("choose at least one volume")
+    withdraw = bool(body.get("withdraw"))
+    for vid in ids:
+        a = (c.get("risk") or {}).get(vid)
+        if not a or a["level"] != "high":
+            raise ValueError("volume %s has no high-risk finding to clear" % vid)
+        risk_mod.record(state.journal, vid, a["signature"], body.get("role"), body.get("by"), body.get("evidence"), withdraw)
+    prev = {"source_backend": c["source_backend"], "target_backend": c["target_backend"]}
+    checks_run_again(state, prev)                     # the new pre-flight run needs the gate (and both sign-offs) again
+    out = api_risk_get(state, {}, {})
+    out["rerun"] = "The pre-flight was run again. Its gate needs the two sign-offs again."
+    return out
+
+
+def api_risk_mark(state, body, query):
+    """Mark volumes (by id or by group) as a risk, from what the customer knows. A marked volume is not moved until two people clear it."""
+    inv = _need(state, "inventory")
+    c = _need(state, "checks")
+    names = {p["id"]: p["name"] for p in state.extra.get("projects", [])}
+    ids = list(body.get("ids") or [])
+    grp = body.get("group")
+    if grp:
+        ids += selection.members(inv, names, state.servers, state.roots, grp.get("kind"), grp.get("key"), {v["id"] for v in inv["volumes"]}, c.get("risk"))
+    known = {v["id"] for v in inv["volumes"]}
+    if not ids or any(i not in known for i in ids):
+        raise ValueError("choose volumes that are in the inventory")
+    for vid in ids:
+        risk_mod.mark(state.journal, vid, body.get("by"), body.get("note"), bool(body.get("withdraw")))
+    checks_run_again(state, {"source_backend": c["source_backend"], "target_backend": c["target_backend"]})
+    out = api_risk_get(state, {}, {})
+    out["rerun"] = "The pre-flight was run again. Its gate needs the two sign-offs again."
+    return out
+
+
+def api_attest(state, body, query):
+    c = _need(state, "checks")
+    cid = body.get("check_id")
+    if cid not in {x["id"] for x in c["platform"] + c["volume"]}:
+        raise ValueError("unknown check: %s" % cid)
+    if body.get("withdraw"):
+        gate_mod.withdraw(state.journal, c["source_backend"], c["target_backend"], cid, body.get("by"))
+    else:
+        gate_mod.attest(state.journal, c["source_backend"], c["target_backend"], cid, body.get("by"), body.get("note"))
+    return _checks_view(state)
+
+
+def api_signoff(state, body, query):
+    c = _need(state, "checks")
+    gate_mod.sign(state.journal, c["run_id"], body.get("role"), body.get("by"))
+    return _checks_view(state)
+
+
+def api_demo_validate(state, body, query):
+    """Demo mode only: record a lab validation of the demonstration cloud so the whole flow can be shown."""
+    if not state.demo:
+        raise ApiError("not available outside demo mode", 404)
+    rel = (_need(state, "platform").get("release") or {}).get("release")
+    if not rel:
+        raise ApiError("the release is not identified", 409)
+    profiles.record_validation(state.journal, rel, True, {"demo": True, "note": "synthetic validation of the demonstration cloud"})
+    api_discover(state, {}, {})
+    return {"ok": True, "release": rel}
+
+
+def api_report(state, body, query):
+    kind = body.get("kind") or "before"
+    customer = (body.get("customer") or "").strip() or ("Demonstration: %s (synthetic data)" % _demo_info(state)["title"] if state.demo else
+                                                         (state.session.project_name if state.session else ""))
+    by = (body.get("prepared_by") or "").strip()
+    names = {p["id"]: p["name"] for p in state.extra.get("projects", [])}
+    if kind == "audit":
+        doc = report_build.audit_document(_need(state, "audit"), customer, by, state.demo, __version__)
+        name = "OpenMove_environment_audit"
+    elif kind == "before":
+        checks = _need(state, "checks")
+        doc = report_build.before_document(
+            _need(state, "platform"), _need(state, "inventory"), checks, _gate(state),
+            gate_mod.attestations(state.journal, checks["source_backend"], checks["target_backend"]),
+            audit=state.audit if body.get("include_audit", True) else None, customer=customer, prepared_by=by,
+            demo=state.demo, version=__version__, project_names=names, servers=state.servers)
+        name = "OpenMove_pre-migration_report"
+    elif kind == "unmigrated":
+        checks = _need(state, "checks")
+        g = _gate(state)
+        doc = report_build.unmigrated_document(_unmigrated(state), customer, by, state.demo, __version__, g["message"] if g else "",
+                                               checks.get("source_backend"), checks.get("target_backend"))
+        name = "OpenMove_volumes_not_migrated"
+    else:
+        raise ValueError("kind must be 'before', 'audit' or 'unmigrated'")
+    data = report_docx.build_docx(doc)
+    stamp = report_docx.datetime.now(report_docx.timezone.utc).strftime("%Y%m%d_%H%M")
+    state.journal.record("report", kind, {"bytes": len(data), "customer": customer, "prepared_by": by, "demo": state.demo})
+    return Download(data, "%s_%s.docx" % (name, stamp), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
 
 ROUTES = {
@@ -253,6 +788,29 @@ ROUTES = {
     ("POST", "inventory/import"): api_inventory_import,
     ("GET", "inventory"): api_inventory_get,
     ("GET", "journal"): api_journal,
+    ("POST", "audit/run"): api_audit_run,
+    ("GET", "audit"): api_audit_get,
+    ("POST", "checks/run"): api_checks_run,
+    ("GET", "checks"): api_checks_get,
+    ("POST", "checks/attest"): api_attest,
+    ("POST", "checks/signoff"): api_signoff,
+    ("POST", "report"): api_report,
+    ("POST", "halt"): api_halt,
+    ("POST", "resume"): api_resume,
+    ("POST", "demo/validate"): api_demo_validate,
+    ("GET", "live"): api_live,
+    ("GET", "unmigrated"): api_unmigrated,
+    ("GET", "volume"): api_volume,
+    ("GET", "risk"): api_risk_get,
+    ("POST", "risk/clear"): api_risk_clear,
+    ("POST", "risk/mark"): api_risk_mark,
+    ("GET", "selection"): api_selection_get,
+    ("POST", "selection"): api_selection_set,
+    ("POST", "release"): api_release,
+    ("POST", "demo/approve"): api_demo_approve,
+    ("POST", "demo/simulate"): api_demo_simulate,
+    ("POST", "demo/scenario"): api_demo_scenario,
+    ("POST", "demo/db-export"): api_demo_dbexport,
 }
 
 

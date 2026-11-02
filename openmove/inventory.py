@@ -28,6 +28,11 @@ def _parse_time(text):
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+# image properties that hint at the guest (openmove/risk.py reads them; nothing else from the image is kept)
+IMAGE_KEYS = ("os_type", "os_distro", "os_version", "image_name", "hw_disk_bus", "hw_scsi_model", "hw_qemu_guest_agent",
+              "hw_firmware_type", "hw_machine_type", "architecture")
+
+
 def _backend(host):
     return host.split("@", 1)[1].split("#", 1)[0] if host and "@" in host else None
 
@@ -51,6 +56,8 @@ def normalise_volume(v, snapshots):
         "multiattach": bool(v.get("multiattach")), "encrypted": bool(v.get("encrypted")),
         "group_id": v.get("group_id"), "consistencygroup_id": v.get("consistencygroup_id"),
         "replication_status": v.get("replication_status"), "bootable": v.get("bootable"),
+        "snapshot_id": v.get("snapshot_id"), "source_volid": v.get("source_volid"),
+        "image_meta": {k: str(x) for k, x in (v.get("volume_image_metadata") or {}).items() if k in IMAGE_KEYS},
         "attachments": [{"server_id": a.get("server_id"), "device": a.get("device"),
                          "host_name": a.get("host_name")} for a in v.get("attachments", [])],
         "snapshots": len(snapshots),
@@ -59,7 +66,7 @@ def normalise_volume(v, snapshots):
         "oldest_snapshot_age_h": max(ages) if ages else 0,
         "newest_snapshot_age_h": min(ages) if ages else 0,
         "min_snapshot_size_gib": min(sizes) if sizes else None,
-        "created_at": v.get("created_at"), "source": "api"}
+        "created_at": v.get("created_at"), "updated_at": v.get("updated_at"), "source": "api"}
 
 
 def collect(session, nova_microversion=None):
@@ -77,9 +84,12 @@ def collect(session, nova_microversion=None):
         for s in session.paginate(COMPUTE_TYPES, "/servers/detail", "servers", {"all_tenants": 1},
                                   microversion=nova_microversion):
             servers[s["id"]] = {
+                "name": s.get("name"), "project_id": s.get("tenant_id"),
                 "status": s.get("status"), "task_state": s.get("OS-EXT-STS:task_state"),
                 "locked": s.get("locked"), "host": s.get("OS-EXT-SRV-ATTR:host"),
-                "image_empty": s.get("image") in ("", None, {})}
+                "image_empty": s.get("image") in ("", None, {}),
+                "metadata": {k: str(x) for k, x in (s.get("metadata") or {}).items() if k in IMAGE_KEYS},
+                "flavor": (s.get("flavor") or {}).get("original_name")}
     except Exception as exc:  # compute data is an extra: classification then notes what it lacks
         warnings.append("servers not read: %s" % exc)
 
@@ -90,7 +100,10 @@ def collect(session, nova_microversion=None):
             sv = servers.get(a.get("server_id"))
             if sv and sv["image_empty"] and a.get("device") in ROOT_DEVICES:
                 roots.add(rec["id"])
-    return {"volumes": records, "servers": servers, "root_volumes": sorted(roots), "warnings": warnings}
+    snapshots = [{"id": s.get("id"), "volume_id": s.get("volume_id"), "status": s.get("status"), "size": s.get("size"),
+                  "created_at": s.get("created_at"), "updated_at": s.get("updated_at")} for s in snaps]
+    return {"volumes": records, "servers": servers, "snapshots": snapshots, "root_volumes": sorted(roots),
+            "servers_read": not any(w.startswith("servers not read") for w in warnings), "warnings": warnings}
 
 
 def build(volumes, servers=None, root_volumes=(), churn=None, backend=None, window_days=14, snapshot_limit=None):

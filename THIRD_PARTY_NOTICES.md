@@ -4,10 +4,14 @@ OpenMove is proprietary software (see [LICENSE](LICENSE) and [LEGAL.md](LEGAL.md
 
 ## Components
 
-None yet. This table is filled in as dependencies are added, with the name, version, licence and source of each. A dependency is added only after its licence is checked to allow use inside proprietary software.
+OpenMove's source uses the Python standard library only; it imports no third-party package (a test enforces this). A dependency is added here, with its name, version, licence and source, only after its licence is checked to allow use inside proprietary software.
+
+When OpenMove is packed into a standalone program (`tools/build/build_exe.py`), the program contains the CPython runtime and the parts of the Python standard library it uses, packed by PyInstaller. Those are distributed under their own licences, listed below. Their licence texts must accompany a distributed program.
 
 | Component | Version | Licence | Source |
 |---|---|---|---|
+| CPython runtime and standard library (inside the standalone program only) | the version used for the build | Python Software Foundation License | https://www.python.org/ |
+| PyInstaller bootloader (inside the standalone program only; the build tool itself is not distributed) | the version used for the build | GPL-2.0-or-later with the PyInstaller bootloader exception, which permits use in programs under any licence | https://pyinstaller.org/ |
 
 ## Trademarks
 

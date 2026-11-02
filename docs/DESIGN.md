@@ -67,6 +67,27 @@ Conditions OpenMove applies to a shared-role host:
 
 A dedicated migration host stays the recommended setup where one is available; the shared role removes the need for one.
 
+**Talking to the Cinder hosts directly (no dedicated host).** OpenMove already reads the Cinder services from the API, so the list of cinder-volume hosts is known after the platform step. The operator does not add a migration host by hand: the registry is pre-filled with those hosts, each with the back-ends it serves, and the operator only gives SSH access for the ones to use. Roles are assigned per host and per task:
+
+| Task | Runs on | Why |
+|---|---|---|
+| Destination-record helper (Cinder object layer, freeze, field sync) | A cinder-volume host of the target back-end | It needs that host's Cinder code and `cinder.conf`. |
+| Copy of snapshot clones onto the staging volume | One host that reaches both arrays | The copy reads the source clone and writes the target staging volume on the same host. |
+| Hypervisor inspection | Compute hosts | Read only. |
+
+The copy host is chosen by test, not by name: each candidate cinder-volume host is checked for reach to both arrays and for the shared-role conditions above (check P8, run per candidate), and OpenMove ranks them. Two cases follow. If one cinder-volume host serves both back-ends, it is the copy host. If the back-ends sit on different hosts, the copy host must still reach the other array (the playbook's test T12 already requires this for detached volumes); if no candidate does, OpenMove says so and the plan needs a dedicated host or the OpenMove Linux image. Large moves can use several copy hosts at once, each with its own rate cap, so no one host carries the whole load. All conditions 1 to 6 above apply to every cinder-volume host used this way.
+
+**Cinder hosts only (requirement R12).** For customers who cannot provide a migration host, using the Cinder hosts is the normal mode, so the design does not depend on a host that reaches both arrays. Two copy modes:
+
+| Mode | When | How |
+|---|---|---|
+| Single host | One cinder-volume host reaches both arrays (it serves both back-ends, or has been given access to the other array). | Reads the source clone and writes the staging volume on the same host, as the playbook does. |
+| Relay | The back-ends sit on different cinder-volume hosts and neither reaches the other array. | The host of the source back-end reads the clone; the host of the target back-end writes the staging volume; the two hosts exchange the data directly over an encrypted channel (SSH), not through the machine OpenMove runs on. Compare is done in place: each side computes block hashes and only the hash lists travel. |
+
+OpenMove proposes the mode from the Cinder API alone (which hosts serve which back-end) and confirms it by the readiness check P8, run per host and per mode: array reach, host-to-host reach for a relay, and measured throughput. The relay mode is new relative to the playbook and must pass lab tests (copy fidelity, throughput, behaviour when the channel drops mid-copy and resumes) before use.
+
+Keeping production hosts clean: the data mover helper is one self-contained Python file, run with the interpreter and tools already on the host (the same interpreter Cinder uses where it must run in Cinder's environment). By default nothing is installed. It works in a temporary folder owned by the job, uses its own iSCSI session names, touches only the devices it created, and removes itself when the job ends or is rolled back; the journal records what it did and removed. If a package or service change would be needed, it is a plan step with its undo and needs approval, and a site setting can forbid every change on production hosts, in which case a missing prerequisite is a failed pre-flight check.
+
 **Everything from the tool.** Each phase of the method is a set of GUI functions built on the same step contract (section 6):
 
 | Phase | What the tool does for the operator |
@@ -183,6 +204,8 @@ On restart the engine reads the journal, finds any step with an intent and no ve
 - Settings the playbook leaves open (compare mode, copy mode, clone QoS, stall and cutover time limits, soak period, concurrency per host) are settings with the playbook's values as defaults.
 
 ## 8. Safety rules carried over from the playbook
+
+The safety case for the whole tool is `SAFETY.md`; the order of a migration is `PROCESS.md` section 4, enforced by `openmove/lifecycle.py`; every call is in `API_CALLS.md`. The rules below are the playbook's, which the engine adds to those.
 
 - Database writes are limited to the allowlist the playbook names; each is preceded by a read stored in the record and followed by a read to confirm, and an update that changes any row count other than the expected one stops the job.
 - The destination record is created only through Cinder's object layer on the Cinder host, never by raw insert.

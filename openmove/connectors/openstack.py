@@ -136,6 +136,25 @@ class OpenStackSession:
                 headers["X-OpenStack-Nova-API-Version"] = microversion
         return self.get_url(base + path, params=params, headers=headers)
 
+    def mutate(self, permit, method, service_types, path, body=None, microversion=None):
+        """The only way OpenMove changes a cloud. Needs a Permit, which is checked again for this very call.
+
+        No retry, no re-login and no second attempt happen here: a change that fails or times out is
+        reported with outcome_unknown set, and the migration engine must read the state back before it decides anything."""
+        method = (method or "").upper()
+        if method not in ("POST", "PUT", "DELETE", "PATCH"):
+            raise ConnectorError("mutate() is for changes; use get() to read")
+        if not self._token:
+            raise ConnectorError("not authenticated")
+        stype, base = self.endpoint(service_types)
+        if not base:
+            raise ConnectorError("no %s endpoint in the service catalogue" % "/".join(service_types))
+        headers = self._headers()
+        if microversion:
+            kind = "volume" if service_types is BLOCK_STORAGE_TYPES else "compute"
+            headers["OpenStack-API-Version"] = "%s %s" % (kind, microversion)
+        return self.http.request(method, base + path, headers=headers, body=body, expect_json=False, permit=permit)
+
     def paginate(self, service_types, path, key, params=None, page=500, microversion=None, max_items=1000000):
         """Collect every item of a list call, following the marker."""
         items, marker, seen = [], None, set()
