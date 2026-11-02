@@ -1,6 +1,6 @@
 # Requirements
 
-Product requirements R1-R8 as stated by the owner. They apply to every design decision. The technical playbook (to be added to this folder) defines the detail; where the two differ, the playbook wins and this file is corrected.
+Product requirements R1-R9 as stated by the owner. They apply to every design decision. The technical playbook (to be added to this folder) defines the detail; where the two differ, the playbook wins and this file is corrected.
 
 ## R1. Standalone, deployable on site
 
@@ -72,6 +72,15 @@ Product requirements R1-R8 as stated by the owner. They apply to every design de
 - A back-end whose behaviour is not known or not verified is reported as unsupported for that pair, and the operator is told why, instead of being attempted.
 - A support matrix (back-end by back-end, direction by direction, with the method and the verification status) is part of the documentation and of every report.
 
+## R9. Detects the OpenStack version and acts accordingly
+
+- OpenMove finds out which OpenStack release it is talking to, and the versions of the services and clients that matter (identity, block storage, compute, the hypervisor, the back-end drivers), before it plans anything. It does not rely on the operator to say.
+- Detection uses what the cloud reports (API version discovery and supported microversions) and, where the operator has allowed it, what the hosts report (package and driver versions). Where sources disagree, OpenMove reports the disagreement and uses the most cautious reading.
+- Behaviour follows the detected version. Commands, API calls and payloads, which tools are used, how a result is read, and which migration procedure variant applies are chosen from a profile of that release. A step that exists in one release and not in another is replaced or reported, never attempted blind.
+- A release OpenMove has not been validated against is treated as untested: inventory, checks and reports run (read only), and every step that changes the cloud is refused until a lab validation for that release has been recorded in OpenMove. This is the playbook's rule that a different release needs Phase 0 again.
+- The detected versions, the profile used, and any difference from the validated build are printed in the plan and in every report.
+- Supporting a new release means adding a profile and its tests. It does not mean changing the engine.
+
 ## Consequences for the design
 
 | Requirement | Design consequence |
@@ -82,6 +91,7 @@ Product requirements R1-R8 as stated by the owner. They apply to every design de
 | R5 | Write-ahead journal and a resumable state machine per volume. Idempotent steps. Fault-injection tests. |
 | R6 | Each journal entry carries its inverse. Rollback is a plan like any other. |
 | R7 | A before snapshot stored with the job, taken at approval and never changed. An after snapshot taken at the end, and a comparison built from the two. A report model built from the job record, rendered by separate writers per format (Word through the ported ARIA parser/renderer, which also decides how the application can run that code: ARIA's is JavaScript, so the stack decision must allow it or replace it with an equivalent). Report sections are generated from the same check and journal data the engine uses, so a report cannot disagree with what happened. |
+| R9 | A discovery module that builds a platform profile (release, service and client versions) at connection time, and release profiles as data that the engine and connectors consult. Mutating steps check the profile status (validated, untested) before they run. |
 | R8 | A back-end adapter interface and a capability profile per back-end. The engine asks the adapter what is possible; it never tests for a vendor name. A support matrix generated from the profiles. |
 
 These are consequences of the requirements, not decisions about technology. The stack is chosen after the playbook is read.

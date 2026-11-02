@@ -1,8 +1,8 @@
 {
-  "version": "0.1.3",
+  "version": "0.2.0",
   "major": 0,
-  "minor": 1,
-  "patch": 3,
+  "minor": 2,
+  "patch": 0,
   "date": "2026-11-02",
-  "notes": "Before and after reports"
+  "notes": "Migration method, design and version detection"
 }

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0 (2026-11-02)
+
+### Added
+- Added MIGRATION_METHOD.md and DESIGN.md from the playbook; requirement R9 (detect the OpenStack version and act accordingly).
+
 ## 0.1.3 (2026-11-02)
 
 ### Added
