@@ -19,6 +19,14 @@ refused, never guessed: class D and E volumes never enter the order at all; clas
 validated; a class C volume cannot leave the copy until every snapshot image has been compared identical and the snapshot ids match, and
 each of its rechecks must show that no tenant snapshot appeared or disappeared (reconciled).
 
+Three checkpoints of the playbook are signed per volume by a second person, one who is not the operator of the run (G2, G3, G4):
+
+  G2  the copy is verified (same size and hash; for class C every snapshot image and id compared). Needed before the cutover.
+  G3  the volume is ready to cut over (rechecks passed, source unchanged, nothing left to copy). Needed before the cutover.
+  G4  the cutover is verified from the new path. Needed before the soak starts.
+
+A sign-off is void when the volume is copied again (G2), copied again or falls back to sync (G3), or is cut over again (G4).
+
 Rules that cannot be bent: no phase can be skipped; a failed recheck drops the volume back to sync, never forward, and
 the count of passes starts again; the cutover needs two passed rechecks that are apart in time, the newest one recent, the source
 unchanged between them, nothing left to copy, an approved gate right now and no halt. Anything unexpected is a refusal.
@@ -37,6 +45,13 @@ HELD_CLASSES = {
          "or an agreed alternative (admin lock and detach) is recorded",
     "E": "class E is not moved by this method (encrypted, multiattach, grouped, replicated, wrong state or a bad provider id)"}
 TERMINAL = ("done", ABORTED)
+
+GATE_KIND = "volume_gate"
+VOLUME_GATES = {
+    "G2": "Staging verified: the copy is the same size and hash as the source and, for class C, every snapshot image and id was compared",
+    "G3": "Ready to cut over: rechecks passed, the source did not change, nothing is left to copy",
+    "G4": "Cutover verified: the volume is healthy from its new path"}
+GATE_CONDITIONS = {"G2": "G2 signed by a second person", "G3": "G3 signed by a second person"}
 
 MIN_RECHECKS = 2          # passed rechecks needed before a cutover
 RECHECK_GAP = 300         # seconds that must lie between the two newest rechecks
@@ -84,6 +99,79 @@ def klass(h):
         if e["phase"] == "precheck":
             return e.get("class")
     return None
+
+
+def _gate_anchor(h, gate):
+    """The id of the event after which a sign-off of this gate counts. An earlier sign-off is void."""
+    a = 0
+    for e in h:
+        if gate == "G2" and e["phase"] == "copy":
+            a = e["id"]
+        elif gate == "G3" and (e["phase"] == "copy" or (e["phase"] == "sync" and e.get("regression"))):
+            a = e["id"]
+        elif gate == "G4" and e["phase"] == "cutover":
+            a = e["id"]
+    return a
+
+
+def _operator(gate):
+    return str((((gate or {}).get("signoffs") or {}).get("operator") or {}).get("by") or "").strip()
+
+
+def gate_signed(journal, volume, gate_name, gate, h=None):
+    """The valid sign-off of one volume gate, or None. Valid: given after the anchor, not withdrawn, by a person other than the run's operator."""
+    h = history(journal, volume) if h is None else h
+    anchor = _gate_anchor(h, gate_name)
+    op = _operator(gate).lower()
+    cur = None
+    for e in reversed(journal.events(GATE_KIND, volume, 10000)):
+        d = e["data"]
+        if d.get("gate") != gate_name:
+            continue
+        if d.get("withdrawn"):
+            cur = None
+        else:
+            cur = dict(d, id=e["id"], ts=e["ts"]) if e["id"] > anchor else None
+    if cur and (not op or str(cur.get("by") or "").strip().lower() == op):
+        return None                        # no operator known, or the operator signed their own work: it does not count
+    return cur
+
+
+def sign_gate(journal, volume, gate_name, by, evidence, gate, withdraw=False, now=None, rules=None):
+    """One person's sign-off (or withdrawal) of G2, G3 or G4 for one volume. Refused unless the volume is at the right point."""
+    if gate_name not in VOLUME_GATES:
+        raise LifecycleError("the volume gates are G2, G3 and G4")
+    by, evidence = str(by or "").strip(), str(evidence or "").strip()
+    if len(by) < 3:
+        raise LifecycleError("a sign-off needs the name of the person who signs")
+    op = _operator(gate)
+    if not op:
+        raise LifecycleError("the pre-flight gate has no operator sign-off, so a second person cannot be told apart from the operator")
+    if by.lower() == op.lower():
+        raise LifecycleError("%s must be signed by a second person, not by the operator (%s)" % (gate_name, op))
+    h = history(journal, volume)
+    cur = h[-1]["phase"] if h else None
+    if not withdraw:
+        if len(evidence) < 8:
+            raise LifecycleError("a sign-off needs a note of what was checked (at least 8 characters)")
+        if gate_name == "G2" and cur not in ("sync", "recheck"):
+            raise LifecycleError("G2 is signed after the copy is verified, while the volume is in sync or recheck; it is in %s" % (cur or "no phase"))
+        if gate_name == "G3":
+            if cur not in ("sync", "recheck"):
+                raise LifecycleError("G3 is signed while the volume is in sync or recheck; it is in %s" % (cur or "no phase"))
+            bad = [c["detail"] for c in readiness(journal, volume, gate, now, rules)
+                   if not c["ok"] and c["name"] not in GATE_CONDITIONS.values() and c["name"] != "Newest recheck is recent"]
+            if bad:
+                raise LifecycleError("G3 cannot be signed yet: " + "; ".join(bad))
+        if gate_name == "G4" and cur != "postcheck":
+            raise LifecycleError("G4 is signed after the cutover, while the volume is in postcheck; it is in %s" % (cur or "no phase"))
+    journal.record("volume_gate", volume, {"gate": gate_name, "by": by, "evidence": evidence, "withdrawn": bool(withdraw)})
+
+
+def gates_of(journal, volume, gate, h=None):
+    """{'G2': event or None, ...} for the screen."""
+    h = history(journal, volume) if h is None else h
+    return {g: gate_signed(journal, volume, g, gate, h) for g in VOLUME_GATES}
 
 
 def _passed_rechecks(h):
@@ -144,6 +232,9 @@ def readiness(journal, volume, gate, now=None, rules=None):
         waiting = any((e.get("lag_s") or 0) > MAX_LAG or (e.get("pending_blocks") or 0) > 0 for e in last)
         add("Nothing left to copy", enough and not waiting, "no lag and no blocks pending at any recheck",
             "data was still waiting to be copied at a recheck" if enough else "not judged yet", pend)
+        for g, name in GATE_CONDITIONS.items():
+            s = gate_signed(journal, volume, g, gate, h)
+            add(name, s, "signed by %s" % (s or {}).get("by"), "%s is not signed by a second person (%s)" % (g, VOLUME_GATES[g].split(":")[0].lower()))
     except Exception as exc:  # fail closed
         out.append({"name": "Decision", "ok": False, "detail": "cutover_ready could not decide (%s: %s)" % (type(exc).__name__, exc), "pending": False})
     return out
@@ -219,6 +310,10 @@ def enter(journal, volume, phase, evidence=None, gate=None, now=None, rules=None
         if not ok:
             raise LifecycleError("cutover refused: " + "; ".join(why))
     elif phase == "soak":
+        s = gate_signed(journal, volume, "G4", gate)
+        if not s:
+            raise LifecycleError("the soak starts only after G4 (the cutover verified) is signed by a second person")
+        evidence["g4_by"] = s["by"]
         evidence["soak_days"] = max(1, int((rules or {}).get("soak_days") or 1))
     elif phase == "done":
         if cur == "soak":

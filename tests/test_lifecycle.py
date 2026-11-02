@@ -11,7 +11,8 @@ from openmove import safety
 from openmove.journal import Journal
 
 T0 = datetime(2026, 11, 2, 9, 0, 0, tzinfo=timezone.utc)
-GATE = {"status": "approved", "message": "ok", "run_id": "r1"}
+GATE = {"status": "approved", "message": "ok", "run_id": "r1", "signoffs": {"operator": {"by": "Olive Operator"}, "reviewer": {"by": "Rex Reviewer"}}}
+SECOND = "Sam Second"
 V = "vol-1"
 
 
@@ -41,13 +42,25 @@ class LifecycleTests(unittest.TestCase):
     def two_rechecks(self, fp="fp-1"):
         L.enter(self.j, V, "recheck", good_recheck(fp), now=at(70))
         L.enter(self.j, V, "recheck", good_recheck(fp), now=at(80))
+        self.sign_23(80)
+
+    def sign_23(self, minutes):
+        """A second person signs G2 and G3 as far as the volume allows (what cannot be signed yet is left unsigned)."""
+        for g in ("G2", "G3"):
+            try:
+                L.sign_gate(self.j, V, g, SECOND, "checked the copy log and the rechecks", GATE, now=at(minutes))
+            except L.LifecycleError:
+                pass
 
     def test_the_full_order_works(self):
         self.to_sync()
         self.two_rechecks()
         L.enter(self.j, V, "cutover", gate=GATE, now=at(82))
         L.enter(self.j, V, "postcheck", now=at(85))
-        L.enter(self.j, V, "soak", now=at(90))
+        with self.assertRaises(L.LifecycleError):
+            L.enter(self.j, V, "soak", gate=GATE, now=at(90))                       # G4 is not signed
+        L.sign_gate(self.j, V, "G4", SECOND, "the guest is healthy from the new path", GATE)
+        L.enter(self.j, V, "soak", gate=GATE, now=at(90))
         L.enter(self.j, V, "done", now=at(90 + 60 * 24 * 7))
         self.assertEqual(L.phase_of(self.j, V), "done")
 
@@ -91,6 +104,7 @@ class LifecycleTests(unittest.TestCase):
             L.enter(self.j, V, "cutover", gate=GATE, now=at(72))
         self.assertIn("apart", str(cm.exception))
         L.enter(self.j, V, "recheck", good_recheck(), now=at(80))                  # now the last two are apart
+        self.sign_23(80)
         L.enter(self.j, V, "cutover", gate=GATE, now=at(81))
         # and a stale one is refused
         self.setUp_new()
@@ -117,6 +131,9 @@ class LifecycleTests(unittest.TestCase):
         with self.assertRaises(L.LifecycleError):
             L.enter(self.j, V, "cutover", gate=GATE, now=at(101))                  # only one pass since the failure
         L.enter(self.j, V, "recheck", good_recheck(), now=at(110))
+        with self.assertRaises(L.LifecycleError):
+            L.enter(self.j, V, "cutover", gate=GATE, now=at(111))                  # the drop back to sync voided G3
+        self.sign_23(110)
         L.enter(self.j, V, "cutover", gate=GATE, now=at(111))
 
     def test_a_recheck_without_a_fingerprint_or_with_lag_never_passes(self):
@@ -175,6 +192,56 @@ class LifecycleTests(unittest.TestCase):
         self.j = Journal(path)                                                      # a new process reads the same journal
         self.assertEqual(L.phase_of(self.j, V), "recheck")
         L.enter(self.j, V, "cutover", gate=GATE, now=at(82))
+
+    def test_the_second_person_must_not_be_the_operator(self):
+        self.to_sync()
+        with self.assertRaises(L.LifecycleError):
+            L.sign_gate(self.j, V, "G2", "olive operator", "checked the copy log", GATE)      # the operator of the run, any case
+        with self.assertRaises(L.LifecycleError):
+            L.sign_gate(self.j, V, "G2", SECOND, "checked the copy log", {"status": "approved"})   # no operator known: fail closed
+        with self.assertRaises(L.LifecycleError):
+            L.sign_gate(self.j, V, "G2", "Sam", "x", GATE)                                    # a name and a note are needed
+        L.sign_gate(self.j, V, "G2", "Rex Reviewer", "checked the copy log", GATE)            # the reviewer is a second person
+        self.assertEqual(L.gate_signed(self.j, V, "G2", GATE)["by"], "Rex Reviewer")
+        # a sign-off made while the operator was someone else does not count if the operator is the signer
+        other = dict(GATE, signoffs={"operator": {"by": "Rex Reviewer"}, "reviewer": {"by": "Olive Operator"}})
+        self.assertIsNone(L.gate_signed(self.j, V, "G2", other))
+
+    def test_each_gate_can_be_signed_only_at_its_point(self):
+        with self.assertRaises(L.LifecycleError):
+            L.sign_gate(self.j, V, "G2", SECOND, "checked the copy log", GATE)                # not started
+        self.to_sync()
+        L.sign_gate(self.j, V, "G2", SECOND, "checked the copy log", GATE)
+        with self.assertRaises(L.LifecycleError):
+            L.sign_gate(self.j, V, "G3", SECOND, "checked the rechecks", GATE, now=at(61))    # no rechecks yet
+        with self.assertRaises(L.LifecycleError):
+            L.sign_gate(self.j, V, "G4", SECOND, "checked the guest", GATE)                   # not after a cutover
+        with self.assertRaises(L.LifecycleError):
+            L.sign_gate(self.j, V, "G5", SECOND, "checked the guest", GATE)
+
+    def test_a_cutover_needs_g2_and_g3_and_a_regression_voids_g3(self):
+        self.to_sync()
+        L.enter(self.j, V, "recheck", good_recheck(), now=at(70))
+        L.enter(self.j, V, "recheck", good_recheck(), now=at(80))
+        with self.assertRaises(L.LifecycleError) as ctx:
+            L.enter(self.j, V, "cutover", gate=GATE, now=at(82))
+        self.assertIn("G2", str(ctx.exception))
+        self.assertIn("G3", str(ctx.exception))
+        L.sign_gate(self.j, V, "G2", SECOND, "checked the copy log", GATE)
+        with self.assertRaises(L.LifecycleError):
+            L.enter(self.j, V, "cutover", gate=GATE, now=at(82))                              # G3 still missing
+        L.sign_gate(self.j, V, "G3", SECOND, "rechecks look right", GATE, now=at(81))
+        names = {c["name"]: c["ok"] for c in L.readiness(self.j, V, GATE, at(82))}
+        self.assertTrue(names["G2 signed by a second person"] and names["G3 signed by a second person"])
+        L.enter(self.j, V, "recheck", dict(good_recheck(), pending_blocks=3), now=at(85))     # the source changed: back to sync
+        self.assertIsNone(L.gate_signed(self.j, V, "G3", GATE))
+        self.assertIsNotNone(L.gate_signed(self.j, V, "G2", GATE))                            # the copy itself did not change
+
+    def test_a_withdrawn_signoff_does_not_count(self):
+        self.to_sync()
+        L.sign_gate(self.j, V, "G2", SECOND, "checked the copy log", GATE)
+        L.sign_gate(self.j, V, "G2", SECOND, "", GATE, withdraw=True)
+        self.assertIsNone(L.gate_signed(self.j, V, "G2", GATE))
 
     def test_volumes_are_independent(self):
         self.to_sync()

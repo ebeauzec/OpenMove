@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 (2026-11-02)
+
+### Added
+- Per-volume gates G2, G3 and G4 signed by a second person; wizard Back and Next buttons
+
 ## 0.4.0 (2026-11-02)
 
 ### Added

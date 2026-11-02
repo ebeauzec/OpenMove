@@ -195,6 +195,7 @@ class SimulationTests(DemoBase):
     def run_sim(self):
         from openmove.demo.simulate import Simulation
         self.state.options = {"hold_before_cutover": False, "stop_after_failures": 0}
+        self.state.auto_sign = "Demo reviewer (synthetic)"
         sim = Simulation(self.state, lambda: S._gate(self.state), tick=0)
         self.state.sim = sim
         sim.start()
@@ -239,6 +240,7 @@ class SimulationTests(DemoBase):
         S.api_demo_approve(self.state, {}, {})
         safety.halt(self.state.journal, "Pat Example", "pause for a question")
         from openmove.demo.simulate import Simulation
+        self.state.auto_sign = "Demo reviewer (synthetic)"
         s = Simulation(self.state, lambda: S._gate(self.state), tick=0)
         s.start()
         s.tick_once()
@@ -250,6 +252,7 @@ class SimulationTests(DemoBase):
     def test_a_gate_that_stops_being_approved_stops_the_run(self):
         from openmove.demo.simulate import Simulation
         S.api_demo_approve(self.state, {}, {})
+        self.state.auto_sign = "Demo reviewer (synthetic)"
         s = Simulation(self.state, lambda: S._gate(self.state), tick=0)
         s.start()
         s.stop()
@@ -265,4 +268,4 @@ class LiveViewTests(DemoBase):
         live = S.api_live(self.state, {}, {})
         self.assertEqual(live["started"], 0)
         self.assertEqual(live["mode"], "idle")
-        self.assertEqual(len(live["cutover_rules"]), 7)
+        self.assertEqual(len(live["cutover_rules"]), 8)

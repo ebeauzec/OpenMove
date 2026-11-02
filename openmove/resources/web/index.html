@@ -196,6 +196,12 @@
     </div>
     <h3>Volumes</h3>
     <div class="actions inline"><button class="primary hidden" id="live-release">Release all ready volumes for cutover</button><span id="live-ready" class="muted"></span></div>
+    <div class="actions inline" id="live-sign">
+      <button class="secondary hidden" id="sign-g23">Sign G2 and G3 (second person)</button>
+      <button class="secondary hidden" id="sign-g4">Sign G4 (second person)</button>
+      <button class="secondary hidden" id="sign-demo">Demo: a made-up second person signs</button>
+      <span id="sign-status" class="muted"></span>
+    </div>
     <p class="muted">Click a volume to see exactly what is being done to it.</p>
     <div class="table-wrap"><table id="live-table"><thead><tr><th>Volume</th><th>Name</th><th>Class</th><th>GiB</th><th>Phase</th><th>Progress</th><th>Note</th></tr></thead><tbody></tbody></table></div>
     <p id="live-more" class="muted"></p>
@@ -214,6 +220,11 @@
     <div class="actions"><button id="journal-refresh" class="secondary">Refresh</button></div>
     <div id="journal-view"></div>
   </section>
+  <div id="wiz" class="wiz" aria-label="Steps">
+    <button id="wiz-back" class="secondary" type="button">Back</button>
+    <span id="wiz-step" class="muted"></span>
+    <button id="wiz-next" class="primary" type="button">Next</button>
+  </div>
 </main>
 
 <footer>Copyright &copy; 2026 Eugene Beauzec and Obi1 - FZCO. All Rights Reserved. OpenStack&reg; is a trademark of the OpenInfra Foundation; OpenMove is not affiliated with it.</footer>

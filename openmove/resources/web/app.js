@@ -49,10 +49,41 @@
     if (name === 'live') { pollLive(true); loadUnmigrated(true); }
     if (name === 'select') { loadSelection(); loadRisk(); }
     currentTab = name;
+    drawWizard();
+  }
+  // Back and Next walk through the numbered steps in order, so the tabs at the top are not the only way to move
+  function wizardSteps() {
+    return Array.prototype.filter.call(document.querySelectorAll('#tabs button'), function (b) { return /^\d+\./.test(b.textContent.trim()); });
+  }
+  function drawWizard() {
+    var steps = wizardSteps(), i = -1;
+    steps.forEach(function (b, k) { if (b.dataset.tab === currentTab) i = k; });
+    var back = $('wiz-back'), next = $('wiz-next'), lab = $('wiz-step');
+    if (i < 0) {                                   // the journal is not a step: Back returns to the last one
+      back.disabled = false; back.textContent = 'Back to ' + steps[steps.length - 1].textContent.trim();
+      next.disabled = true; next.textContent = 'Next'; lab.textContent = 'Journal';
+      return;
+    }
+    back.disabled = i === 0;
+    back.textContent = i === 0 ? 'Back' : 'Back: ' + steps[i - 1].textContent.trim();
+    next.disabled = i === steps.length - 1;
+    next.textContent = i === steps.length - 1 ? 'Next' : 'Next: ' + steps[i + 1].textContent.trim();
+    lab.textContent = 'Step ' + (i + 1) + ' of ' + steps.length + ': ' + steps[i].textContent.trim().replace(/^\d+\.\s*/, '');
+  }
+  function wizardGo(delta) {
+    var steps = wizardSteps(), i = -1;
+    steps.forEach(function (b, k) { if (b.dataset.tab === currentTab) i = k; });
+    var to = i < 0 ? steps.length - 1 : i + delta;
+    if (to < 0 || to >= steps.length) return;
+    showTab(steps[to].dataset.tab);
+    window.scrollTo(0, 0);
   }
   document.querySelectorAll('#tabs button').forEach(function (b) {
     b.addEventListener('click', function () { showTab(b.dataset.tab); });
   });
+  $('wiz-back').addEventListener('click', function () { wizardGo(-1); });
+  $('wiz-next').addEventListener('click', function () { wizardGo(1); });
+  drawWizard();
 
   // ---- status ----
   var lastStatus = {};
@@ -504,7 +535,9 @@
     aborted: 'Stopped before the cutover, with a reason. The source volume was only read and is exactly as it was.'};
   var liveTimer = null;
   function bar(pct, cls) { var b = el('div', { class: 'bar ' + (cls || '') }); var f = el('span'); f.style.width = Math.max(0, Math.min(100, pct)) + '%'; b.appendChild(f); return b; }
+  var lastLive = null;
   function renderLive(l) {
+    lastLive = l;
     var sim = l.simulation;
     $('live-note').className = 'banner ' + (l.mode === 'simulation' ? 'ok' : 'warn');
     $('live-note').textContent = lastStatus.demo
@@ -544,6 +577,12 @@
     $('live-more').textContent = l.volumes_more ? 'and ' + l.volumes_more + ' more' : '';
     if (currentTab === 'live') { loadUnmigrated(); if (vdId) loadVolume(vdId); }
     $('live-release').classList.toggle('hidden', !l.ready);
+    $('sign-g23').classList.toggle('hidden', !l.need_g23);
+    $('sign-g4').classList.toggle('hidden', !l.need_g4);
+    $('sign-demo').classList.toggle('hidden', !(lastStatus && lastStatus.demo));
+    $('sign-demo').textContent = l.auto_sign ? 'Demo: stop the made-up second person signing' : 'Demo: a made-up second person signs';
+    $('sign-status').textContent = (l.need_g23 ? l.need_g23 + ' volume(s) wait for G2 and G3. ' : '') + (l.need_g4 ? l.need_g4 + ' volume(s) wait for G4. ' : '') +
+      (l.need_g23 || l.need_g4 ? 'The signer must not be the operator of the run.' : '');
     $('live-ready').textContent = l.ready ? l.ready + ' volume(s) are in sync and checked, waiting for your release. The settings are on the Select tab.' : '';
     var gp = $('gprog');
     gp.classList.toggle('hidden', !l.started);
@@ -783,6 +822,22 @@
     body.by = by.trim();
     guard(btn, function () { return api('POST', 'release', body).then(function (l) { renderLive(l); banner('ok', 'Released. The cutover is attempted only if every condition holds.'); if (vdId) loadVolume(vdId, true); }); });
   }
+  function signGates(names, btn) {
+    var by = window.prompt('Sign as the SECOND person. You must not be the operator of this run.' + String.fromCharCode(10, 10) + 'Your name:' + (lastStatus && lastStatus.demo ? '  (demonstration: try "Demo reviewer")' : '')); if (!by || by.trim().length < 3) return;
+    var note = window.prompt('What did you check? (at least 8 characters, kept in the journal)'); if (!note || note.trim().length < 8) return;
+    guard(btn, function () {
+      var chain = Promise.resolve(null);
+      names.forEach(function (g) {
+        chain = chain.then(function () { return api('POST', 'volume-gate', { gate: g, all: true, by: by.trim(), evidence: note.trim() }); });
+      });
+      return chain.then(function (l) { renderLive(l); banner('ok', 'Signed ' + names.join(' and ') + ' for the volumes that were at that point.'); if (vdId) loadVolume(vdId, true); });
+    });
+  }
+  $('sign-g23').addEventListener('click', function () { signGates(['G2', 'G3'], $('sign-g23')); });
+  $('sign-g4').addEventListener('click', function () { signGates(['G4'], $('sign-g4')); });
+  $('sign-demo').addEventListener('click', function () {
+    guard($('sign-demo'), function () { return api('POST', 'demo/simulate', { action: 'autosign', on: !(lastLive && lastLive.auto_sign) }).then(renderLive); });
+  });
   $('live-release').addEventListener('click', function () { releaseVolumes({ all: true }, $('live-release')); });
   $('live-table').addEventListener('click', function (e) {
     var tr = e.target.closest ? e.target.closest('tr') : null;

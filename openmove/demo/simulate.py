@@ -31,6 +31,8 @@ RATE_PER_COPY_MB_S = 42   # synthetic
 WATCH_LIMIT = 6           # ticks a class B volume is watched before the window is over
 
 
+WAITING = ("ready", "g4wait")      # stages in which the volume waits for a person
+
 class Simulation:
     def __init__(self, state, get_gate, tick=0.6, seed=11):
         self.state, self.get_gate, self.tick = state, get_gate, tick
@@ -140,10 +142,11 @@ class Simulation:
             self.state.journal.record("refusal", "simulation", {"attempt": "continue", "reason": self.status})
             return False
         o = self.opts()
-        working = [v for v in self._active if self._plan[v]["stage"] != "ready"]
+        self._auto_sign(gate)
+        working = [v for v in self._active if self._plan[v]["stage"] not in WAITING]
         if self._active and not working and not self._queue:
-            # everything left is in sync and waiting for a person: the (virtual) clock stands still
-            self.status = "waiting for you to release %d volume(s) for cutover" % len(self._active)
+            # everything left is waiting for a person (a release or a second person's sign-off): the (virtual) clock stands still
+            self.status = "waiting for people: %d volume(s) need a release or a sign-off" % len(self._active)
             self.throughput = 0.0
             self._release_ready(gate, o)
             return True
@@ -165,8 +168,26 @@ class Simulation:
 
     def _release_ready(self, gate, o):
         for vid in list(self._active):
-            if self._plan[vid]["stage"] == "ready":
+            if self._plan[vid]["stage"] in WAITING:
                 self._step(vid, gate, o)
+
+    def _signed(self, vid, gate, *names):
+        return all(L.gate_signed(self.state.journal, vid, n, gate) for n in names)
+
+    def _auto_sign(self, gate):
+        """Demonstration only: a made-up second person signs the volume gates, labelled synthetic. Off unless the screen switches it on."""
+        who = getattr(self.state, "auto_sign", None)
+        if not who:
+            return
+        for vid in list(self._active):
+            st = self._plan[vid]["stage"]
+            for name in (("G2", "G3") if st == "ready" else ("G4",) if st == "g4wait" else ()):
+                if not L.gate_signed(self.state.journal, vid, name, gate):
+                    try:
+                        L.sign_gate(self.state.journal, vid, name, who, "synthetic sign-off for the demonstration", gate, now=self.vnow,
+                                    rules=selection.rules(self.opts()))
+                    except L.LifecycleError:
+                        pass
 
     def _auto_halt(self, o):
         n = o["stop_after_failures"]
@@ -188,6 +209,13 @@ class Simulation:
         self.failures += 1
         L.enter(self.state.journal, vid, "aborted", {"reason": reason, "cause": cause, "simulated": True}, now=self.vnow)
         self._plan[vid]["stage"] = "end"
+
+    def _note_ready(self, vid, gate, o):
+        p = self._plan[vid]
+        if not self._signed(vid, gate, "G2", "G3"):
+            self.notes[vid] = "ready for cutover: in sync and checked, waiting for a second person's sign-off of G2 and G3"
+        else:
+            self.notes[vid] = "ready for cutover: in sync and checked, waiting for your release"
 
     def _recheck(self, vid, gate, fp, p, **bad):
         ev = {"ok": True, "lag_s": 0, "pending_blocks": 0, "source_fingerprint": fp}
@@ -278,16 +306,18 @@ class Simulation:
                     p["passes"] += 1
                     p["ticks"] = 0
                     if p["passes"] >= o["rechecks"]:
-                        if (o["hold_before_cutover"] or p["risk"]) and vid not in self.state.released:
+                        if ((o["hold_before_cutover"] or p["risk"]) and vid not in self.state.released) or not self._signed(vid, gate, "G2", "G3"):
                             p["stage"] = "ready"                  # in sync and checked: waits for a person
-                            self.notes[vid] = "ready for cutover: in sync and checked, waiting for your release"
+                            self._note_ready(vid, gate, o)
                         else:
                             p["stage"] = "recheck2"
         elif st == "ready":
-            if vid in self.state.released or not (o["hold_before_cutover"] or p["risk"]):
+            if (vid in self.state.released or not (o["hold_before_cutover"] or p["risk"])) and self._signed(vid, gate, "G2", "G3"):
                 self.notes.pop(vid, None)
-                self._recheck(vid, gate, fp, p)                   # released: check once more, right now
+                self._recheck(vid, gate, fp, p)                   # released and signed: check once more, right now
                 p["stage"], p["ticks"] = "recheck2", 0
+            else:
+                self._note_ready(vid, gate, o)
         elif st == "recheck2":
             if self._enter(vid, "cutover", {}, gate):
                 p["stage"], p["ticks"] = "cutover", 0
@@ -310,5 +340,13 @@ class Simulation:
                 L.enter(self.state.journal, vid, "rollback", {
                     "reason": "the guest did not come back healthy after the cutover: rolled back to the source", "cause": "postcheck_failed", "simulated": True}, now=self.vnow)
                 p["stage"] = "end"
-            elif self._enter(vid, "soak", {}, gate):
-                p["stage"] = "end"                                 # the soak period is not simulated: the source stays untouched
+            elif self._signed(vid, gate, "G4"):
+                if self._enter(vid, "soak", {}, gate):
+                    p["stage"] = "end"                             # the soak period is not simulated: the source stays untouched
+            else:
+                p["stage"] = "g4wait"
+                self.notes[vid] = "post-check passed: waiting for a second person to sign G4 before the soak starts"
+        elif st == "g4wait":
+            if self._signed(vid, gate, "G4") and self._enter(vid, "soak", {}, gate):
+                self.notes.pop(vid, None)
+                p["stage"] = "end"

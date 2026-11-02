@@ -436,8 +436,12 @@ def volume_view(journal, vol, note, urow, readiness=None):
     ready = bool(note and str(note).startswith("ready for cutover"))
     if urow and urow["outcome"] in ("stopped", "rolled back"):
         now = "%s: %s" % (urow["outcome"].capitalize(), urow["how"])
+    elif ready and "sign-off" in str(note):
+        now = "In sync and checked. Waiting for a second person to sign G2 and G3. Every cutover condition is asked again at the cutover."
     elif ready:
         now = "In sync and checked. Waiting for you to release it for cutover. Every cutover condition is asked again at the moment of release."
+    elif cur == "postcheck" and "G4" in str(note):
+        now = "The post-check passed. Waiting for a second person to sign G4 before the soak starts."
     elif cls == "B" and cur == "precheck" and note:
         now = "Waiting for rotation: " + str(note)
     elif cls in ("D", "E"):

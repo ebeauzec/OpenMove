@@ -52,6 +52,7 @@ class AppState:
         self.selection = None      # the volumes chosen for the batch; None means every admitted volume (the default)
         self.options = None        # the operator's options; None means the defaults
         self.released = set()      # volumes the operator released for cutover
+        self.auto_sign = None      # demo only: the made-up second person who signs the volume gates
         self.extra_hosts = ()  # Host header values accepted besides loopback; set with --allow-host
         self._raw = None  # last API collection, kept so a back-end filter can be re-applied without calling the cloud
 
@@ -246,6 +247,9 @@ def api_demo_simulate(state, body, query):
         raise ApiError("not available outside demo mode", 404)
     from .demo.simulate import Simulation
     action = body.get("action")
+    if action == "autosign":
+        state.auto_sign = "Demo reviewer (synthetic)" if body.get("on") else None
+        return api_live(state, {}, {})
     if state.sim:
         state.sim.stop()
     if action == "stop":
@@ -395,6 +399,44 @@ def api_release(state, body, query):
     return api_live(state, {}, {})
 
 
+def api_volume_gate(state, body, query):
+    """Sign (or withdraw) G2, G3 or G4 for volumes, as a second person who is not the operator of the run. Each volume is checked on its own:
+    a volume that is not at the right point is refused with the reason. With `all`, volumes not at that point are skipped quietly."""
+    name = str(body.get("gate") or "").upper()
+    if name not in lifecycle.VOLUME_GATES:
+        raise ValueError("gate must be G2, G3 or G4")
+    withdraw = bool(body.get("withdraw"))
+    ids = list(body.get("ids") or [])
+    every = bool(body.get("all"))
+    if every:
+        ids = list(lifecycle.states(state.journal))
+    if not ids:
+        raise ValueError("choose at least one volume that has started")
+    g = _gate(state)
+    now = state.sim.vnow if state.sim else None
+    rules = selection.rules(selection.options_of(state))
+    signed, refused, skipped = [], [], 0
+    for vid in ids:
+        if every and not withdraw and lifecycle.gate_signed(state.journal, vid, name, g):
+            skipped += 1
+            continue
+        try:
+            lifecycle.sign_gate(state.journal, vid, name, body.get("by"), body.get("evidence"), g, withdraw, now, rules)
+            signed.append(vid)
+        except lifecycle.LifecycleError as exc:
+            if every and "is signed" in str(exc):
+                skipped += 1
+            elif every and "cannot be signed yet" in str(exc):
+                skipped += 1
+            else:
+                refused.append({"id": vid, "reason": str(exc)})
+    if not signed and refused:
+        raise ValueError(refused[0]["reason"])
+    out = api_live(state, {}, {})
+    out.update({"signed": len(signed), "skipped": skipped, "refused": refused[:20]})
+    return out
+
+
 def api_volume(state, body, query):
     """Everything about one volume: its path, where it is on it, what is happening now, what blocks the cutover (requirement R18)."""
     inv = _need(state, "inventory")
@@ -428,35 +470,39 @@ def api_live(state, body, query):
     sim = state.sim
     opts = selection.options_of(state)
     ready = {v for v, pl in (sim._plan.items() if sim else ()) if pl.get("stage") == "ready"}
+    g4wait = {v for v, pl in (sim._plan.items() if sim else ()) if pl.get("stage") == "g4wait"}
     copy_pct = sim.progress if sim else {}
+    g = _gate(state)
     counts, rows = {}, []
     for vid, e in st.items():
         ph = e["phase"]
         counts[ph] = counts.get(ph, 0) + 1
         v = inv.get(vid, {})
         rows.append({"id": vid, "name": v.get("name"), "size": v.get("size"), "class": v.get("class"), "phase": ph,
-                     "progress": lifecycle.progress(ph, copy_pct.get(vid)), "at": e.get("at"), "ready": vid in ready,
+                     "progress": lifecycle.progress(ph, copy_pct.get(vid)), "at": e.get("at"), "ready": vid in ready, "g4wait": vid in g4wait,
+                     "gates": ({k: (s or {}).get("by") for k, s in lifecycle.gates_of(state.journal, vid, g).items()}
+                               if ph in ("sync", "recheck", "postcheck") else None),
                      "note": (sim.notes.get(vid) if sim and ph not in ("aborted", "rollback") else None) or e.get("reason") or
                              ("source changed: back to sync" if e.get("regression") else "")})
     total = len(admitted) or len(st)
     done = sum(r["progress"] for r in rows)
     active = [r for r in rows if r["phase"] not in ("soak", "done", "aborted", "rollback")]
     rows.sort(key=lambda r: (r["phase"] in ("soak", "done", "aborted", "rollback"), -r["progress"], r["id"]))
-    g = _gate(state)
     unresolved = state.journal.unresolved_steps()
+    need_g23 = sum(1 for r in rows if r["ready"] and r["gates"] and not (r["gates"]["G2"] and r["gates"]["G3"]))
     events = [{"id": e["id"], "ts": e["ts"], "kind": e["kind"], "line": _event_line(e)} for e in state.journal.events(None, None, 40)
               if e["kind"] in ("phase", "refusal", "halt", "resume", "preflight", "signoff", "attestation", "demo", "report", "audit", "inventory", "platform")]
     return {"mode": ("simulation" if sim else "idle") if state.demo else "idle",
             "engine": "not built" if not state.demo else "simulated, demonstration only",
             "simulation": {"status": sim.status, "running": sim.running, "throughput_mb_s": round(sim.throughput),
                            "rate_cap_mb_s": opts["rate_cap_mb_s"], "virtual_time": sim.vnow.strftime("%Y-%m-%d %H:%M"), "ticks": sim.ticks} if sim else None,
-            "total": total, "started": len(st), "active": len(active), "counts": counts, "ready": len(ready), "options": opts,
+            "total": total, "started": len(st), "active": len(active), "counts": counts, "ready": len(ready), "need_g23": need_g23, "need_g4": len(g4wait), "auto_sign": state.auto_sign, "options": opts,
             "by_class": {k: sum(1 for v in admitted if inv.get(v, {}).get("class") == k) for k in "ABC"} if admitted else {},
             "overall": round(done / total, 1) if total else 0, "volumes": rows[:150], "volumes_more": max(0, len(rows) - 150),
             "gate": {"status": g["status"], "message": g["message"]} if g else None,
             "halted": safety.halted(state.journal), "unresolved_steps": len(unresolved), "events": events,
             "cutover_rules": ["two passed rechecks in a row", "at least 5 minutes apart", "newest no older than 15 minutes",
-                              "source unchanged between them", "nothing left to copy", "gate approved right now", "no halt"]}
+                              "source unchanged between them", "nothing left to copy", "gate approved right now", "no halt", "G2 and G3 signed by a second person"]}
 
 
 def api_demo_scenario(state, body, query):
@@ -807,6 +853,7 @@ ROUTES = {
     ("GET", "selection"): api_selection_get,
     ("POST", "selection"): api_selection_set,
     ("POST", "release"): api_release,
+    ("POST", "volume-gate"): api_volume_gate,
     ("POST", "demo/approve"): api_demo_approve,
     ("POST", "demo/simulate"): api_demo_simulate,
     ("POST", "demo/scenario"): api_demo_scenario,

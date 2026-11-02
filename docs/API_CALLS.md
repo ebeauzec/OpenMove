@@ -103,6 +103,7 @@ Protection: every `/api/` call needs the per-run token (printed at start-up and 
 | `GET /api/selection` | Which volumes are selected for the migration, the eligible ones, the groups (by class, project, attachment, size, snapshots, Cinder host, instance and workload risk), and the settings with their defaults and floors. Read from the inventory, the pre-flight and the journal; makes no cloud call. | | no |
 | `POST /api/selection` | Choose volumes by id or by group (`set`, `add`, `remove`, `none`, `reset`), and change the settings. A volume that is not admitted is refused, a setting below its floor is refused (never clamped), and nothing changes while a run is in progress. Every change is recorded. | action, ids, group, options, reset_options, name | no |
 | `POST /api/release` | Release volumes that wait in the sync phase, before the cutover. Needs a name. The cutover rules still apply after the release. | ids or all, name | no |
+| `POST /api/volume-gate` | Sign, or withdraw, the playbook's volume gate G2, G3 or G4 for volumes, as a second person who is not the operator of the run. Each volume is checked on its own: it must be at the point where that gate is signed. | gate, ids or all, name, evidence, withdraw | no |
 | `GET /api/volume` | One volume in full: its class, its steps with the status of each, what is happening now, the cutover conditions, its journal events and, if it was not migrated, the cause and the steps to resolve it. Read from the journal; makes no cloud call. | id (query) | no |
 | `GET /api/risk` | The volumes that host a workload with a known risk, the reasons, the advice, and who has cleared or marked them (`WORKLOAD_RISKS.md`). | | no |
 | `POST /api/risk/clear` | Record one person's clearance of a high-risk volume, as operator or as reviewer, or withdraw it. Needs a name and evidence of at least 20 characters. Runs the pre-flight again. | ids, role, name, evidence, withdraw | no |
@@ -135,6 +136,7 @@ The journal is a local SQLite file (`journal.db`). It is append-only in normal u
 | `refusal` | The order, the gate or the halt refused a step. | The step attempted and the exact reasons. In the simulation they are marked simulated. |
 | `phase` | A volume enters a phase of the migration order. | Phase, time, evidence (the volume class from the precheck, verification results, snapshot image comparison for class C, fingerprints, lag). An abort or rollback also carries its reason and cause code. |
 | `selection` | The selection or the settings change. | Action, count, the ids or the group, the settings, name. |
+| `volume_gate` | A second person signs, or withdraws, G2, G3 or G4 for one volume. | Volume, gate, name, evidence, withdrawn. |
 | `release` | A person releases volumes held before the cutover. | Volume ids, name. |
 | `risk_clearance` | A person clears, or withdraws the clearance of, a high-risk volume. | Volume, role, name, evidence, the risk signature. |
 | `risk_mark` | A person marks a volume as a risk, or withdraws the mark. | Volume, name, note. |

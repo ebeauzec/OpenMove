@@ -1,8 +1,8 @@
 {
-  "version": "0.4.0",
+  "version": "0.4.1",
   "major": 0,
   "minor": 4,
-  "patch": 0,
+  "patch": 1,
   "date": "2026-11-02",
-  "notes": "Pre-flight checks and gate, environment audit, demo mode, safety layer, volume selection, workload risk, unmigrated-volume reports"
+  "notes": "Per-volume gates G2, G3 and G4 signed by a second person; wizard Back and Next buttons"
 }

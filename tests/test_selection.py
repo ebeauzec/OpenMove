@@ -45,6 +45,7 @@ class Base(unittest.TestCase):
     def run_sim(self, **opts):
         S.api_demo_approve(self.state, {}, {})
         self.state.options = dict({"hold_before_cutover": False, "stop_after_failures": 0}, **opts)
+        self.state.auto_sign = "Demo reviewer (synthetic)"
         sim = Simulation(self.state, lambda: S._gate(self.state), tick=0)
         self.state.sim = sim
         sim.start()
@@ -125,6 +126,7 @@ class SelectionTests(Base):
     def test_the_selection_cannot_change_during_a_run(self):
         S.api_demo_approve(self.state, {}, {})
         self.state.options = {"hold_before_cutover": True}
+        self.state.auto_sign = "Demo reviewer (synthetic)"
         sim = Simulation(self.state, lambda: S._gate(self.state), tick=0.2)
         self.state.sim = sim
         sim.start()
@@ -158,6 +160,7 @@ class HoldAndStopTests(Base):
         ids = [v for v in self.state.checks["admitted"] if self.state.inventory["volumes"][0] and True][:6]
         S.api_selection_set(self.state, {"action": "set", "ids": ids}, {})
         self.state.options = {"stop_after_failures": 0}                # hold_before_cutover stays at its default: on
+        self.state.auto_sign = "Demo reviewer (synthetic)"
         sim = Simulation(self.state, lambda: S._gate(self.state), tick=0)
         self.state.sim = sim
         sim.start()
@@ -166,7 +169,7 @@ class HoldAndStopTests(Base):
             sim.tick_once()
         live = S.api_live(self.state, {}, {})
         self.assertGreater(live["ready"], 0)
-        self.assertIn("waiting for you", sim.status)
+        self.assertIn("waiting for people", sim.status)
         for vid in ids:
             self.assertNotIn(L.phase_of(self.state.journal, vid), ("cutover", "postcheck", "soak"), vid)
         with self.assertRaises(ValueError):
@@ -191,6 +194,7 @@ class HoldAndStopTests(Base):
         from openmove import safety
         S.api_demo_approve(self.state, {}, {})
         self.state.options = {"hold_before_cutover": False, "stop_after_failures": 2}
+        self.state.auto_sign = "Demo reviewer (synthetic)"
         sim = Simulation(self.state, lambda: S._gate(self.state), tick=0)
         self.state.sim = sim
         sim.start()
@@ -325,6 +329,7 @@ class RiskTests(Base):
         S.api_demo_approve(self.state, {}, {})
         S.api_selection_set(self.state, {"action": "set", "ids": cleared}, {})
         self.state.options = {"hold_before_cutover": False, "stop_after_failures": 0}   # the option is off, risky volumes are held anyway
+        self.state.auto_sign = "Demo reviewer (synthetic)"
         sim = Simulation(self.state, lambda: S._gate(self.state), tick=0)
         self.state.sim = sim
         sim.start()
@@ -393,6 +398,7 @@ class VolumeViewTests(Base):
     def test_the_cutover_conditions_are_listed_for_a_volume_in_sync(self):
         S.api_demo_approve(self.state, {}, {})
         self.state.options = {"hold_before_cutover": True, "stop_after_failures": 0}
+        self.state.auto_sign = "Demo reviewer (synthetic)"
         sim = Simulation(self.state, lambda: S._gate(self.state), tick=0)
         self.state.sim = sim
         sim.start()
@@ -404,7 +410,7 @@ class VolumeViewTests(Base):
         v = S.api_volume(self.state, {}, {"id": pending[0]})
         names = [c["name"] for c in v["readiness"]]
         self.assertIn("Rechecks passed in a row", names)
-        self.assertEqual(len(names), 8)
+        self.assertEqual(len(names), 10)
         sim.stop()
 
     def test_readiness_agrees_with_cutover_ready(self):
@@ -420,6 +426,8 @@ class VolumeViewTests(Base):
         for m in (4, 10):
             L.enter(j, "vx", "recheck", rc, now=now + timedelta(minutes=m))
         t = now + timedelta(minutes=11)
+        for g in ("G2", "G3"):
+            L.sign_gate(j, "vx", g, "Sam Second", "checked the log and the rechecks", gate, now=t)
         ok, why = L.cutover_ready(j, "vx", gate, t)
         conds = L.readiness(j, "vx", gate, t)
         self.assertEqual(ok, all(c["ok"] for c in conds))
@@ -432,11 +440,74 @@ class VolumeViewTests(Base):
         self.assertTrue(ok4)                                            # rules cannot loosen the process minimum
 
 
+class VolumeGateTests(Base):
+    """G2, G3 and G4 are signed per volume by a second person; without them nothing cuts over and nothing soaks."""
+
+    def drive(self, sim, n=400):
+        for _ in range(n):
+            sim.tick_once()
+
+    def test_nothing_cuts_over_or_soaks_without_the_second_persons_signature(self):
+        S.api_demo_approve(self.state, {}, {})
+        ids = self.state.checks["admitted"][:14]
+        S.api_selection_set(self.state, {"action": "set", "ids": ids}, {})
+        self.state.options = {"hold_before_cutover": False, "stop_after_failures": 0}      # no hold: only the gates stand in the way
+        self.state.auto_sign = None
+        sim = Simulation(self.state, lambda: S._gate(self.state), tick=0)
+        self.state.sim = sim
+        sim.start()
+        sim.stop()
+        self.drive(sim)
+        live = S.api_live(self.state, {}, {})
+        self.assertGreater(live["need_g23"], 0)
+        self.assertIn("waiting for people", sim.status)
+        for vid in ids:
+            self.assertNotIn(L.phase_of(self.state.journal, vid), ("cutover", "postcheck", "soak"), vid)
+        row = next(r for r in live["volumes"] if r["ready"])
+        self.assertEqual(row["gates"], {"G2": None, "G3": None, "G4": None})
+        # the operator of the run cannot be the second person
+        with self.assertRaises(ValueError):
+            S.api_volume_gate(self.state, {"gate": "G2", "all": True, "by": "Demo operator", "evidence": "checked the copy log"}, {})
+        with self.assertRaises(ValueError):
+            S.api_volume_gate(self.state, {"gate": "G9", "all": True, "by": "Sam Second", "evidence": "checked"}, {})
+        out = S.api_volume_gate(self.state, {"gate": "G2", "all": True, "by": "Sam Second", "evidence": "checked the copy log"}, {})
+        self.assertGreater(out["signed"], 0)
+        S.api_volume_gate(self.state, {"gate": "G3", "all": True, "by": "Sam Second", "evidence": "checked the rechecks"}, {})
+        self.assertEqual(S.api_live(self.state, {}, {})["need_g23"], 0)
+        self.drive(sim, 200)
+        live = S.api_live(self.state, {}, {})
+        self.assertGreater(live["need_g4"], 0)                                              # post-check passed, G4 is next
+        self.assertEqual(live["counts"].get("soak", 0), 0)
+        S.api_volume_gate(self.state, {"gate": "G4", "all": True, "by": "Sam Second", "evidence": "the guests are healthy"}, {})
+        self.drive(sim, 100)
+        live = S.api_live(self.state, {}, {})
+        self.assertGreater(live["counts"].get("soak", 0), 0)
+        self.assertEqual(live["need_g4"], 0)
+        events = [e["data"] for e in self.state.journal.events("volume_gate", None, 500)]
+        self.assertTrue(all(e["by"] == "Sam Second" for e in events))
+
+    def test_a_signature_for_a_volume_at_the_wrong_point_is_refused_with_the_reason(self):
+        S.api_demo_approve(self.state, {}, {})
+        vid = self.state.checks["admitted"][0]
+        with self.assertRaises(ValueError) as cm:
+            S.api_volume_gate(self.state, {"gate": "G2", "ids": [vid], "by": "Sam Second", "evidence": "checked the copy log"}, {})
+        self.assertIn("no phase", str(cm.exception))
+
+    def test_the_demo_switch_makes_the_signatures_synthetic(self):
+        S.api_demo_approve(self.state, {}, {})
+        self.assertIsNone(S.api_live(self.state, {}, {})["auto_sign"])
+        out = S.api_demo_simulate(self.state, {"action": "autosign", "on": True}, {})
+        self.assertIn("synthetic", out["auto_sign"])
+        self.run_sim()
+        names = {e["data"]["by"] for e in self.state.journal.events("volume_gate", None, 5000)}
+        self.assertEqual(names, {"Demo reviewer (synthetic)"})
+
+
 class SoakTests(unittest.TestCase):
     def test_the_source_is_released_only_after_the_soak_period(self):
         d = tempfile.TemporaryDirectory()
         j = Journal(Path(d.name) / "j.db")
-        gate = {"status": "approved", "run_id": "r"}
+        gate = {"status": "approved", "run_id": "r", "signoffs": {"operator": {"by": "Olive Operator"}}}
         t0 = datetime(2026, 11, 2, 9, 0, tzinfo=timezone.utc)
         rc = {"ok": True, "lag_s": 0, "pending_blocks": 0, "source_fingerprint": "f"}
         L.enter(j, "v", "precheck", {"class": "A"}, gate=gate, now=t0)
@@ -445,9 +516,12 @@ class SoakTests(unittest.TestCase):
         L.enter(j, "v", "sync", {"size_equal": True, "hash_match": True}, now=t0)
         L.enter(j, "v", "recheck", rc, now=t0 + timedelta(minutes=1))
         L.enter(j, "v", "recheck", rc, now=t0 + timedelta(minutes=8))
+        for g in ("G2", "G3"):
+            L.sign_gate(j, "v", g, "Sam Second", "checked the log and the rechecks", gate, now=t0 + timedelta(minutes=8))
         L.enter(j, "v", "cutover", gate=gate, now=t0 + timedelta(minutes=9))
         L.enter(j, "v", "postcheck", now=t0 + timedelta(minutes=10))
-        L.enter(j, "v", "soak", {}, now=t0 + timedelta(minutes=11), rules={"soak_days": 14})
+        L.sign_gate(j, "v", "G4", "Sam Second", "the guest is healthy", gate)
+        L.enter(j, "v", "soak", {}, gate=gate, now=t0 + timedelta(minutes=11), rules={"soak_days": 14})
         with self.assertRaises(L.LifecycleError):
             L.enter(j, "v", "done", now=t0 + timedelta(days=13))
         L.enter(j, "v", "done", now=t0 + timedelta(days=15))

@@ -17,7 +17,7 @@ from openmove.journal import Journal
 from openmove.server import create_server
 
 T0 = datetime(2026, 11, 2, 9, 0, 0, tzinfo=timezone.utc)
-GATE = {"status": "approved", "message": "ok", "run_id": "r1"}
+GATE = {"status": "approved", "message": "ok", "run_id": "r1", "signoffs": {"operator": {"by": "Olive Operator"}}}
 
 
 def at(m):
@@ -85,6 +85,8 @@ class ClassRuleTests(unittest.TestCase):
         self.assertIn("tenant snapshot", h[-1]["reason"])
         L.enter(self.j, "v1", "recheck", dict(rc, reconciled=True), now=at(80))
         L.enter(self.j, "v1", "recheck", dict(rc, reconciled=True), now=at(90))
+        for g in ("G2", "G3"):
+            L.sign_gate(self.j, "v1", g, "Sam Second", "checked the log and the rechecks", GATE, now=at(90))
         ok, why = L.cutover_ready(self.j, "v1", GATE, at(91))
         self.assertTrue(ok, why)
 
@@ -149,6 +151,7 @@ class EnterpriseRunTests(unittest.TestCase):
         cls.before = S.api_unmigrated(cls.state, {}, {})
         S.api_demo_approve(cls.state, {}, {})
         cls.state.options = {"hold_before_cutover": False, "stop_after_failures": 0}
+        cls.state.auto_sign = "Demo reviewer (synthetic)"
         sim = Simulation(cls.state, lambda: S._gate(cls.state), tick=0)
         cls.state.sim = sim
         sim.start()

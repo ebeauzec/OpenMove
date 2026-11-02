@@ -131,6 +131,8 @@ The simulated migration uses made-up evidence and a virtual clock, but the real 
 | **8. Live** | Watch. | Shows progress, the order, the gate, the halt, the events and the volumes not migrated. |
 | **Journal** | Read. | Lists what OpenMove recorded. |
 
+**Back and Next.** A bar at the bottom of every screen walks through the numbered steps in order (Back and Next name the step they lead to). The tabs at the top still work for jumping. The Journal is not a step; Back returns from it to the last step.
+
 The header shows the connection state, the version and the **HALT** button. A thin progress bar appears under the header on every tab once a migration has started.
 
 ### Volume classes
@@ -159,6 +161,15 @@ Nothing migrates all at once. After the pre-flight, open **6. Select**.
 ### Workload risk
 
 The *Workload risk* panel lists volumes that may host something that breaks, for example a legacy Windows server. OpenMove cannot see inside a guest. It reads hints, and it says so. A high-risk volume is not moved. To move it, an operator and a different reviewer each enter a name and evidence (what was tested, what the owner agreed, the way back). To flag a volume the cloud does not show as risky, *mark* it with a name and a reason. See `WORKLOAD_RISKS.md` for what can break and a list of questions for the customer.
+
+### Second-person sign-offs: G2, G3 and G4
+
+The playbook has a second person sign three points for each volume. On the Live tab:
+
+* **Sign G2 and G3** appears when volumes are in sync and checked. G2: the copy is verified. G3: the volume is ready to cut over. The volumes cannot be cut over without both.
+* **Sign G4** appears when volumes passed the post-check. Without G4 the soak does not start.
+* The signer must not be the operator of the run (the person who signed the pre-flight gate as operator). You enter your name and what you checked; it is kept in the journal. Volumes that are not yet at that point are skipped.
+* In demonstration mode a button lets a made-up second person sign for you.
 
 ### One volume in detail
 

@@ -21,7 +21,7 @@ The playbook is the authority. `MIGRATION_METHOD.md` is the working summary. Thi
 | Discovery, inventory, classification, pre-flight checks, reports, the rules that order a migration, the safety layer, the GUI | **built** (mock cloud and demo only) |
 | Phase 0: the 21 lab tests T1 to T21 as guided, recorded procedures | **not built** (only the record that gate G0 passed is kept) |
 | Phases 3, 4, 5 and the rollbacks R1 to R3 as actions that change the cloud | **not built**. The demo simulates them. |
-| Per-volume gate sign-offs G2, G3, G4 by a second person | **not built** (see "Gaps that matter") |
+| Per-volume gate sign-offs G2, G3, G4 by a second person | built (see "Gaps that matter") |
 | Anything run against a real cloud or a real array | **never done** |
 
 ## Phase 0: lab validation (gate G0)
@@ -124,14 +124,14 @@ OpenMove adds, around these steps: precheck, validate, copy, sync, **recheck twi
 |---|---|---|---|
 | G0 | Lab validation, signed | P16 | **Check only** |
 | G1 | End of Phase 2, signed | The pre-flight gate: all checks, attestations, **two people**, bound to the run | **Built** |
-| G2 | Staging verified, second person signs, per volume | Rules (S1 to S4). **No per-volume sign-off.** | **Gap** |
-| G3 | Record and freeze verified, second person signs, per volume | Rules (C1 to C6). **No per-volume sign-off.** | **Gap** |
-| G4 | Cutover verified, second person signs, per volume | Post-check rule. **No per-volume sign-off.** | **Gap** |
+| G2 | Staging verified, second person signs, per volume | Per-volume sign-off by a second person, enforced before the cutover (`POST /api/volume-gate`). The checks S1 to S4 behind it are not run automatically. | **Built** (sign-off), checks **check only** |
+| G3 | Record and freeze verified, second person signs, per volume | Per-volume sign-off, enforced before the cutover. In this release the freeze is inside the cutover phase, so G3 is signed on the readiness conditions; it moves between the freeze and the swap when the engine splits them. | **Built** (sign-off), checks **check only** |
+| G4 | Cutover verified, second person signs, per volume | Per-volume sign-off, enforced before the soak starts. | **Built** (sign-off), checks **check only** |
 
 ## Gaps that matter
 
 1. **The engine.** Nothing moves a byte. Every "Not built" row above is the engine.
-2. **Per-volume gates G2, G3, G4.** The playbook wants a second person to sign at each. OpenMove has the two-person gate once, before the run, and an optional hold before the cutover that needs one named person. The recheck rules replace some of what the gates check, but they are not the same control. Recommended: add a per-volume sign-off at G2, G3 and G4, enforced in `lifecycle.py` like the other rules.
+2. **Per-volume gates G2, G3, G4.** Now built (see the gates table). What stays open: G3 sits at the entry of the cutover phase until the engine separates the freeze from the swap.
 3. **Image-cache and internal-tenant volumes (step 1.7).** Not looked for.
 4. **`provider_id` repair (step 1.9).** Found, not repaired.
 5. **Phase 0.** No guided lab procedures.

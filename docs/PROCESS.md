@@ -162,7 +162,19 @@ This is what happens to one volume, and what the screen shows. The same list is 
 | `done` | After the soak and a person's sign-off the source and its clones are released. The only deletion. | source released |
 | `hold` | Class D and E. The volume never starts. The reason is shown. | none |
 
-The cutover conditions, shown for each volume with the state of each: in the recheck or sync phase; no halt; gate approved; enough rechecks passed in a row; the rechecks far enough apart; the newest recheck recent; the source fingerprint unchanged; lag zero and no pending blocks.
+The cutover conditions, shown for each volume with the state of each: in the recheck or sync phase; no halt; gate approved; enough rechecks passed in a row; the rechecks far enough apart; the newest recheck recent; the source fingerprint unchanged; lag zero and no pending blocks; **G2 and G3 signed by a second person**.
+
+### The volume gates G2, G3 and G4
+
+The playbook has a second person sign at three points of each volume. OpenMove enforces them in `lifecycle.py` (`sign_gate`, `gate_signed`):
+
+| Gate | Signed when | Needed before |
+|---|---|---|
+| G2 | The copy is verified (same size and hash; for class C every snapshot image and id compared). The volume is in sync or recheck. | the cutover |
+| G3 | The volume is ready: rechecks passed, far enough apart, the source did not change, nothing is left to copy. | the cutover |
+| G4 | The cutover was verified from the new path. The volume is in post-check. | the soak |
+
+The signer must not be the operator of the run (the person who signed the pre-flight gate as operator, compared without regard to case); if the operator is not known, a sign-off is refused. The reviewer of the pre-flight gate may sign. A sign-off needs a name and a note of what was checked. A sign-off is void when the volume is copied again (G2), copied again or falls back to sync (G3), or is cut over again (G4). These gates are always required: the setting that holds a volume for release does not replace them, and a run cannot be left to cut over unattended. In this release the cutover phase includes the freeze, so G3 is checked at its entry; when the engine splits the freeze from the swap, G3 moves between them.
 
 ### Choosing what moves
 
