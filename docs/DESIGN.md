@@ -54,6 +54,19 @@ The image is built from a pinned base, holds no credentials and no data, and kee
 4. ships and starts the data mover, and proves it with a throwaway copy in both directions (check P8), recording the throughput;
 5. registers the host's initiator on the arrays (access group on the source array, host object on the target array), as plan steps with undo.
 
+**Using a Cinder host as the migration host (shared role).** Supported as a configuration of the migration-host registry, with conditions. The reasons it fits: the cinder-volume host of the source back-end already has iSCSI and multipath to the source array and, for detached volumes, must already reach the target array (the playbook's test T12); Cinder code and `cinder.conf` are on a Cinder host anyway, so the destination-record helper runs there. The reasons for care: the host is a production service node, its iSCSI and multipath state is managed by Cinder's own attach code, and the playbook specifies a dedicated host so that no other volume is ever presented to it.
+
+Conditions OpenMove applies to a shared-role host:
+
+1. The data mover uses its own initiator identity (a separate iSCSI interface with its own initiator name, or a dedicated host object and access group), so migration clones and the staging volume are never mixed with volumes Cinder presents. To be verified in the lab.
+2. The data mover touches only the devices it created. It never runs a global multipath flush or reload, and it never logs out sessions it did not open. Readiness check P8 verifies this on the host.
+3. Copy rate and concurrency are capped by settings, with a lower default than on a dedicated host, because the copy competes with cinder-volume's own work and storage NICs.
+4. The host is shown in the plan as shared-role, and the plan records the extra risk. Starting a copy requires that the host's cinder-volume service is healthy and no Cinder operation on it is in progress.
+5. The throughput and impact are measured in the lab (tests T11 and T19) before the configuration is used in production, and the result is stored with the host entry.
+6. Choose the cinder-volume host of the source back-end, not an API or scheduler node: it already has the data paths, and the copy does not load the control plane. If cinder-volume runs in a container on that host, the data mover runs on the host, not inside that container.
+
+A dedicated migration host stays the recommended setup where one is available; the shared role removes the need for one.
+
 **Everything from the tool.** Each phase of the method is a set of GUI functions built on the same step contract (section 6):
 
 | Phase | What the tool does for the operator |

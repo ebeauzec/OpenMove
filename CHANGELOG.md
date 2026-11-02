@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.3 (2026-11-02)
+
+### Changed
+- Design: a Cinder host can act as the migration host, with conditions.
+
 ## 0.2.2 (2026-11-02)
 
 ### Added

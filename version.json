@@ -1,8 +1,8 @@
 {
-  "version": "0.2.2",
+  "version": "0.2.3",
   "major": 0,
   "minor": 2,
-  "patch": 2,
+  "patch": 3,
   "date": "2026-11-02",
-  "notes": "Container, Linux deployment and full in-tool control"
+  "notes": "Shared-role migration host"
 }
