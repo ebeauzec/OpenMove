@@ -1,0 +1,26 @@
+{
+  "comment": "One profile per OpenStack release. A release without a profile is untested. A profile makes a release usable for changes only after a lab validation has been recorded in the journal (see profiles.py).",
+  "profiles": {
+    "Queens": {
+      "source": "Owner's playbook v1.2, section 15 (checked against the Queens source; not yet run on a cloud)",
+      "variants": {
+        "live_migration_listing": "novaclient: nova server-migration-list <instance>. python-openstackclient of this era has no equivalent. An error from the command is a stop, never 'no migration'.",
+        "attach_flow": "to be determined in the lab (playbook test T5): old style or attachment-id style",
+        "cinder_manage_quota_command": false,
+        "destination_helper_interpreter": "the interpreter that runs cinder-volume (may be Python 2); the helper must run on Python 2 and 3",
+        "nova_swap_instance_states": ["ACTIVE", "PAUSED", "RESIZED"],
+        "nova_swap_requires_no_task_state": true,
+        "pure_driver_rest_api_versions": "1.2 to 1.5",
+        "pure_driver_pod_support": false,
+        "pure_driver_update_migrated_volume": false,
+        "solidfire_driver_update_migrated_volume": false,
+        "metadata_update_blocked_in": ["maintenance"],
+        "snapshot_delete_blocked_while_migrating": false
+      },
+      "notes": [
+        "Vendor builds carry patches. Lab validation must confirm the behaviour on the actual build.",
+        "Not verified in the playbook and left for the lab: attach flow, boot-from-volume swap, Purity size unit, recover-with-snapshots, scheduler 'or' operator."
+      ]
+    }
+  }
+}

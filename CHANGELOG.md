@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0 (2026-11-02)
+
+### Added
+- Version detection, read-only inventory and local web interface
+
 ## 0.2.3 (2026-11-02)
 
 ### Changed

@@ -18,6 +18,15 @@ The hooks need Python 3 on the path.
 - **Documented in the same commit.** A change to behaviour updates `README.md`, `CONTEXT.md`, `CHANGELOG.md` and the relevant file in `docs/`.
 - **Never bypass the hooks.** No `--no-verify`.
 
+## Running and testing
+
+```bash
+python -m openmove                              # start the application
+python -m unittest discover -s tests -t .       # run the tests
+```
+
+The tests need no cloud. `tests/mock_openstack.py` serves a small Keystone, Cinder and Nova on a local port with made-up data, and the tests check that only read calls reach it and that the password never appears in a result, the journal file or an error. New code comes with tests in the same commit.
+
 ## Sensitive-data guard
 
 `tools/guard_sensitive.py` runs from the hooks. It can also be run by hand:

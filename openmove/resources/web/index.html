@@ -1,0 +1,95 @@
+<!doctype html>
+<!-- Copyright (c) 2026 Eugene Beauzec and Obi1 - FZCO. All Rights Reserved. Proprietary software; see LICENSE. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="openmove-token" content="__TOKEN__">
+<title>OpenMove</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">OpenMove</span><span class="sub">Cinder volume audit, reporting and migration</span></div>
+  <div class="head-right"><span id="mode" class="chip">not connected</span><span id="ver" class="muted"></span></div>
+</header>
+
+<main>
+  <nav id="tabs" role="tablist">
+    <button role="tab" data-tab="connect" class="active">1. Connect</button>
+    <button role="tab" data-tab="platform">2. Platform</button>
+    <button role="tab" data-tab="inventory">3. Inventory</button>
+    <button role="tab" data-tab="journal">Journal</button>
+  </nav>
+
+  <div id="banner" class="banner hidden" role="status"></div>
+
+  <section id="tab-connect" class="panel">
+    <h2>Connect to the cloud</h2>
+    <p class="muted">Use an administrator account. The password is kept in memory for this session only and is never written to disk, the journal or a report.</p>
+    <form id="connect-form" autocomplete="off">
+      <div class="grid">
+        <label>Identity (Keystone) URL<input name="auth_url" required placeholder="https://cloud.example.net:5000"></label>
+        <label>User name<input name="username" required></label>
+        <label>Password<input name="password" type="password" required autocomplete="new-password"></label>
+        <label>Project<input name="project_name" required value="admin"></label>
+        <label>User domain<input name="user_domain" value="Default"></label>
+        <label>Project domain<input name="project_domain" value="Default"></label>
+        <label>Region (optional)<input name="region"></label>
+        <label>Endpoint interface
+          <select name="interface"><option>public</option><option>internal</option><option>admin</option></select></label>
+        <label>CA certificate file (optional)<input name="ca_file" placeholder="path on this machine"></label>
+        <label class="check"><input name="verify" type="checkbox" checked> Verify TLS certificates</label>
+      </div>
+      <div class="actions"><button class="primary" type="submit">Connect</button>
+        <button type="button" id="disconnect" class="secondary">Disconnect</button></div>
+    </form>
+    <div id="connect-result" class="result"></div>
+  </section>
+
+  <section id="tab-platform" class="panel hidden">
+    <h2>Platform</h2>
+    <div class="actions"><button class="primary" id="discover">Detect version and back-ends</button></div>
+    <div id="platform-view"></div>
+  </section>
+
+  <section id="tab-inventory" class="panel hidden">
+    <h2>Volume inventory and classification</h2>
+    <div class="actions inline">
+      <label>Back-end<select id="inv-backend"><option value="">all back-ends</option></select></label>
+      <label>Rotation window (days)<input id="inv-window" type="number" min="1" value="14"></label>
+      <button class="primary" id="inv-run">Read from the cloud</button>
+    </div>
+    <details>
+      <summary>No database access? Import the playbook's query results instead</summary>
+      <p class="muted">Paste or load the tab-separated output of query A1 (required), A2 (snapshot churn), A4 (root volumes) and the attached-instances list. They add provider_id and snapshot history, which the API does not show.</p>
+      <div class="grid">
+        <label>A1 inventory<textarea id="imp-a1" rows="3"></textarea><input type="file" data-for="imp-a1"></label>
+        <label>A2 churn<textarea id="imp-a2" rows="3"></textarea><input type="file" data-for="imp-a2"></label>
+        <label>A4 root volumes<textarea id="imp-a4" rows="3"></textarea><input type="file" data-for="imp-a4"></label>
+        <label>Attached instances<textarea id="imp-inst" rows="3"></textarea><input type="file" data-for="imp-inst"></label>
+      </div>
+      <div class="actions"><button id="inv-import" class="secondary">Classify the imported data</button></div>
+    </details>
+    <div id="inv-summary"></div>
+    <div class="actions inline" id="inv-filter" hidden>
+      <label>Show class<select id="inv-class"><option value="">all</option></select></label>
+      <label>Search<input id="inv-search" placeholder="id, name, project, host"></label>
+    </div>
+    <div class="table-wrap"><table id="inv-table" hidden>
+      <thead><tr><th>Volume</th><th>Class</th><th>Reason</th><th>GiB</th><th>Snapshots</th><th>Status</th><th>Back-end</th><th>Attached to</th></tr></thead>
+      <tbody></tbody></table></div>
+    <p id="inv-more" class="muted"></p>
+  </section>
+
+  <section id="tab-journal" class="panel hidden">
+    <h2>Journal</h2>
+    <div class="actions"><button id="journal-refresh" class="secondary">Refresh</button></div>
+    <div id="journal-view"></div>
+  </section>
+</main>
+
+<footer>Copyright &copy; 2026 Eugene Beauzec and Obi1 - FZCO. All Rights Reserved. OpenStack&reg; is a trademark of the OpenInfra Foundation; OpenMove is not affiliated with it.</footer>
+<script src="/app.js"></script>
+</body>
+</html>

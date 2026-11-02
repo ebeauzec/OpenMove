@@ -1,8 +1,8 @@
 {
-  "version": "0.2.3",
+  "version": "0.3.0",
   "major": 0,
-  "minor": 2,
-  "patch": 3,
+  "minor": 3,
+  "patch": 0,
   "date": "2026-11-02",
-  "notes": "Shared-role migration host"
+  "notes": "Version detection, read-only inventory and local web interface"
 }

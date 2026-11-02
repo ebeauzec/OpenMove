@@ -1,0 +1,31 @@
+{
+  "source": "Official OpenStack API microversion histories: Cinder (docs.openstack.org/cinder/latest/contributor/api_microversion_history.html) and Nova (docs.openstack.org/nova/latest/reference/api-microversion-history.html). Each value is the highest microversion the page labels 'Maximum in <release>'.",
+  "retrieved": "2026-11-02",
+  "note": "cinder_max is null where the Cinder page lists no maximum for that release (Kilo and Liberty predate the v3 API; releases after 2024.2 are not yet listed). A cloud reports the maximum of the code it runs, so vendor builds that differ from upstream can report other values.",
+  "releases": [
+    {"name": "Kilo",     "cinder_max": null,   "nova_max": "2.3"},
+    {"name": "Liberty",  "cinder_max": null,   "nova_max": "2.12"},
+    {"name": "Mitaka",   "cinder_max": "3.0",  "nova_max": "2.25"},
+    {"name": "Newton",   "cinder_max": "3.15", "nova_max": "2.38"},
+    {"name": "Ocata",    "cinder_max": "3.27", "nova_max": "2.42"},
+    {"name": "Pike",     "cinder_max": "3.43", "nova_max": "2.53"},
+    {"name": "Queens",   "cinder_max": "3.50", "nova_max": "2.60"},
+    {"name": "Rocky",    "cinder_max": "3.55", "nova_max": "2.65"},
+    {"name": "Stein",    "cinder_max": "3.59", "nova_max": "2.72"},
+    {"name": "Train",    "cinder_max": "3.59", "nova_max": "2.79"},
+    {"name": "Ussuri",   "cinder_max": "3.60", "nova_max": "2.87"},
+    {"name": "Victoria", "cinder_max": "3.62", "nova_max": "2.87"},
+    {"name": "Wallaby",  "cinder_max": "3.64", "nova_max": "2.88"},
+    {"name": "Xena",     "cinder_max": "3.66", "nova_max": "2.90"},
+    {"name": "Yoga",     "cinder_max": "3.68", "nova_max": "2.90"},
+    {"name": "Zed",      "cinder_max": "3.70", "nova_max": "2.93"},
+    {"name": "2023.1",   "cinder_max": "3.70", "nova_max": "2.95"},
+    {"name": "2023.2",   "cinder_max": "3.70", "nova_max": "2.95"},
+    {"name": "2024.1",   "cinder_max": "3.71", "nova_max": "2.96"},
+    {"name": "2024.2",   "cinder_max": "3.71", "nova_max": "2.96"},
+    {"name": "2025.1",   "cinder_max": null,   "nova_max": "2.100"},
+    {"name": "2025.2",   "cinder_max": null,   "nova_max": "2.100"},
+    {"name": "2026.1",   "cinder_max": null,   "nova_max": "2.103"},
+    {"name": "2026.2",   "cinder_max": null,   "nova_max": "2.104"}
+  ]
+}

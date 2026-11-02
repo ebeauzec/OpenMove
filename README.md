@@ -2,7 +2,7 @@
 
 OpenMove is a GUI-driven tool that automates the audit, reporting and migration of OpenStack Cinder volumes. It connects directly to an OpenStack cloud and does its work by calling OpenStack's own services and clients, so every action is one the cloud already supports and records.
 
-> **Status:** early development (version 0.1.0). The project scaffold, documentation set and repository safeguards are in place. The functional specification is being added to `docs/`, and this README is extended as each part of it is built.
+> **Status:** early development (version 0.3.0). Version detection, the read-only inventory with volume classification, and the local web interface work and are tested against a mock cloud. Checks, reports and migration are not built yet, and nothing has run against a real cloud. Until a release has a recorded lab validation, the tool is read only.
 
 ## Table of Contents
 
@@ -42,7 +42,20 @@ The detailed behaviour of each area is defined by the specification in `docs/`.
 
 ## 3. Getting Started
 
-To be written when the first runnable version exists. It will cover prerequisites, installation, connecting to a cloud and a first audit.
+**Prerequisite:** Python 3.9 or later (developed and tested on 3.12). OpenMove uses the standard library only; nothing else is installed.
+
+```bash
+python -m openmove
+```
+
+OpenMove starts a web server on the loopback address, prints a link that holds a one-time access token and opens it in the default browser. Use `--no-browser` to only print the link, `--port` to change the port (default 8765) and `--home` to choose where the journal is kept.
+
+1. **Connect:** enter the Keystone address and an administrator account. The password stays in memory and is never written to disk, the journal or a report.
+2. **Platform:** detect the OpenStack release, the API versions, the back-ends, the Cinder services and the compute hosts.
+3. **Inventory:** read the volumes through the APIs and see them by class (A to E). If the Cinder database is not reachable, import the playbook's query results instead.
+4. **Journal:** review what was recorded.
+
+A packaged application and a container image will follow.
 
 ## 4. Repository Layout
 
@@ -55,6 +68,8 @@ To be written when the first runnable version exists. It will cover prerequisite
 | `LICENSE` | Proprietary software licence. |
 | `LEGAL.md` | Ownership and intellectual property declaration. |
 | `THIRD_PARTY_NOTICES.md` | Licences of third-party components and trademark notices. |
+| `openmove/` | The application (Python, standard library only). |
+| `tests/` | Automated tests and a mock OpenStack cloud. |
 | `docs/` | Specification, design and operating documents. See `docs/README.md`. |
 | `tools/` | Repository tooling, including the sensitive-data guard. |
 | `tools/dev/` | Developer helpers (release bump). |
