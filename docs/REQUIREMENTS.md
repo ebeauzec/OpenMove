@@ -51,6 +51,12 @@ Product requirements R1-R8 as stated by the owner. They apply to every design de
 - The same report series serves as the operations team's progress and update reports: status counts, the state of every volume, what changed since the last report, open issues, and next steps.
 - Format is enterprise standard: a controlled document (title, document identifier, version, date, status, author, distribution), an executive summary, numbered sections, tables with consistent columns, an issues and risks log, an appendix with raw evidence, and a sign-off block. The report carries the copyright notice required by `LEGAL.md`.
 - Reports are produced as documents operations can open without OpenMove (a page-fixed format for hand-over and archive, and an editable office format), and the volume lists are also produced as spreadsheet data. The exact set of formats is confirmed with the owner before the reporting module is built.
+- **Before and after.** Every migration job produces a matched pair of reports so progress is clear at a glance:
+  - *Before report* (baseline): the state of every volume in scope as found, all pre-migration checks, the plan, the risks and the rollback plan. It is fixed when the plan is approved.
+  - *After report*: the state of the same volumes once the job ends, the post-migration verification, and a side-by-side comparison with the before report for each volume (back-end, volume type, size, status, attachment, host, metadata), with every difference marked as expected or unexpected.
+  - *Update reports* between the two use the same layout and show, against the before baseline, what has moved, what is running, what failed and what was rolled back.
+  - A rolled-back job gets an after report that shows the volumes back at their baseline, and states whether they match it.
+- **Word renderer.** Word output uses the document parser and renderer proven in ARIA: a text/Markdown-style report is parsed into a document model (title, metadata, headings, tables, lists, charts) and rendered to a .docx with a document control block on the title page, numbered chapters, a contents list, consistent tables and a running header and footer. OpenMove gets its own generic copy, with every ARIA- and NetApp-specific rule and name removed, and with the matching layout lint (the equivalent of ARIA's `wordlint.py`) and its rule tests. The copy is bundled so the report is built offline.
 - Reports are generated offline, are reproducible from the stored job record, and name the OpenMove version and the cloud they describe.
 - Reports contain real cloud data, so they stay on the machine (see section 7 of the README); they are never committed.
 
@@ -75,7 +81,7 @@ Product requirements R1-R8 as stated by the owner. They apply to every design de
 | R4 | Check framework with a result record per check, reused by pre-flight, in-flight and post-migration stages. |
 | R5 | Write-ahead journal and a resumable state machine per volume. Idempotent steps. Fault-injection tests. |
 | R6 | Each journal entry carries its inverse. Rollback is a plan like any other. |
-| R7 | A report model built from the job record, rendered by separate writers per format. Report sections are generated from the same check and journal data the engine uses, so a report cannot disagree with what happened. |
+| R7 | A before snapshot stored with the job, taken at approval and never changed. An after snapshot taken at the end, and a comparison built from the two. A report model built from the job record, rendered by separate writers per format (Word through the ported ARIA parser/renderer, which also decides how the application can run that code: ARIA's is JavaScript, so the stack decision must allow it or replace it with an equivalent). Report sections are generated from the same check and journal data the engine uses, so a report cannot disagree with what happened. |
 | R8 | A back-end adapter interface and a capability profile per back-end. The engine asks the adapter what is possible; it never tests for a vendor name. A support matrix generated from the profiles. |
 
 These are consequences of the requirements, not decisions about technology. The stack is chosen after the playbook is read.

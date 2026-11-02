@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3 (2026-11-02)
+
+### Added
+- Requirement R7 extended: before/after report pair, update reports, Word renderer.
+
 ## 0.1.2 (2026-11-02)
 
 ### Added
