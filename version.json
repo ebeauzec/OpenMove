@@ -1,8 +1,8 @@
 {
-  "version": "0.2.1",
+  "version": "0.2.2",
   "major": 0,
   "minor": 2,
-  "patch": 1,
+  "patch": 2,
   "date": "2026-11-02",
-  "notes": "Platform independence requirement"
+  "notes": "Container, Linux deployment and full in-tool control"
 }

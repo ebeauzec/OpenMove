@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2 (2026-11-02)
+
+### Added
+- Requirement R11: container image, own Linux deployment, migration host registry, every phase controlled from the tool.
+
 ## 0.2.1 (2026-11-02)
 
 ### Added

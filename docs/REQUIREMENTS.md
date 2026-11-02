@@ -1,6 +1,6 @@
 # Requirements
 
-Product requirements R1-R10 as stated by the owner. They apply to every design decision. The technical playbook (to be added to this folder) defines the detail; where the two differ, the playbook wins and this file is corrected.
+Product requirements R1-R11 as stated by the owner. They apply to every design decision. The technical playbook (to be added to this folder) defines the detail; where the two differ, the playbook wins and this file is corrected.
 
 ## R1. Standalone, deployable on site
 
@@ -89,6 +89,15 @@ Product requirements R1-R10 as stated by the owner. They apply to every design d
 - File paths, line endings, character encodings, time zones and process handling are handled in one place and tested on every supported system.
 - The reports, the job record and the settings are portable: a job started on one system can be opened and reported on from another.
 
+## R11. Containerised, with its own Linux deployment if needed, and everything controlled from the tool
+
+- OpenMove can be run as a container. The image holds the whole application and, where needed, the data mover, so a site can start it with one command and no other setup.
+- Where a container cannot do the job (for example because the host's iSCSI and multipath stack cannot be reached safely from inside one), OpenMove provides its own Linux deployment: a purpose-built minimal Linux image with OpenMove and the data mover installed, which can act as the migration host itself.
+- OpenMove is pointed at a migration host: the operator enters the host's address and access in the tool, and OpenMove checks it, reports what is missing, and prepares it. The migration host may be a separate Linux system, the OpenMove container's own host, or the OpenMove Linux deployment.
+- **Everything is controlled from the tool.** The operator does not need a terminal on any system. That covers the whole procedure: connecting to the cloud and the arrays; preparing the migration host and the arrays (access groups, host objects, the migration account, clone QoS); preparing Cinder (backends, volume types, type access, quota, reference volume); database backup; lab validation tests; inventory, classification and batch planning; every migration step and gate; rollback; cleanup after the soak period; monitoring of a running job; settings; and reports.
+- Every action the tool takes on the operator's behalf follows the same rules as a migration step (R3 to R6): it is planned, shown, approved, journaled, verified and has a recorded undo. A preparation step such as creating an access group is as reversible and as well documented as a cutover.
+- Where the tool cannot do something itself (for example editing the configuration of the OpenStack services, which it does not own), it says exactly what must be changed, checks that it has been changed, and records the result. It never assumes.
+
 ## Consequences for the design
 
 | Requirement | Design consequence |
@@ -101,6 +110,7 @@ Product requirements R1-R10 as stated by the owner. They apply to every design d
 | R7 | A before snapshot stored with the job, taken at approval and never changed. An after snapshot taken at the end, and a comparison built from the two. A report model built from the job record, rendered by separate writers per format (Word through the ported ARIA parser/renderer, which also decides how the application can run that code: ARIA's is JavaScript, so the stack decision must allow it or replace it with an equivalent). Report sections are generated from the same check and journal data the engine uses, so a report cannot disagree with what happened. |
 | R9 | A discovery module that builds a platform profile (release, service and client versions) at connection time, and release profiles as data that the engine and connectors consult. Mutating steps check the profile status (validated, untested) before they run. |
 | R10 | Control plane (the application, any OS) separated from the data mover (a helper that runs on a Linux migration host, shipped and started over SSH). All code is Python with no shell scripts. One portability layer for paths, processes and encodings. Build and test on all three systems. |
+| R11 | A container image with two run modes (controller, and migration host). A Linux image build for a dedicated deployment. A migration-host registry, readiness checks and preparation steps in the tool. Every playbook phase exposed as GUI functions built on the same step contract, so nothing needs a terminal. |
 | R8 | A back-end adapter interface and a capability profile per back-end. The engine asks the adapter what is possible; it never tests for a vendor name. A support matrix generated from the profiles. |
 
 These are consequences of the requirements, not decisions about technology. The stack is chosen after the playbook is read.

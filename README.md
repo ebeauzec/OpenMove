@@ -35,6 +35,7 @@ The detailed behaviour of each area is defined by the specification in `docs/`.
 - **Direct OpenStack integration.** OpenMove authenticates against Keystone and drives Cinder (and the services it depends on) directly. It does not keep its own copy of cloud state beyond what a report or a running job needs.
 - **Standalone and on site.** One self-contained application that runs without internet access and contacts OpenStack only.
 - **Platform independent.** Runs on Windows, macOS and Linux, as a packaged application, a container or from source. Work that needs Linux block-device tools runs on the remote migration host through a helper OpenMove ships and starts there.
+- **Containerised, and controlled entirely from the tool.** Runs as a container, or from its own Linux image where needed. The operator points it at a migration host and does every step, from preparing the arrays and the host to the last report, from the interface. No terminal is required.
 - **Version aware.** It detects the OpenStack release and the versions of the services around it, and follows the procedure that release needs. A release it has not been validated against is read only.
 - **Safe by design.** Every change is journaled with its undo, so any action can be rolled back; a crash or lost connection never leaves a volume in an unknown state.
 - **Read before write.** Audit and reporting are read-only. Migration is the only function that changes the cloud, and it shows what it will do before it does it.
