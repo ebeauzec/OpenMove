@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0 (2026-11-02)
+
+### Added
+- The engine that moves class A and B volumes with Cinder's retype (lock, retype, follow, post-check, unlock, reverse), working with the OpenStack APIs only; the access level (api or full) with the new cause 'no data mover' for class C; the retype order in the lifecycle; the Move tab (dry run, run, sign G2 to G4, release, reverse) and the lab validation record (gate G0); lab mode and OpenMove-Lab.bat for a real OpenStack on this machine (DevStack in WSL). Tested against a mock cloud with fault injection (244 tests). Not yet run on the lab, and nothing has run on a customer cloud.
+
 ## 0.4.2 (2026-11-02)
 
 ### Added

@@ -2,7 +2,7 @@
 
 OpenMove is a GUI-driven tool that automates the audit, reporting and migration of OpenStack Cinder volumes. It connects directly to an OpenStack cloud and does its work by calling OpenStack's own services and clients, so every action is one the cloud already supports and records.
 
-> **Status:** early development (version 0.4.0). Version detection, the read-only inventory and classification, the environment audit, the pre-flight checks with the gate, Word reports, the live view and a demonstration mode work and are tested against a mock cloud. The migration engine is **not built yet**, and nothing has run against a real cloud. Until a release has a recorded lab validation, the tool is read only. The safety rules and the fixed order of a migration are already built and tested (`docs/SAFETY.md`, `docs/PROCESS.md`).
+> **Status:** early development. Version detection, the read-only inventory and classification, the environment audit, the pre-flight checks with the gate, Word reports, the live view and a demonstration mode work and are tested against a mock cloud. The engine that moves class A and B volumes with Cinder's retype is built and tested against a mock cloud; the engine for class C is **not built yet**, and nothing has run against a real cloud. Until a release has a recorded lab validation, the tool is read only. The safety rules and the fixed order of a migration are already built and tested (`docs/SAFETY.md`, `docs/PROCESS.md`).
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ OpenMove is a GUI-driven tool that automates the audit, reporting and migration 
 |---|---|
 | **Audit** | Inventory Cinder volumes across projects and backends, and report their state, attachment, type, size and placement. |
 | **Reporting** | Verbose, enterprise-standard reports: every pre-migration check, the volumes to be moved, and progress and update reports for the operations team. |
-| **Migration** | Plan and run volume moves between back-ends, with checks before and after each move and rollback of every action. Volumes are chosen one by one or by group; a volume that hosts a workload that may break is not moved until two people clear it; a volume that is not migrated is explained in a report. The engine that moves data is not built yet (`docs/PLAYBOOK_TRACE.md`). |
+| **Migration** | Plan and run volume moves between back-ends, with checks before and after each move and rollback of every action. Volumes are chosen one by one or by group; a volume that hosts a workload that may break is not moved until two people clear it; a volume that is not migrated is explained in a report. Class A and B move with Cinder's retype using only the OpenStack APIs; class C needs a data mover and is not built yet (`docs/PLAYBOOK_TRACE.md`). |
 
 Back-end support is broad by design, with a focus on moves to and from NetApp SolidFire, NetApp ONTAP and Pure Storage. Each back-end pair is listed in a support matrix with its migration method and verification status.
 

@@ -1,6 +1,6 @@
 # Building the migration engine: plan for a test environment
 
-Status: **not started**. This page is the plan. It says what will be built, in what order, what can be proven without a cloud, and what only a lab can prove. Nothing here has run against a real cloud.
+Status: **in progress**. Built and tested against a mock cloud: the access level, the retype order, E1 (journal, permit, evidence; the shell executor is not needed for the APIs-only level and comes with E5), E3 for lock, unlock and retype, and E4 (class A and B). Not built: E2, E5, E6, E7. This page is the plan. It says what will be built, in what order, what can be proven without a cloud, and what only a lab can prove. Nothing here has run against a real cloud.
 
 ## What "works" can mean
 
@@ -25,6 +25,17 @@ The first run in a test environment is a **dry run**: every step that would chan
 
 E1 to E4 give a class A and class B path that can be tried in a test environment first. E5 is the larger piece.
 
+## Two levels of access
+
+The engine must work when OpenMove has **only the OpenStack APIs** (no migration host, no array access, no SSH). The level is chosen on the Pre-flight tab and recorded with the pre-flight result.
+
+| Level | Reaches | Moves | Held back |
+|---|---|---|---|
+| `api` (default) | Keystone, Cinder, Nova | Class A and B, by Cinder retype with on-demand migration | Class C, cause `no_data_mover`, with steps to resolve it |
+| `full` | also SSH hosts and both arrays | Class A, B and C | none for this reason |
+
+Under `api`, the checks P12, P14 and P15 (source array account, target namespace, clone call) are informational. E1, E3 and E4 need only the `api` level; E2 and E5 need `full`.
+
 ## Where it runs
 
 * The **controller** (the OpenMove program, on Windows, macOS or Linux) talks to OpenStack over HTTPS, to the arrays over HTTPS or SSH, and to the Linux hosts over SSH.
@@ -43,4 +54,4 @@ E1 to E4 give a class A and class B path that can be tried in a test environment
 
 The playbook moves a class A volume with a **standard retype**: Cinder asks Nova, and Nova copies the data with a live block copy and switches the guest to the new device by itself. OpenMove cannot pause that switch to run two rechecks first. The order in `lifecycle.py` (copy, keep in sync, recheck twice, cutover) fits the staged method, where OpenMove controls the copy.
 
-Recommended: class A and B use the playbook's retype and a shorter, enforced order (precheck, validate, G2 and G3, retype as the cutover, post-check, G4, soak). The "recheck twice" rule stays for the staged method. See the question put to the owner.
+Decided by the owner ("use retype"): class A and B use the playbook's retype and a shorter, enforced order (precheck, validate, G2 and G3, retype as the cutover, post-check, G4, soak). The "recheck twice" rule stays for the staged method. See the question put to the owner.

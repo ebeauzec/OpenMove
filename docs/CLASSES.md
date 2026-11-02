@@ -13,7 +13,8 @@ The owner's question was whether all the logic is in place for every class of vo
 | The rules each class must meet inside the order of a migration (`lifecycle.py`, section below) | built, tested |
 | What happens to a volume that is not migrated: cause, how, state left behind, proposed steps (`handling.py`, the not-migrated report) | built, tested |
 | A simulated run in which every class takes its own path and fails in its own ways (demonstration only) | built, tested |
-| The code that really moves data: class A copy and cutover, the class B watcher, the class C history rebuild, freeze and swap, rollback R1 to R3 | **not built** |
+| The code that moves class A and B volumes: lock, retype, follow, post-check, unlock, reverse (R3), and the class B wait for the rotation | built, tested against a mock cloud only |
+| The code that moves class C: the history rebuild, freeze and swap, rollback R1 and R2 | **not built** |
 | Lab validation of any of it (playbook Phase 0, tests T1 to T21) | **not done**; nothing has run against a real cloud |
 
 So for snapshots in particular: class B and class C volumes are recognised, kept apart from class A, held to stricter rules, and shown with their own failure causes. The staged rebuild of a snapshot history on the target array (playbook phase 5) is **not written yet**.

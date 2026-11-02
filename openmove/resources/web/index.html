@@ -23,6 +23,10 @@
   <div class="demo-pick"><label>Scenario <select id="demo-scenario"></select></label> <details class="demo-about"><summary>About this scenario</summary><span id="demo-desc"></span></details></div>
 </div>
 
+<div id="lab-banner" class="demo hidden" role="note">
+  <div>LAB MODE: connected to the OpenStack lab on this machine (a real Keystone, Nova and Cinder, with two LVM back-ends standing in for the two arrays). Changes are real, but only inside the lab. It is not a customer cloud, and it proves nothing about Queens, SolidFire or FlashArray.</div>
+</div>
+
 <main>
   <nav id="tabs" role="tablist">
     <button role="tab" data-tab="connect" class="active">1. Connect</button>
@@ -31,8 +35,9 @@
     <button role="tab" data-tab="audit">4. Audit</button>
     <button role="tab" data-tab="preflight">5. Pre-flight</button>
     <button role="tab" data-tab="select">6. Select</button>
-    <button role="tab" data-tab="reports">7. Reports</button>
-    <button role="tab" data-tab="live">8. Live</button>
+    <button role="tab" data-tab="move">7. Move</button>
+    <button role="tab" data-tab="reports">8. Reports</button>
+    <button role="tab" data-tab="live">9. Live</button>
     <button role="tab" data-tab="journal">Journal</button>
   </nav>
 
@@ -110,8 +115,13 @@
     <div class="actions inline">
       <label>Source back-end<select id="pf-source"><option value="">choose</option></select></label>
       <label>Target back-end<select id="pf-target"><option value="">choose</option></select></label>
+      <label>What OpenMove can reach<select id="pf-access">
+        <option value="api">The OpenStack APIs only (classes A and B, moved by Cinder)</option>
+        <option value="full">APIs, hosts and arrays (also class C, the staged method)</option>
+      </select></label>
       <button class="primary" id="pf-run">Run all pre-flight checks</button>
       <button class="secondary hidden" id="pf-demo-validate">Record lab validation (demo only)</button>
+      <button class="secondary hidden" id="pf-lab-approve" title="Lab only: records the lab validation of the lab release, attests the open items and signs as two lab users. A failed check still blocks.">Lab: validate, attest and sign the gate</button>
       <button class="secondary hidden" id="pf-demo-approve" title="Demonstration only: attests the open items and signs as two made-up people. A failed check still blocks.">Demo: attest and sign the gate</button>
     </div>
     <p class="muted">Needs the platform detected and the inventory read.</p>
@@ -150,6 +160,30 @@
     </div>
     <div class="table-wrap"><table id="risk-table"><thead><tr><th>Tick</th><th>Volume</th><th>Name</th><th>Class</th><th>Risk</th><th>Why</th><th>Cleared by</th></tr></thead><tbody></tbody></table></div>
     <div id="risk-advice"></div>
+  </section>
+
+  <section id="tab-move" class="panel hidden">
+    <h2>Move volumes with Cinder's retype</h2>
+    <p class="muted">Class A and B volumes are moved by Cinder itself: OpenMove locks the instance, sends one retype with on-demand migration, follows it, checks the result against the before-state and unlocks. It needs only the OpenStack APIs. Always run the dry run first: it reads the cloud and lists the exact calls, and changes nothing.</p>
+    <div id="mv-note" class="banner warn">A real run needs three things: a recorded lab validation of the OpenStack release (gate G0), an approved pre-flight gate, and no halt. Class C volumes are not moved here.</div>
+    <div class="actions inline">
+      <label>Target volume type<input id="mv-type" placeholder="empty: chosen if only one type fits"></label>
+      <button class="secondary" id="mv-dry">1. Dry run (changes nothing)</button>
+      <button class="primary" id="mv-start">2. Start the run</button>
+      <button class="secondary" id="mv-stop">Stop taking new volumes</button>
+      <button class="secondary" id="mv-refresh">Refresh</button>
+      <button class="secondary" id="mv-validate">Record lab validation (G0)</button>
+    </div>
+    <div class="actions inline">
+      <button class="secondary" id="mv-g23">Sign G2 and G3 (second person)</button>
+      <button class="secondary" id="mv-g4">Sign G4 (second person)</button>
+      <button class="secondary" id="mv-release">Release all for the retype</button>
+      <span id="mv-status" class="muted"></span>
+    </div>
+    <div id="mv-dry-view"></div>
+    <div id="mv-cards" class="cards"></div>
+    <div class="table-wrap"><table id="mv-table"><thead><tr><th>Volume</th><th>Class</th><th>Phase</th><th>G2</th><th>G3</th><th>G4</th><th>What is happening</th><th></th></tr></thead><tbody></tbody></table></div>
+    <p id="mv-more" class="muted"></p>
   </section>
 
   <section id="tab-reports" class="panel hidden">

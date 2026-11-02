@@ -38,6 +38,12 @@ from . import safety
 
 KIND = "phase"
 ORDER = ("precheck", "validate", "copy", "sync", "recheck", "cutover", "postcheck", "soak", "done")
+# Class A and B volumes can be moved by Cinder itself (a retype with on-demand migration). Cinder and Nova copy the data and switch the guest
+# in one operation that OpenMove cannot pause, so there is no copy, sync or recheck phase: the retype IS the cutover. G2 and G3 are signed
+# in the validate phase, before it. Rollback is a retype back (R3).
+RETYPE_ORDER = ("precheck", "validate", "cutover", "postcheck", "soak", "done")
+RETYPE = "retype"
+STAGED = "staged"
 ABORTED, ROLLBACK = "aborted", "rollback"
 MOVED_CLASSES = ("A", "B", "C")
 HELD_CLASSES = {
@@ -64,6 +70,8 @@ NEXT = {None: ("precheck",), "precheck": ("validate",), "validate": ("copy",), "
         ROLLBACK: ("done",)}
 # Giving up is always allowed before the cutover. After it the only way out is rollback.
 ABORTABLE = ("precheck", "validate", "copy", "sync", "recheck")
+NEXT_RETYPE = {None: ("precheck",), "precheck": ("validate",), "validate": ("cutover",),
+               "cutover": ("postcheck", ROLLBACK), "postcheck": ("soak", ROLLBACK), "soak": ("done", ROLLBACK), ROLLBACK: ("done",)}
 
 
 class LifecycleError(Exception):
@@ -101,13 +109,21 @@ def klass(h):
     return None
 
 
+def method_of(h):
+    """How the volume is moved: "retype" (Cinder moves it) or "staged" (OpenMove copies it). Set by the precheck; staged when not said."""
+    for e in h:
+        if e["phase"] == "precheck":
+            return RETYPE if e.get("method") == RETYPE else STAGED
+    return STAGED
+
+
 def _gate_anchor(h, gate):
     """The id of the event after which a sign-off of this gate counts. An earlier sign-off is void."""
     a = 0
     for e in h:
-        if gate == "G2" and e["phase"] == "copy":
+        if gate == "G2" and e["phase"] in ("copy", "validate"):
             a = e["id"]
-        elif gate == "G3" and (e["phase"] == "copy" or (e["phase"] == "sync" and e.get("regression"))):
+        elif gate == "G3" and (e["phase"] in ("copy", "validate") or (e["phase"] == "sync" and e.get("regression"))):
             a = e["id"]
         elif gate == "G4" and e["phase"] == "cutover":
             a = e["id"]
@@ -154,11 +170,14 @@ def sign_gate(journal, volume, gate_name, by, evidence, gate, withdraw=False, no
     if not withdraw:
         if len(evidence) < 8:
             raise LifecycleError("a sign-off needs a note of what was checked (at least 8 characters)")
-        if gate_name == "G2" and cur not in ("sync", "recheck"):
-            raise LifecycleError("G2 is signed after the copy is verified, while the volume is in sync or recheck; it is in %s" % (cur or "no phase"))
+        retype = method_of(h) == RETYPE
+        where = ("validate",) if retype else ("sync", "recheck")
+        if gate_name == "G2" and cur not in where:
+            raise LifecycleError("G2 is signed %s, while the volume is in %s; it is in %s" % (
+                "after validation, before the retype" if retype else "after the copy is verified", " or ".join(where), cur or "no phase"))
         if gate_name == "G3":
-            if cur not in ("sync", "recheck"):
-                raise LifecycleError("G3 is signed while the volume is in sync or recheck; it is in %s" % (cur or "no phase"))
+            if cur not in where:
+                raise LifecycleError("G3 is signed while the volume is in %s; it is in %s" % (" or ".join(where), cur or "no phase"))
             bad = [c["detail"] for c in readiness(journal, volume, gate, now, rules)
                    if not c["ok"] and c["name"] not in GATE_CONDITIONS.values() and c["name"] != "Newest recheck is recent"]
             if bad:
@@ -201,6 +220,8 @@ def readiness(journal, volume, gate, now=None, rules=None):
 
     try:
         h = history(journal, volume)
+        if method_of(h) == RETYPE:
+            return _readiness_retype(journal, volume, gate, h, out, add)
         in_phase = bool(h) and h[-1]["phase"] in ("recheck", "sync")
         add("In the recheck stage", in_phase, "the volume is in %s" % h[-1]["phase"] if h else "",
             "the volume is in phase %s, not in recheck" % (h[-1]["phase"] if h else "none"))
@@ -240,6 +261,22 @@ def readiness(journal, volume, gate, now=None, rules=None):
     return out
 
 
+def _readiness_retype(journal, volume, gate, h, out, add):
+    """The conditions for a retype: validated, no halt, gate approved, G2 and G3 signed by a second person. There are no rechecks:
+    Cinder and Nova copy and switch in one operation."""
+    add("In the validate stage", bool(h) and h[-1]["phase"] == "validate", "the volume is validated",
+        "the volume is in phase %s, not in validate" % (h[-1]["phase"] if h else "none"))
+    halt = safety.halted(journal)
+    add("No halt in force", not halt, "no halt", "all changes are halted by %s: %s" % ((halt or {}).get("by"), (halt or {}).get("reason")))
+    gate_ok = bool(gate) and gate.get("status") == "approved"
+    add("Gate approved right now", gate_ok, "the pre-flight gate is approved",
+        "the pre-flight gate is not approved: %s" % ((gate or {}).get("message") or "no pre-flight has run"))
+    for g, name in GATE_CONDITIONS.items():
+        s = gate_signed(journal, volume, g, gate, h)
+        add(name, s, "signed by %s" % (s or {}).get("by"), "%s is not signed by a second person (%s)" % (g, VOLUME_GATES[g].split(":")[0].lower()))
+    return out
+
+
 def cutover_ready(journal, volume, gate, now=None, rules=None):
     """(ok, reasons). The check that stands between a synchronised volume and the production path."""
     conds = readiness(journal, volume, gate, now, rules)
@@ -261,8 +298,11 @@ def enter(journal, volume, phase, evidence=None, gate=None, now=None, rules=None
         if len(str(evidence.get("reason") or "")) < 8:
             raise LifecycleError("an abort needs a reason")
         return _write(journal, volume, ABORTED, evidence, now)
-    if phase not in NEXT.get(cur, ()):
-        raise LifecycleError("%s cannot go from %s to %s; the order is %s" % (volume, cur or "nothing", phase, " > ".join(ORDER)))
+    h0 = history(journal, volume)
+    retype = method_of(h0) == RETYPE if h0 else evidence.get("method") == RETYPE
+    if phase not in (NEXT_RETYPE if retype else NEXT).get(cur, ()):
+        raise LifecycleError("%s cannot go from %s to %s; the order is %s" % (
+            volume, cur or "nothing", phase, " > ".join(RETYPE_ORDER if retype else ORDER)))
 
     if phase == "precheck":
         if not gate or gate.get("status") != "approved":
@@ -273,6 +313,10 @@ def enter(journal, volume, phase, evidence=None, gate=None, now=None, rules=None
             raise LifecycleError(HELD_CLASSES[cls])
         if cls not in MOVED_CLASSES:
             raise LifecycleError("the volume class (A, B or C) must be given; got %r" % (cls,))
+        if evidence.get("method") not in (None, RETYPE, STAGED):
+            raise LifecycleError("the method must be retype or staged")
+        if evidence.get("method") == RETYPE and cls not in ("A", "B"):
+            raise LifecycleError("only a class A or B volume can be moved by retype; a class C volume needs the staged method")
     elif phase == "validate":
         cls = klass(history(journal, volume))
         if evidence.get("room_ok") is False:
@@ -309,10 +353,15 @@ def enter(journal, volume, phase, evidence=None, gate=None, now=None, rules=None
         ok, why = cutover_ready(journal, volume, gate, now, rules)
         if not ok:
             raise LifecycleError("cutover refused: " + "; ".join(why))
+        if retype and evidence.get("before_state") is not True:
+            raise LifecycleError("cutover refused: the before-state of the volume and its instance was not captured")
     elif phase == "soak":
         s = gate_signed(journal, volume, "G4", gate)
         if not s:
             raise LifecycleError("the soak starts only after G4 (the cutover verified) is signed by a second person")
+        h = history(journal, volume)
+        if h and h[-1].get("ok") is False:
+            raise LifecycleError("the soak starts only when the post-check passed; it failed. The volume must be reversed")
         evidence["g4_by"] = s["by"]
         evidence["soak_days"] = max(1, int((rules or {}).get("soak_days") or 1))
     elif phase == "done":

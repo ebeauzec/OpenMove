@@ -36,6 +36,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="openmove", description="OpenMove %s" % __version__)
     ap.add_argument("--demo", action="store_true",
                     help="demonstration mode: a built-in cloud with made-up data, a temporary data folder")
+    ap.add_argument("--lab", action="store_true",
+                    help="lab mode: connect to the OpenStack lab on this machine (see tools/lab) and use the real engine")
+    ap.add_argument("--lab-reset", action="store_true", help="with --lab: forget the lab's journal and evidence first")
     ap.add_argument("--scenario", default=None, help="demonstration scenario (with --demo); see --list-scenarios")
     ap.add_argument("--list-scenarios", action="store_true", help="list the demonstration scenarios and exit")
     ap.add_argument("--host", default="127.0.0.1", help="address to listen on (default: this machine only)")
@@ -57,6 +60,12 @@ def main(argv=None):
             print("Note: --home is ignored in demonstration mode; a temporary folder is used.", flush=True)
         temp_home = tempfile.mkdtemp(prefix="openmove-demo-")
         home = Path(temp_home)
+    elif a.lab:
+        from . import lab as lab_mod
+        home = lab_mod.home_dir()
+        if a.lab_reset and home.exists():
+            shutil.rmtree(home, ignore_errors=True)
+        home.mkdir(parents=True, exist_ok=True)
     elif a.home:
         os.environ["OPENMOVE_HOME"] = a.home
     server, state = create_server(a.host, a.port, home)
@@ -71,11 +80,19 @@ def main(argv=None):
             shutil.rmtree(temp_home, ignore_errors=True)
             print(str(e), file=sys.stderr)
             return 2
+    if a.lab:
+        try:
+            lab_mod.connect(state)
+        except lab_mod.LabError as e:
+            server.server_close()
+            state.journal.close()
+            print(str(e), file=sys.stderr)
+            return 2
     port = server.server_address[1]
     shown = "127.0.0.1" if a.host in ("0.0.0.0", "::") else a.host
     url = "http://%s:%d/?token=%s" % (shown, port, state.token)
     say = lambda text: print(text, flush=True)
-    say("OpenMove %s%s" % (__version__, "  [DEMONSTRATION MODE: synthetic data, no real cloud]" if a.demo else ""))
+    say("OpenMove %s%s" % (__version__, "  [DEMONSTRATION MODE: synthetic data, no real cloud]" if a.demo else "  [LAB MODE: the OpenStack lab on this machine, not a customer cloud]" if a.lab else ""))
     say("Data folder: %s" % state.home)
     say("Open: %s" % url)
     say("Stop with Ctrl+C or by closing this window.")

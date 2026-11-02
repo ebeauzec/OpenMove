@@ -46,12 +46,15 @@ class AppState:
         self.extra = {}            # volume types, QoS, backups and project names from the last audit
         self.checks = None         # the latest pre-flight run
         self.demo = False
+        self.lab = False           # connected to the lab cloud (openmove/lab): a real OpenStack on this machine, not a customer cloud
         self.demo_cloud = None     # the built-in mock cloud, in demonstration mode
         self.demo_scenario = None  # id of the scenario it plays
         self.sim = None            # the simulated migration run, in demonstration mode
         self.selection = None      # the volumes chosen for the batch; None means every admitted volume (the default)
         self.options = None        # the operator's options; None means the defaults
         self.released = set()      # volumes the operator released for cutover
+        self.engine = None         # the migration engine (openmove/engine), created on first use
+        self.access = "api"        # what OpenMove can reach: "api" (the OpenStack APIs only) or "full" (also hosts and arrays)
         self.auto_sign = None      # demo only: the made-up second person who signs the volume gates
         self.extra_hosts = ()  # Host header values accepted besides loopback; set with --allow-host
         self._raw = None  # last API collection, kept so a back-end filter can be re-applied without calling the cloud
@@ -65,6 +68,9 @@ class AppState:
             self.servers, self.roots, self.extra = {}, (), {}
             self.selection = self.options = None
             self.released = set()
+            if self.engine:
+                self.engine.stop()
+                self.engine = None
 
 
 def make_handler(state, port_getter):
@@ -183,7 +189,7 @@ def api_status(state, body, query):
     with state.lock:
         g = _gate(state)
         return {"version": __version__, "home": str(state.home), "connected": state.session is not None,
-                "project": state.session.project_name if state.session else None, "demo": state.demo,
+                "project": state.session.project_name if state.session else None, "demo": state.demo, "lab": state.lab,
                 "demo_scenario": _demo_info(state), "halted": safety.halted(state.journal),
                 "platform": state.platform is not None, "inventory": state.inventory is not None,
                 "audit": state.audit is not None, "checks": state.checks is not None, "gate": g["status"] if g else None,
@@ -221,19 +227,47 @@ def api_demo_approve(state, body, query):
     A failed check still blocks: it cannot be waived."""
     if not state.demo:
         raise ApiError("not available outside demo mode", 404)
+    return _synthetic_approve(state, "Demo operator", "Demo reviewer", "demonstration", api_demo_validate)
+
+
+def api_lab_approve(state, body, query):
+    """Lab mode only: the same shortcut for the lab cloud, labelled as the lab's. It records the lab validation of the lab release
+    (gate G0, only for the lab's own profile), attests the open items and signs as two lab users. A failed check still blocks."""
+    if not state.lab:
+        raise ApiError("not available outside lab mode", 404)
+    return _synthetic_approve(state, "Lab operator", "Lab reviewer", "OpenMove lab", _lab_validate)
+
+
+def _lab_validate(state, body, query):
+    plat = _need(state, "platform")
+    rel = (plat.get("release") or {}).get("release")
+    prof = load_lab_profile(rel)
+    if not prof:
+        raise ApiError("the lab release %r has no lab profile; the engine will not change a release without one" % rel, 409)
+    profiles.record_validation(state.journal, rel, True, {"lab": True, "note": "OpenMove lab (a real OpenStack on this machine). This is not a validation of any customer release.",
+                                                       "by": "Lab operator", "second": "Lab reviewer"})
+    api_discover(state, {}, {})
+    return {"ok": True, "release": rel}
+
+
+def load_lab_profile(release):
+    return (profiles.load_profiles().get(release) or {}) if (profiles.load_profiles().get(release) or {}).get("lab") else None
+
+
+def _synthetic_approve(state, operator, reviewer, label, validate):
     c = _need(state, "checks")
     if (state.platform or {}).get("profile", {}).get("status") != "validated":
-        api_demo_validate(state, {}, {})
+        validate(state, {}, {})
     c = checks_run_again(state, c)
     g = _gate(state)
     if g["status"] == "blocked":
         raise ApiError("the gate is blocked, and a failed check cannot be waived: " + "; ".join(
             "%s %s" % (b["id"], b["title"]) for b in g["blockers"]), 409)
     for item in g["open_items"]:
-        gate_mod.attest(state.journal, c["source_backend"], c["target_backend"], item["id"], "Demo operator",
-                        "demonstration: synthetic attestation of an open item")
-    gate_mod.sign(state.journal, c["run_id"], "operator", "Demo operator")
-    gate_mod.sign(state.journal, c["run_id"], "reviewer", "Demo reviewer")
+        gate_mod.attest(state.journal, c["source_backend"], c["target_backend"], item["id"], operator,
+                        "%s: synthetic attestation of an open item" % label)
+    gate_mod.sign(state.journal, c["run_id"], "operator", operator)
+    gate_mod.sign(state.journal, c["run_id"], "reviewer", reviewer)
     return _checks_view(state)
 
 
@@ -397,6 +431,79 @@ def api_release(state, body, query):
     state.released |= set(ids)
     state.journal.record("release", "batch", {"by": by, "count": len(ids), "ids": ids[:50]})
     return api_live(state, {}, {})
+
+
+def _engine(state):
+    if state.demo:
+        raise ApiError("the engine does not run in demonstration mode; the simulation on the Live tab shows the process", 409)
+    _need(state, "checks")
+    if state.engine is None:
+        from .engine.runner import Engine
+        state.engine = Engine(state, lambda: make_permit(state, "engine"), lambda: _gate(state))
+    return state.engine
+
+
+def _refusals(fn):
+    """A permit that says no, or an unknown outcome, is a 409 with the reason, never a 500."""
+    from .engine.actions import OutcomeUnknown
+    try:
+        return fn()
+    except (safety.Refused, OutcomeUnknown, profiles.ReadOnlyRelease, gate_mod.GateClosed) as exc:
+        raise ApiError(str(exc), 409) from None
+
+
+def api_engine_get(state, body, query):
+    if state.engine is None:
+        return {"status": "idle", "ticks": 0, "queued": 0, "active": 0, "finished": 0, "failed": 0, "volumes": [], "more": 0, "access": state.access}
+    return dict(state.engine.view(), access=state.access)
+
+
+def api_engine_dry_run(state, body, query):
+    """What a run would do, from fresh reads. Reads only: it changes nothing and needs no permit."""
+    return _engine(state).dry_run(body.get("ids") or None, body.get("type_map") or None)
+
+
+def api_engine_start(state, body, query):
+    """Start moving the selected class A and B volumes by Cinder's retype. Needs a permit now: validated release, approved gate, no halt."""
+    by = (body.get("by") or "").strip()
+    if len(by) < 3:
+        raise ValueError("starting a run needs the name of the person who starts it")
+    e = _engine(state)
+    _refusals(lambda: e.start(body.get("ids") or None, body.get("type_map") or None))
+    state.journal.record("engine_start", "batch", {"by": by, "queued": len(e.queue), "resumed": len(e.active)})
+    return e.view()
+
+
+def api_engine_stop(state, body, query):
+    if state.engine:
+        state.engine.stop()
+    return api_engine_get(state, {}, {})
+
+
+def api_engine_reverse(state, body, query):
+    """Put a moved volume back with a retype to its first type (R3)."""
+    e = _engine(state)
+    e.reverse(str(body.get("id") or ""), body.get("reason"), body.get("by"))
+    return e.view()
+
+
+def api_validation(state, body, query):
+    """Record the lab validation of the release (gate G0): two different people say that the lab tests were run and what came out.
+    This is what lifts the read-only state of the release. Nothing is tested here: it is the people's declaration, kept in the journal."""
+    rel = (_need(state, "platform").get("release") or {}).get("release")
+    if not rel:
+        raise ApiError("the release is not identified", 409)
+    by, second = (body.get("by") or "").strip(), (body.get("second") or "").strip()
+    note = (body.get("evidence") or "").strip()
+    if len(by) < 3 or len(second) < 3 or by.lower() == second.lower():
+        raise ValueError("the validation needs two different people")
+    if len(note) < 40:
+        raise ValueError("describe what was tested and what came out (at least 40 characters): which lab tests, on which cloud, with which result")
+    passed = bool(body.get("passed"))
+    profiles.record_validation(state.journal, rel, passed, {"by": by, "second": second, "evidence": note, "environment": (body.get("environment") or "test")[:20],
+                                                           "auth_url": state.session.auth_url if state.session else None})
+    api_discover(state, {}, {})
+    return {"ok": True, "release": rel, "result": "passed" if passed else "failed"}
 
 
 def api_volume_gate(state, body, query):
@@ -681,11 +788,15 @@ def api_checks_run(state, body, query):
     tgt = body.get("target_backend") or None
     mk = risk_mod.marks(state.journal)
     cleared = risk_mod.active(state.journal, risk_mod.assess_all(inv["volumes"], state.servers, state.roots, mk))
-    result = checks_run.run_all(platform, inv, state.servers, state.roots, src, tgt, state.previous_ids, cleared, mk)
+    access = body.get("access") or state.access
+    if access not in checks_run.ACCESS_LEVELS:
+        raise ValueError("access must be 'api' or 'full'")
+    state.access = access
+    result = checks_run.run_all(platform, inv, state.servers, state.roots, src, tgt, state.previous_ids, cleared, mk, access)
     with state.lock:
         state.checks = result
     state.journal.record("preflight", result["run_id"], {
-        "source": src, "target": tgt, "counts": result["counts"], "admitted": len(result["admitted"]), "volumes": result["volumes_total"],
+        "source": src, "target": tgt, "counts": result["counts"], "admitted": len(result["admitted"]), "volumes": result["volumes_total"], "access": access,
         "fingerprint": result["fingerprint"]})
     return _checks_view(state)
 
@@ -854,7 +965,14 @@ ROUTES = {
     ("POST", "selection"): api_selection_set,
     ("POST", "release"): api_release,
     ("POST", "volume-gate"): api_volume_gate,
+    ("GET", "engine"): api_engine_get,
+    ("POST", "engine/dry-run"): api_engine_dry_run,
+    ("POST", "engine/start"): api_engine_start,
+    ("POST", "engine/stop"): api_engine_stop,
+    ("POST", "engine/reverse"): api_engine_reverse,
+    ("POST", "validation"): api_validation,
     ("POST", "demo/approve"): api_demo_approve,
+    ("POST", "lab/approve"): api_lab_approve,
     ("POST", "demo/simulate"): api_demo_simulate,
     ("POST", "demo/scenario"): api_demo_scenario,
     ("POST", "demo/db-export"): api_demo_dbexport,

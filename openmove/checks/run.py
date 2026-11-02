@@ -335,13 +335,29 @@ def fingerprint(source_backend, target_backend, volume_ids):
     return h.hexdigest()[:16]
 
 
-def run_all(platform, inventory, servers=None, root_volumes=(), source_backend=None, target_backend=None, previous_ids=None, clearances=None, marks=None):
-    """All the pre-flight checks. Returns the result stored for the gate and the reports."""
+ACCESS_LEVELS = ("api", "full")
+NEEDS_ARRAYS = ("P12", "P14", "P15")      # checks that only the staged method (class C) needs: the source array account, the target namespace, the clone call
+
+
+def run_all(platform, inventory, servers=None, root_volumes=(), source_backend=None, target_backend=None, previous_ids=None, clearances=None, marks=None,
+            access="api"):
+    """All the pre-flight checks. Returns the result stored for the gate and the reports.
+
+    access is what OpenMove can reach. "api": the OpenStack APIs only. Classes A and B are moved by Cinder itself (a retype), so they need nothing else;
+    class C needs a data mover host with both arrays and is NOT admitted. "full": also the hosts and the arrays, so class C is admitted."""
+    if access not in ACCESS_LEVELS:
+        raise ValueError("access must be one of %s" % (ACCESS_LEVELS,))
     free = None
     if target_backend:
         pools = [p for p in platform.get("backends", []) if p.get("backend") == target_backend and p.get("free_gb") is not None]
         free = int(sum(float(p["free_gb"]) for p in pools)) if pools else None
     plat = platform_checks(platform, source_backend, target_backend)
+    if access != "full":
+        for i, c in enumerate(plat):
+            if c["id"] in NEEDS_ARRAYS:
+                plat[i] = rec(c["id"], "info", "Not needed for this level of access",
+                              "OpenMove has the OpenStack APIs only. This check is needed only by the staged method for class C volumes, which are not migrated at this level.",
+                              "Not applicable. Classes A and B are moved by Cinder itself (a retype).", c["source"])
     risk_map = risk_mod.assess_all(inventory["volumes"], servers, root_volumes, marks)
     cleared = {v: s for v, s in (clearances or {}).items() if v in risk_map}
     vol_checks, per_volume = volume_checks(inventory, servers, root_volumes, target_backend, free, previous_ids, risk_map, cleared)
@@ -349,12 +365,13 @@ def run_all(platform, inventory, servers=None, root_volumes=(), source_backend=N
     run_id = now.strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(2)
     allc = plat + vol_checks
     counts = {s: sum(1 for c in allc if c["status"] == s) for s in STATUSES}
-    admitted = [v["id"] for v in inventory["volumes"]
-                if v.get("class") in ("A", "B", "C") and not any(s == "fail" for s in per_volume[v["id"]].values())]
+    clean = [v for v in inventory["volumes"] if v.get("class") in ("A", "B", "C") and not any(s == "fail" for s in per_volume[v["id"]].values())]
+    no_mover = [v["id"] for v in clean if v.get("class") == "C" and access != "full"]
+    admitted = [v["id"] for v in clean if v["id"] not in set(no_mover)]
     return {"run_id": run_id, "ran_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "source_backend": source_backend,
             "target_backend": target_backend, "fingerprint": fingerprint(source_backend, target_backend, [v["id"] for v in inventory["volumes"]]),
             "platform": plat, "volume": vol_checks, "later": later_phase_checks(), "counts": counts,
-            "volumes_total": len(inventory["volumes"]), "admitted": admitted,
+            "volumes_total": len(inventory["volumes"]), "admitted": admitted, "access": access, "no_mover": no_mover,
             "volume_status": {vid: worst(list(s.values())) for vid, s in per_volume.items()},
             "volume_ids": [v["id"] for v in inventory["volumes"]],
             "risk": {vid: dict(a, signature=risk_mod.signature(a), cleared=cleared.get(vid) == risk_mod.signature(a)) for vid, a in risk_map.items()}}

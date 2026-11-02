@@ -26,6 +26,7 @@ def start(state, port=0, scenario=DEFAULT):
         state.demo = True
         state.demo_cloud = cloud
         state.demo_scenario = scenario
+        state.access = "full"      # the demonstration simulates the staged method too, so it pretends the hosts and arrays are reachable
     state.journal.record("demo", "start", {"note": "demonstration cloud with synthetic data", "scenario": scenario,
                                            "roles": info["roles"]})
     state.journal.record("connect", "demo", {"auth_url": session.auth_url, "user": session.username,

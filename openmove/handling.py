@@ -135,6 +135,14 @@ CAUSES = {
                      ["Read the failed check in the pre-flight (the evidence is quoted in this record).",
                       "Fix the cause it names, for example a missing volume type, a snapshot that is not available, or too little room on the target.",
                       "Run the pre-flight again."], "Operator"),
+    "no_data_mover": ("No data mover: class C needs host and array access",
+                      "A volume with long-lived snapshots can be moved only by the staged method: its snapshot history is rebuilt on the target array from a host that reaches both arrays. "
+                      "Cinder cannot migrate a volume that has snapshots, and OpenMove has the OpenStack APIs only at this level of access.",
+                      SAFE_SRC, NO_TGT,
+                      ["Decide whether the history of snapshots must be kept. If it is not needed, ask the owner to delete the snapshots; the volume becomes class A and moves by retype.",
+                       "If it is needed: provide a Linux host that reaches both arrays (an existing cinder-volume host can be used), give OpenMove SSH access to it and the array accounts, "
+                       "set the access level to full, and run the pre-flight again.",
+                       "Until then leave the volume where it is: nothing was done to it."], "Application owner and cloud administrator"),
     "not_admitted": ("Not admitted to the migration",
                      "The volume is not in the list the pre-flight admitted.",
                      SAFE_SRC, NO_TGT, ["Run the pre-flight again and read the held-back list."], "Operator"),
@@ -238,7 +246,7 @@ def describe_cause(code):
     return {"code": code, "title": t[0], "why": t[1], "source": t[2], "target": t[3], "steps": list(t[4]), "who": t[5]}
 
 
-def held_back_cause(vol, failed_checks):
+def held_back_cause(vol, failed_checks, no_mover=False):
     """The cause of a volume that never started, from its class reason and its failed checks. failed_checks: [(id, title, evidence)]."""
     reason = str(vol.get("reason") or "")
     if vol.get("class") in ("D", "E"):
@@ -250,6 +258,8 @@ def held_back_cause(vol, failed_checks):
         return "risky_workload"
     if failed_checks:
         return "check_failed"
+    if no_mover:
+        return "no_data_mover"
     return "not_admitted"
 
 
@@ -312,7 +322,7 @@ def unmigrated(journal, inventory, checks, servers=None, project_names=None, hal
             outcome, code, how = "not started", ("halted" if halted else ("not_started" if gate_ok else "gate_closed")), "admitted, no phase recorded"
         else:
             outcome = "held back" if v.get("class") in ("D", "E") else "not admitted"
-            code = held_back_cause(v, failed.get(vid, []))
+            code = held_back_cause(v, failed.get(vid, []), vid in set((checks or {}).get("no_mover") or ()))
             how = v.get("reason")
         d = describe_cause(code)
         att = [servers.get(a.get("server_id"), {}).get("name") or a.get("server_id") or "" for a in v.get("attachments", [])]

@@ -48,6 +48,7 @@
     if (name === 'preflight') fillBackends();
     if (name === 'live') { pollLive(true); loadUnmigrated(true); }
     if (name === 'select') { loadSelection(); loadRisk(); }
+    if (name === 'move') loadMove();
     currentTab = name;
     drawWizard();
   }
@@ -92,6 +93,8 @@
       lastStatus = s;
       $('ver').textContent = 'v' + s.version;
       $('demo-banner').classList.toggle('hidden', !s.demo);
+      $('lab-banner').classList.toggle('hidden', !s.lab);
+      $('pf-lab-approve').classList.toggle('hidden', !s.lab);
       $('pf-demo-validate').classList.toggle('hidden', !s.demo);
       $('pf-demo-approve').classList.toggle('hidden', !s.demo);
       $('inv-demo-export').classList.toggle('hidden', !s.demo);
@@ -357,7 +360,7 @@
         sel.value = keep;
       });
       var d = lastStatus.demo_scenario;
-      if (d && !$('pf-source').value && !$('pf-target').value) { $('pf-source').value = d.source; $('pf-target').value = d.target; }
+      if (d && !$('pf-source').value && !$('pf-target').value) { $('pf-source').value = d.source; $('pf-target').value = d.target; $('pf-access').value = 'full'; }
     }).catch(function () {});
   }
 
@@ -448,6 +451,9 @@
     [['Pass', c.counts.pass], ['Info', c.counts.info], ['Warn', c.counts.warn], ['Fail', c.counts.fail], ['Not checked', c.counts.not_checked],
      ['Volumes admitted', c.admitted.length + ' of ' + c.volumes_total]].forEach(function (x) { cards.appendChild(card(x[0], x[1])); });
     v.appendChild(cards);
+    v.appendChild(el('p', { class: 'muted', text: c.access === 'full'
+      ? 'Access level: APIs, hosts and arrays. Class C volumes can be admitted.'
+      : 'Access level: the OpenStack APIs only. Classes A and B are moved by Cinder (a retype). ' + (c.no_mover && c.no_mover.length ? c.no_mover.length + ' class C volume(s) are held back: they need a data mover host and array access.' : '') }));
     if (g.blockers.length) {
       v.appendChild(el('h3', { text: 'Blocks the gate (fix these)' }));
       var ul = el('ul', { class: 'plain' });
@@ -503,7 +509,7 @@
   $('pf-run').addEventListener('click', function () {
     guard($('pf-run'), function () {
       attesting = null;
-      return api('POST', 'checks/run', { source_backend: $('pf-source').value, target_backend: $('pf-target').value })
+      return api('POST', 'checks/run', { source_backend: $('pf-source').value, target_backend: $('pf-target').value, access: $('pf-access').value })
         .then(function (c) { renderChecks(c); return refreshStatus(); });
     });
   });
@@ -513,6 +519,11 @@
     });
   });
 
+  $('pf-lab-approve').addEventListener('click', function () {
+    guard($('pf-lab-approve'), function () {
+      return api('POST', 'lab/approve', {}).then(function (r) { renderChecks(r); banner('ok', 'Lab: the open items were attested and the gate signed by two lab users. This is not a customer sign-off.'); return refreshStatus(); });
+    });
+  });
   $('pf-demo-approve').addEventListener('click', function () {
     guard($('pf-demo-approve'), function () {
       return api('POST', 'demo/approve', {}).then(function (r) { renderChecks(r); banner('ok', 'Demonstration: the open items were attested and the gate signed by two made-up people.'); return refreshStatus(); });
@@ -839,6 +850,69 @@
     guard($('sign-demo'), function () { return api('POST', 'demo/simulate', { action: 'autosign', on: !(lastLive && lastLive.auto_sign) }).then(renderLive); });
   });
   $('live-release').addEventListener('click', function () { releaseVolumes({ all: true }, $('live-release')); });
+
+  // ---- move (the engine) ----
+  var moveTimer = null;
+  function typeMap() { var t = $('mv-type').value.trim(); return t ? { '*': t } : {}; }
+  function drawMove(m) {
+    var cards = $('mv-cards'); clear(cards);
+    [['Run', m.status], ['Queued', m.queued], ['Active', m.active], ['Finished', m.finished], ['Failed', m.failed]].forEach(function (x) { cards.appendChild(card(x[0], x[1])); });
+    var tb = $('mv-table').tBodies[0]; clear(tb);
+    (m.volumes || []).forEach(function (r) {
+      var act = el('td');
+      if (r.reversible) {
+        var b = el('button', { class: 'secondary', text: 'Reverse' });
+        b.addEventListener('click', function () {
+          var by = window.prompt('Reverse ' + r.id + ' with a retype back.' + String.fromCharCode(10, 10) + 'Your name:'); if (!by) return;
+          var why = window.prompt('Reason (at least 8 characters):'); if (!why) return;
+          guard(b, function () { return api('POST', 'engine/reverse', { id: r.id, by: by.trim(), reason: why.trim() }).then(drawMove); });
+        });
+        act.appendChild(b);
+      }
+      tb.appendChild(el('tr', {}, [el('td', { text: r.id }), el('td', { text: r.class || '' }), el('td', { text: r.phase }),
+        el('td', { text: r.gates.G2 ? 'signed' : '' }), el('td', { text: r.gates.G3 ? 'signed' : '' }), el('td', { text: r.gates.G4 ? 'signed' : '' }),
+        el('td', { text: r.note || '' }), act]));
+    });
+    $('mv-more').textContent = m.more ? m.more + ' more volume(s) not shown.' : '';
+    $('mv-status').textContent = m.halted ? 'HALTED by ' + m.halted.by + ': ' + m.halted.reason : '';
+    if (moveTimer) { clearTimeout(moveTimer); moveTimer = null; }
+    if (m.status === 'running' && currentTab === 'move') moveTimer = setTimeout(loadMove, 4000);
+  }
+  function loadMove() { return api('GET', 'engine').then(drawMove).catch(function () {}); }
+  function drawDry(d) {
+    var v = $('mv-dry-view'); clear(v);
+    v.appendChild(el('div', { class: 'banner ok', text: 'Dry run: ' + d.counts.ok + ' ready, ' + d.counts.wait + ' waiting, ' + d.counts.blocked + ' blocked. ' + d.note }));
+    var t = el('table', {}, [el('thead', {}, [el('tr', {}, ['Volume', 'Class', 'Result', 'Target type', 'Why or what would be sent'].map(function (h) { return el('th', { text: h }); }))]), el('tbody')]);
+    d.volumes.forEach(function (r) {
+      var why = r.error ? r.error : r.checks.filter(function (c) { return !c.ok; }).map(function (c) { return c.detail; }).join('; ');
+      var calls = (r.calls || []).map(function (c) { return c.what + '  (undo: ' + c.undo + ')'; }).join(String.fromCharCode(10));
+      var td = el('td', { text: why || calls }); td.style.whiteSpace = 'pre-wrap';
+      t.tBodies[0].appendChild(el('tr', {}, [el('td', { text: r.id }), el('td', { text: r.class || '' }), el('td', { text: r.verdict }), el('td', { text: r.target_type || '' }), td]));
+    });
+    v.appendChild(el('div', { class: 'table-wrap' }, [t]));
+  }
+  $('mv-dry').addEventListener('click', function () {
+    guard($('mv-dry'), function () { return api('POST', 'engine/dry-run', { type_map: typeMap() }).then(drawDry); });
+  });
+  $('mv-start').addEventListener('click', function () {
+    var by = window.prompt('Start the real run. Volumes are changed in the cloud.' + String.fromCharCode(10, 10) + 'Your name:'); if (!by || by.trim().length < 3) return;
+    guard($('mv-start'), function () { return api('POST', 'engine/start', { by: by.trim(), type_map: typeMap() }).then(function (m) { drawMove(m); banner('ok', 'The run has started. Nothing is sent for a volume until G2 and G3 are signed by a second person.'); }); });
+  });
+  $('mv-stop').addEventListener('click', function () { guard($('mv-stop'), function () { return api('POST', 'engine/stop', {}).then(drawMove); }); });
+  $('mv-refresh').addEventListener('click', loadMove);
+  $('mv-release').addEventListener('click', function () { releaseVolumes({ all: true }, $('mv-release')); });
+  $('mv-g23').addEventListener('click', function () { signGates(['G2', 'G3'], $('mv-g23')); });
+  $('mv-g4').addEventListener('click', function () { signGates(['G4'], $('mv-g4')); });
+  $('mv-validate').addEventListener('click', function () {
+    var nl = String.fromCharCode(10, 10);
+    var by = window.prompt('Gate G0: record that the lab tests for this OpenStack release were run and passed. This lifts the read-only state of the release.' + nl + 'Your name:'); if (!by) return;
+    var second = window.prompt('The second person (a different person):'); if (!second) return;
+    var ev = window.prompt('What was tested, on which cloud, with what result (at least 40 characters):'); if (!ev) return;
+    guard($('mv-validate'), function () {
+      return api('POST', 'validation', { by: by.trim(), second: second.trim(), evidence: ev.trim(), passed: true, environment: 'test' })
+        .then(function (r) { banner('ok', 'Recorded the lab validation of ' + r.release + '. Run the pre-flight again.'); return refreshStatus(); });
+    });
+  });
   $('live-table').addEventListener('click', function (e) {
     var tr = e.target.closest ? e.target.closest('tr') : null;
     if (!tr || !tr.getAttribute('data-id') || e.target.tagName === 'BUTTON') return;

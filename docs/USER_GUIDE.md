@@ -115,7 +115,7 @@ The enterprise scenario shows both copy modes: choosing `pure-prod` as the desti
 5. **6. Reports**: build the *Pre-migration report (Word)* and the *Environment audit (Word)*. Open them in Word.
 6. **7. Live**: press *Start the simulated migration*. Watch the overall progress, the pipeline, the per-volume progress and the event feed. Point out a refused early cutover, a volume sent back to sync because its source changed, and a copy that failed verification and was aborted with the source untouched. Press **HALT** to show everything pause, and *Resume* to continue.
 
-The simulated migration uses made-up evidence and a virtual clock, but the real order, gate and halt rules. It sends nothing to any system. The real migration engine is not built yet.
+The simulated migration uses made-up evidence and a virtual clock, but the real order, gate and halt rules. It sends nothing to any system. The real engine is on the Move tab (section 4).
 
 ## 4. A tour of the screens
 
@@ -127,8 +127,9 @@ The simulated migration uses made-up evidence and a virtual clock, but the real 
 | **4. Audit** | Press *Run the audit*. | A full audit of the environment, with findings ranked by severity. |
 | **5. Pre-flight** | Choose the source and target back-end and press *Run all pre-flight checks*. Attest open items and sign. | Runs every check, shows the gate and the copy plan. |
 | **6. Select** | Choose which volumes migrate, by volume or by group, and look at the settings. Clear or mark workloads that may break. | Shows what is selected and why anything is not. Refuses what is not allowed. |
-| **7. Reports** | Enter the customer and your name, choose what to include, press a button. | Builds a Word report and your browser saves it. Includes *Volumes not migrated*. |
-| **8. Live** | Watch. | Shows progress, the order, the gate, the halt, the events and the volumes not migrated. |
+| **7. Move** | Run the dry run, then the real run; sign G2, G3 and G4 as a second person; reverse a volume. | Moves class A and B volumes with Cinder's retype. Nothing is sent before the dry run is looked at, the release has a recorded lab validation (gate G0), the gate is approved and a second person has signed G2 and G3. |
+| **8. Reports** | Enter the customer and your name, choose what to include, press a button. | Builds a Word report and your browser saves it. Includes *Volumes not migrated*. |
+| **9. Live** | Watch. | Shows progress, the order, the gate, the halt, the events and the volumes not migrated. |
 | **Journal** | Read. | Lists what OpenMove recorded. |
 
 **Back and Next.** A bar at the bottom of every screen walks through the numbered steps in order (Back and Next name the step they lead to). The tabs at the top still work for jumping. The Journal is not a step; Back returns from it to the last step.
@@ -237,6 +238,15 @@ Some customers cannot provide a migration host. OpenMove is designed to work wit
 * **Relay**: the host of the source back-end reads, the host of the target back-end writes, and the two exchange the data directly.
 
 By default nothing is installed on a production host; anything that would change a host is a plan step that needs approval, and a site can forbid it. Whether each host really reaches its array is *not checked* until the engine can test it, and stays an open item for you to attest.
+
+### The access level: OpenStack APIs only
+
+On the Pre-flight tab, "What OpenMove can reach" says how much OpenMove has:
+
+* **The OpenStack APIs only** (default). This is enough for class A and class B volumes: Cinder moves them itself, with a retype that uses Nova's live block copy. OpenMove needs only the Keystone, Cinder and Nova endpoints and an administrator account. Class C volumes (long-lived snapshots) are **not admitted**: they appear in the unmigrated report with the cause "No data mover" and the steps to resolve it. The checks that only the staged method needs (P12, P14, P15) show as "not needed".
+* **APIs, hosts and arrays.** Also admits class C, which needs a Linux host that reaches both arrays, SSH access to it, and the array accounts.
+
+The level changes nothing in the cloud; it only decides which volumes the pre-flight admits.
 
 ## 10. Where data is kept
 

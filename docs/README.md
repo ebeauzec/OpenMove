@@ -10,6 +10,7 @@
 | `API_CALLS.md` | Every call OpenMove makes to a cloud, every call its local interface accepts and every journal event, with the rules each must obey. For review. |
 | `CLASSES.md` | Each volume class: what is enforced today, what the engine must still do, and why a volume might not be migrated. |
 | `WORKLOAD_RISKS.md` | Workloads that may fail this migration (legacy Windows, clusters, databases and more), how sure we are of each, whether OpenMove can see it, and what it does. |
+| `LAB.md` | The OpenMove lab: a real OpenStack (DevStack) on this machine for the real engine, what it proves and what it does not, and how to use it. |
 | `PLAYBOOK_TRACE.md` | Playbook v1.2 step by step: what OpenMove covers, what is only checked, what is not built, and the gaps. |
 | `ENGINE_PLAN.md` | The plan for building the migration engine for a test environment: milestones, what fakes can prove, what only a lab can prove, and what the environment must provide. |
 | `SAFETY.md` | The safety case: hazards, the control for each, where it is in the code, which test proves it, and what is not yet built. |

@@ -2,7 +2,7 @@
 
 This document describes, in the order they happen, what OpenMove does and what it will not do. It is written to be reviewed: every step names what it reads, what it changes (nothing, until the cutover) and what happens when it fails. `API_CALLS.md` lists every call. `SAFETY.md` lists the hazards and the control for each. `MIGRATION_METHOD.md` is the playbook summary the process is built on.
 
-**Status of this document.** Sections 1 to 3 describe what the program does today (version 0.4.0: read, audit, check, report; nothing is changed in any cloud). Sections 4 to 6 describe the migration process the engine must follow. The order in section 4 is already enforced in code (`openmove/lifecycle.py`, with tests); the steps that move data are not built yet and are marked **planned**.
+**Status of this document.** Sections 1 to 3 describe what the program does today (read, audit, check, report). Sections 4 to 6 describe the migration process. The order in section 4 is enforced in code (`openmove/lifecycle.py`, with tests). Since version 0.5.0 the engine moves class A and B volumes by Cinder's retype (section 5a); the staged method for class C is still **planned**.
 
 ## The rule
 
@@ -223,9 +223,30 @@ In demonstration mode the **Start the simulated migration** button drives this v
 * Anyone may press Halt; only a named person with a reason may resume.
 * The tool never decides a human question. Where the playbook says a person decides, the tool stops and says so.
 
+## 5a. Class A and B: the retype order
+
+Class A and B volumes are moved by Cinder itself, with a retype that uses on-demand migration. Cinder asks Nova to copy the volume to the target back-end and to switch the guest to the new device in one operation that OpenMove cannot pause. So there is no copy, sync or recheck phase, and the retype is the cutover. The order is fixed by `lifecycle.RETYPE_ORDER`:
+
+`precheck` > `validate` > `cutover` > `postcheck` > `soak` > `done`; the way back is `rollback` (a retype back, R3). An abort is possible only before the cutover.
+
+| Step | What the engine does | What it will not do |
+|---|---|---|
+| precheck | Needs an approved gate. Records the class, the method, the source and target back-end and type. | Start a class C volume (it needs the staged method). |
+| validate | Reads the volume, its snapshots and its instance afresh and checks them. A class B volume with snapshots left waits for the rotation (up to 72 hours, then it is given up with the reason). Any other failure gives the volume up. | Move a volume with snapshots, encrypted, multi-attach, replicated, in a group, in a move already, or whose instance is not running and idle. |
+| G2 and G3 | Waits for a second person, who is not the operator, to sign both. | Send anything before they are signed. |
+| release | If the volume is held (the setting, or a high workload risk) waits for a person's release. | |
+| cutover | Reads everything again; if anything changed, gives the volume up. Records the before-state, enters `cutover`, locks the instance (C1), sends the retype (C3), and follows it by reading the volume every few seconds. | Send a second retype, ever. |
+| after the retype | Success means migration status `success`, the target back-end, the target type and the first status. A failed move in the cloud (migration status `error`, the volume still usable) is rolled back. A volume in an error status halts everything. A retype running longer than 6 hours halts everything. | Decide alone about a volume in an error status. |
+| postcheck | Compares with the before-state: status, size, attachments, bootable, instance running. If it passes, unlocks the instance (C2). If it fails, halts and leaves the instance locked. | Start the soak after a failed post-check. |
+| G4 | Waits for a second person to sign G4. | |
+| soak | The source is already gone (Cinder deletes it after the migration), so the soak is an observation period for the rollback. After the set days the volume is `done`. | |
+| rollback | A person asks for it (the Reverse button), or a failure leads to it. The engine waits for any move to end, retypes back if the volume is not on its first type, unlocks, and records `done`. | |
+
+The gates G2 and G3 are signed while the volume is in `validate`. A halt stops the engine at the next tick, also while it waits for an unknown answer to be read back.
+
 ## 6. What is not built yet
 
-* Everything that moves data: the data mover, the staging copy, the history rebuild, the sync, the cutover and the rollbacks. The order and the permit that guard them are built and tested.
+* The staged method for class C: the data mover, the staging copy, the history rebuild, the sync and its rollbacks. The retype path for class A and B is built (section 5a) and tested against a mock cloud.
 * The checks that need an array, a Cinder host, a compute host or the Cinder database. They show as "not checked" and need an attestation, never a pass.
 * Lab validation (playbook Phase 0). No release profile is marked validated; every real cloud is read only until a passed lab validation is recorded.
-* Nothing in this release has been run against a real cloud. The demonstration uses a built-in mock cloud.
+* Nothing in this release has been run against a real cloud. The demonstration and the engine tests use a built-in mock cloud.

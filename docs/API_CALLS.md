@@ -2,8 +2,8 @@
 
 Every call OpenMove makes or accepts, in one place, so it can be reviewed line by line. Three groups:
 
-1. **Outbound calls to the cloud** (section 2). In this release there are 14 distinct calls. Thirteen are reads; the fourteenth is the login, a `POST` that creates a token and changes nothing.
-2. **Outbound calls that change the cloud** (section 3). None exist in this release. The rules every future one must obey are fixed here first.
+1. **Outbound calls to the cloud** (section 2). In this release there are 17 distinct read calls and the login, a `POST` that creates a token and changes nothing.
+2. **Outbound calls that change the cloud** (section 3). Three exist in this release (lock, unlock, retype), used only for class A and B volumes. The rules every one must obey are fixed here.
 3. **The local interface** (section 4): the calls the browser makes to OpenMove on this machine.
 
 Section 5 lists the events OpenMove writes to its journal. Section 6 lists everything it writes to disk.
@@ -25,7 +25,7 @@ A test (`tests/test_docs_sync.py`) fails when the code makes a call, serves a ro
 
 Every call below sends `Accept: application/json`. Calls to the services also send `X-Auth-Token`. Calls marked "unauthenticated" send no token.
 
-## 2. Calls to the cloud today (all reads)
+## 2. Calls to the cloud that read
 
 `{auth}` is the Keystone v3 URL (the address typed on the Connect tab, with `/v3` added if missing). `{block}` and `{compute}` are the endpoints from the service catalogue, chosen by service type (block storage: `volumev3`, `block-storage`, `volumev2`, `volume`, in that order; compute: `compute`) and by the interface and region on the Connect tab.
 
@@ -45,6 +45,9 @@ Every call below sends `Accept: application/json`. Calls to the services also se
 | B5 | `GET {block}/types` | any | Volume types and their extra specs (back-end name, QoS, features). Audit finding A19 and the report. | Warning. |
 | B6 | `GET {block}/qos-specs` | administrator | QoS specifications. The audit and the report. | Warning. |
 | B7 | `GET {block}/backups/detail?all_tenants=1&limit=500[&marker=<id>]` | administrator | Backups: status, size, age. Audit finding A18. | Warning. |
+| B8 | `GET {block}/volumes/{id}` | administrator | One volume, read afresh by the engine before and after each step: status, migration status, back-end, type, size, attachments, bootable. | The engine does not continue with that volume; it looks again at the next tick. |
+| B9 | `GET {block}/snapshots/detail?volume_id={id}&all_tenants=1` | administrator | The snapshots of one volume, read afresh before a move (class A and B are moved only with none). | As B8. |
+| N3 | `GET {compute}/servers/{id}`, with compute microversion 2.9 so that the lock state is shown | administrator | One instance, read before a move (running, idle, locked) and after it. | As B8. |
 
 Notes:
 
@@ -53,24 +56,32 @@ Notes:
 * Page size is 500; the marker is the id of the last item of the previous page.
 * No call is ever made to a Cinder host, a compute host or an array in this release. Those need SSH or an array API and arrive with the migration engine (section 3).
 
-## 3. Calls that change the cloud (none yet)
+## 3. Calls that change the cloud
 
-The migration engine is not built. When it is, every change goes through `OpenStackSession.mutate(permit, ...)` and obeys `SAFETY.md`: permit checked per call, step intent written to the journal before the call and its result after, an inverse recorded for every step, no retry of an unknown outcome, and the order of `PROCESS.md` section 4 enforced by `openmove/lifecycle.py`.
+Every change goes through `OpenStackSession.mutate(permit, ...)` and obeys `SAFETY.md`: a permit checked for each call (release validated, gate approved, no halt), the step's intent and its inverse written to the journal before the call and its result after, no retry of an unknown outcome, and the order of `PROCESS.md` enforced by `openmove/lifecycle.py`. All of it is in one file, `openmove/engine/actions.py`.
 
-The calls below are **candidates** taken from the owner's playbook. They are listed so they can be reviewed before any of them is written, not because they exist. The exact list is fixed when the engine is built and is proven in the lab (playbook Phase 0, tests T1 to T21) before a release profile can be marked validated.
+| ID | Call | Needs | Used for | Inverse | If it fails |
+|---|---|---|---|---|---|
+| C1 | `POST {compute}/servers/{id}/action` with `{"lock": null}` | administrator | Locks the instance that uses the volume, so that nobody changes it while the volume moves (playbook 3.2). Skipped if the instance is already locked by someone else. | C2 | A refusal by the cloud: nothing is moved, the volume is marked rolled back. |
+| C2 | `POST {compute}/servers/{id}/action` with `{"unlock": null}` | administrator | Unlocks the instance after the post-check passed, or after a rollback. Only an instance that OpenMove locked. | C1 | The step is retried at the next tick; the instance stays locked until it works. |
+| C3 | `POST {block}/volumes/{id}/action` with `{"os-retype": {"new_type": T, "migration_policy": "on-demand"}}` | administrator | The move itself (playbook 3.3): Cinder asks Nova to copy the volume to the target back-end and switch the guest, with the instance running. The same call, with the first type, is the rollback (R3). | C3 with the first type | A refusal (4xx): nothing was moved. A lost answer or a 5xx: the outcome is unknown, everything halts, and the volume is read back before anything else is done. |
+
+A call is never repeated by the engine. After an answer is lost, the next tick reads the volume (B8) and closes the open step with what the cloud shows: moving or moved is "done", unchanged is "failed" and the volume is rolled back.
+
+### Still candidates (class C, the staged method)
+
+These are taken from the owner's playbook, are **not** implemented, and are listed so they can be reviewed before any of them is written. They need a data mover host and the arrays, so they are only for the `full` access level.
 
 | Step (see `PROCESS.md`) | Candidate call | Changes |
 |---|---|---|
 | Cutover, attached volume | Nova volume swap: `PUT {compute}/servers/{server}/os-volume_attachments/{volume}` | The instance's disk is copied to the destination by the hypervisor and switched, with the instance running. |
 | Cutover, completion | Cinder migration completion for the pair of volume records | The two Cinder records swap. The volume keeps its id and gains the destination as its backing volume. |
 | Freeze and unfreeze | Setting the migration status of the source record (through Cinder's own interfaces on the Cinder host) | The source record stops accepting changes during the cutover and is released after. |
-| Lock | `POST {compute}/servers/{server}/action` with `lock` and `unlock` | Prevents other operations on the instance during the cutover. |
-| Detached volumes | Cinder's standard retype or migrate (`POST {block}/volumes/{volume}/action`) | Moves a class A volume. |
 | Destination record and cleanup | Cinder's object layer and `cinder-manage`, on a Cinder host, over SSH | Creates and, on rollback, removes the destination record. |
 | Copy | A self-contained data mover script run on a Cinder host over SSH, reading the source array and writing the target array | Writes the staging volume on the target array. Reads the source only. |
 | Array calls | The source array's snapshot-clone call; the target array's volume and snapshot calls | Creates clones and the staging volume. Never writes to a source volume. |
 
-A change that cannot be undone is shown as such in the plan and needs its own approval. The cutover and the cleanup after the soak period are the only two.
+A change that cannot be undone is shown as such in the plan and needs its own approval.
 
 ## 4. The local interface
 
@@ -91,7 +102,7 @@ Protection: every `/api/` call needs the per-run token (printed at start-up and 
 | `GET /api/journal` | Recent journal events (long lists are summarised). | filters | no |
 | `POST /api/audit/run` | The full environment audit: B1 to B7, K3 and the inventory calls. | optional back-end | no |
 | `GET /api/audit` | The last audit. | | no |
-| `POST /api/checks/run` | Run the pre-flight checks for a source and target back-end. Makes no cloud call. | source back-end, target back-end | no |
+| `POST /api/checks/run` | Run the pre-flight checks for a source and target back-end. Makes no cloud call. | source back-end, target back-end, access level (`api` or `full`) | no |
 | `GET /api/checks` | The last pre-flight run, its gate and attestations. | | no |
 | `POST /api/checks/attest` | Attest (or withdraw) a check that is a warning or not checked. Needs a name and at least 8 characters of evidence. | check id, name, note, withdraw | no |
 | `POST /api/checks/signoff` | Sign the gate as operator or reviewer. Two different people are needed. | role, name | no |
@@ -108,6 +119,13 @@ Protection: every `/api/` call needs the per-run token (printed at start-up and 
 | `GET /api/risk` | The volumes that host a workload with a known risk, the reasons, the advice, and who has cleared or marked them (`WORKLOAD_RISKS.md`). | | no |
 | `POST /api/risk/clear` | Record one person's clearance of a high-risk volume, as operator or as reviewer, or withdraw it. Needs a name and evidence of at least 20 characters. Runs the pre-flight again. | ids, role, name, evidence, withdraw | no |
 | `POST /api/risk/mark` | Mark volumes, by id or group, as a risk from what the customer knows, or withdraw a mark. Needs a name and a reason. Runs the pre-flight again. | ids, group, name, note, withdraw | no |
+| `GET /api/engine` | The engine's state for the Move screen: counters, and one row per volume with its phase, signed gates and what is happening. Read from the journal; makes no cloud call. | | no |
+| `POST /api/engine/dry-run` | The dry run: fresh reads (B8, B9, N3, B5) of the selected class A and B volumes, the checks, and the exact changes a run would make with their undo. Sends nothing that changes anything; needs no permit. | target type (optional), ids (optional) | no |
+| `POST /api/engine/start` | Start the real run of the selected class A and B volumes. Needs a permit now (validated release, approved gate, no halt) and a name. Nothing is sent for a volume until G2 and G3 are signed by a second person. | name, target type, ids | yes (C1, C2, C3) |
+| `POST /api/engine/stop` | Stop taking new volumes. A retype already sent carries on in the cloud. | | no |
+| `POST /api/engine/reverse` | Put a moved volume back with a retype to its first type (R3). Needs a name and a reason. | id, name, reason | yes (C3) |
+| `POST /api/validation` | Record the lab validation of the release (gate G0): two different people declare which lab tests were run, where, and the result. Lifts the read-only state of the release. | name, second person, evidence, passed, environment | no |
+| `POST /api/lab/approve` | Lab mode only: record the lab validation of the lab release (only for a release whose profile is marked as a lab), attest the open items and sign as two lab users, labelled as the lab's. A failed check still blocks; it cannot be waived. | | no |
 | `POST /api/demo/validate` | Demo mode only: record a labelled, synthetic lab validation. | | no |
 | `POST /api/demo/approve` | Demo mode only: attest the open items and sign as two made-up people, labelled synthetic. A failed check still blocks; it cannot be waived. | | no |
 | `POST /api/demo/simulate` | Demo mode only: start or stop a simulated migration run with made-up evidence and a virtual clock. It uses the real lifecycle, gate and halt rules and sends nothing to any system. It cannot start unless the gate is approved. | action (`start` or `stop`) | no |
@@ -140,6 +158,10 @@ The journal is a local SQLite file (`journal.db`). It is append-only in normal u
 | `release` | A person releases volumes held before the cutover. | Volume ids, name. |
 | `risk_clearance` | A person clears, or withdraws the clearance of, a high-risk volume. | Volume, role, name, evidence, the risk signature. |
 | `risk_mark` | A person marks a volume as a risk, or withdraws the mark. | Volume, name, note. |
+| `engine_dry_run` | A dry run is made. | Counts of volumes ready, waiting and blocked. |
+| `engine_run` | A real run starts. | Volumes queued and resumed, the type map. |
+| `engine_start` | A person starts a run. | Name, queued and resumed counts. |
+| `lab` | Lab mode connects to the lab cloud. | Address, roles, a note that it is not a customer cloud. Never the password. |
 | `demo` | Demo mode starts, or a simulated run starts. | Scenario, or the simulation note. |
 
 ## 6. What OpenMove writes to disk
@@ -148,5 +170,6 @@ The journal is a local SQLite file (`journal.db`). It is append-only in normal u
 |---|---|
 | `journal.db` (and `-wal`, `-shm`) in the data folder | The journal above. The data folder is the user's application-data folder, or the folder given with `--home`, or a throw-away temporary folder in demo mode. |
 | Reports | Only where the browser saves a download. OpenMove keeps no copy. |
+| `evidence/<volume id>/` in the data folder | Per volume the engine moves: `validated.json`, `before.json`, `after.json`, `calls.jsonl` (every change sent or refused, with time and result) and, after a failure or a reverse, `failed.json` or `after-reverse.json`. Cloud answers only; never a password or token. |
 
 OpenMove writes nothing on any Cinder host, compute host or array in this release.

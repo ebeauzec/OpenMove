@@ -20,7 +20,8 @@ The playbook is the authority. `MIGRATION_METHOD.md` is the working summary. Thi
 | Method, classes A to E, check catalogue, gates, rollback rules, failure modes (documents) | written |
 | Discovery, inventory, classification, pre-flight checks, reports, the rules that order a migration, the safety layer, the GUI | **built** (mock cloud and demo only) |
 | Phase 0: the 21 lab tests T1 to T21 as guided, recorded procedures | **not built** (only the record that gate G0 passed is kept) |
-| Phases 3, 4, 5 and the rollbacks R1 to R3 as actions that change the cloud | **not built**. The demo simulates them. |
+| Phase 3 (retype of class A and B) and rollback R3 as actions that change the cloud | **built** against a mock cloud (`openmove/engine`), not run on a real cloud |
+| Phases 4, 5 and the rollbacks R1, R2 as actions that change the cloud | **not built**. The demo simulates them. |
 | Per-volume gate sign-offs G2, G3, G4 by a second person | built (see "Gaps that matter") |
 | Anything run against a real cloud or a real array | **never done** |
 

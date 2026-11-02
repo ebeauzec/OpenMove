@@ -251,5 +251,89 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(L.summary(self.j, [V, "vol-2", "vol-3"]), {"sync": 1, "precheck": 1, "not started": 1})
 
 
+class RetypeOrderTests(unittest.TestCase):
+    """Class A and B volumes moved by Cinder's retype: precheck, validate, G2 and G3, cutover (the retype), post-check, G4, soak."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.j = Journal(Path(self.dir.name) / "j.db")
+
+    def tearDown(self):
+        self.j.close()
+        self.dir.cleanup()
+
+    def to_validate(self, cls="A"):
+        L.enter(self.j, V, "precheck", {"class": cls, "method": "retype"}, gate=GATE, now=at(0))
+        L.enter(self.j, V, "validate", {"snapshots_now": 0}, now=at(1))
+
+    def sign(self, *gates):
+        for g in gates:
+            L.sign_gate(self.j, V, g, SECOND, "checked the before-state and the target", GATE, now=at(2))
+
+    def test_the_short_order_works_end_to_end(self):
+        self.to_validate()
+        self.assertEqual(L.method_of(L.history(self.j, V)), "retype")
+        self.sign("G2", "G3")
+        L.enter(self.j, V, "cutover", {"before_state": True}, gate=GATE, now=at(3))
+        L.enter(self.j, V, "postcheck", now=at(10))
+        L.sign_gate(self.j, V, "G4", SECOND, "the guest is healthy on the new back-end", GATE)
+        L.enter(self.j, V, "soak", gate=GATE, now=at(11))
+        L.enter(self.j, V, "done", now=at(11 + 60 * 24 * 7))
+        self.assertEqual(L.phase_of(self.j, V), "done")
+
+    def test_there_is_no_copy_sync_or_recheck(self):
+        self.to_validate()
+        for target in ("copy", "sync", "recheck"):
+            with self.assertRaises(L.LifecycleError, msg=target):
+                L.enter(self.j, V, target, {"validated": True}, gate=GATE, now=at(3))
+
+    def test_cutover_needs_g2_and_g3_from_a_second_person(self):
+        self.to_validate()
+        with self.assertRaises(L.LifecycleError) as cm:
+            L.enter(self.j, V, "cutover", {"before_state": True}, gate=GATE, now=at(3))
+        self.assertIn("G2", str(cm.exception))
+        self.assertIn("G3", str(cm.exception))
+        with self.assertRaises(L.LifecycleError):
+            L.sign_gate(self.j, V, "G2", "Olive Operator", "checked the before-state", GATE)      # the operator may not sign
+
+    def test_cutover_needs_the_before_state(self):
+        self.to_validate()
+        self.sign("G2", "G3")
+        with self.assertRaises(L.LifecycleError):
+            L.enter(self.j, V, "cutover", {}, gate=GATE, now=at(3))
+
+    def test_cutover_refused_with_a_halt_or_a_closed_gate(self):
+        self.to_validate()
+        self.sign("G2", "G3")
+        with self.assertRaises(L.LifecycleError):
+            L.enter(self.j, V, "cutover", {"before_state": True}, gate={"status": "stale"}, now=at(3))
+        safety.halt(self.j, "Olive Operator", "stopping everything for the test")
+        with self.assertRaises(L.LifecycleError):
+            L.enter(self.j, V, "cutover", {"before_state": True}, gate=GATE, now=at(3))
+
+    def test_a_volume_can_be_given_up_before_the_retype(self):
+        self.to_validate()
+        self.sign("G2", "G3")
+        L.enter(self.j, V, "aborted", {"reason": "start again for the test"}, now=at(4))
+        self.assertEqual(L.phase_of(self.j, V), "aborted")
+
+    def test_class_c_cannot_use_retype(self):
+        with self.assertRaises(L.LifecycleError):
+            L.enter(self.j, V, "precheck", {"class": "C", "method": "retype"}, gate=GATE, now=at(0))
+
+    def test_unknown_method_is_refused(self):
+        with self.assertRaises(L.LifecycleError):
+            L.enter(self.j, V, "precheck", {"class": "A", "method": "magic"}, gate=GATE, now=at(0))
+
+    def test_rollback_after_the_cutover_is_allowed_and_abort_is_not(self):
+        self.to_validate()
+        self.sign("G2", "G3")
+        L.enter(self.j, V, "cutover", {"before_state": True}, gate=GATE, now=at(3))
+        with self.assertRaises(L.LifecycleError):
+            L.enter(self.j, V, "aborted", {"reason": "too late to abort"}, now=at(4))
+        L.enter(self.j, V, "rollback", {"reason": "the post-check failed"}, now=at(5))
+        L.enter(self.j, V, "done", now=at(6))
+
+
 if __name__ == "__main__":
     unittest.main()
