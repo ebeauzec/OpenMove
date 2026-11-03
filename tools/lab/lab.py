@@ -9,6 +9,7 @@ Windows with WSL 2 is assumed (the lab is a lab for this machine, not part of th
 here run it every day after that. Standard library only.
 """
 import json
+import os
 import subprocess
 import sys
 import time
@@ -19,23 +20,28 @@ sys.path.insert(0, str(ROOT))
 from openmove import lab  # noqa: E402
 
 UP_SCRIPT = Path(__file__).with_name("lab_up.sh")
+DOWN_SCRIPT = Path(__file__).with_name("lab_down.sh")
 
 
 def wsl(*args, root=True, check=False, capture=True):
     cmd = ["wsl", "-d", lab.DISTRO] + (["-u", "root"] if root else []) + ["--"] + list(args)
-    return subprocess.run(cmd, capture_output=capture, text=True, check=check, errors="replace")
+    return subprocess.run(cmd, capture_output=capture, text=True, check=check, errors="replace", cwd=NEUTRAL_DIR)
+
+
+# WSL cannot translate a cloud-drive folder (G:\My Drive) as its working directory and says so on every call; a neutral folder avoids that
+NEUTRAL_DIR = os.environ.get("SystemRoot", "C:\\") if sys.platform == "win32" else None
 
 
 def distro_exists():
-    out = subprocess.run(["wsl", "-l", "-q"], capture_output=True).stdout.decode("utf-16-le", "ignore").replace("\x00", "")
+    out = subprocess.run(["wsl", "-l", "-q"], capture_output=True, cwd=NEUTRAL_DIR).stdout.decode("utf-16-le", "ignore").replace("\x00", "")
     return lab.DISTRO in [l.strip() for l in out.splitlines()]
 
 
 def keepalive():
     """WSL stops a distro when no session is open. One detached `sleep` keeps the lab running until `down`."""
-    flags = 0x00000008 | 0x00000200          # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    flags = 0x08000000 | 0x00000200          # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP: no console window of its own
     subprocess.Popen(["wsl", "-d", lab.DISTRO, "-u", "root", "--", "sleep", "infinity"], creationflags=flags if sys.platform == "win32" else 0,
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=NEUTRAL_DIR)
 
 
 def status():
@@ -68,12 +74,30 @@ def up():
 
 
 def down():
-    subprocess.run(["wsl", "--terminate", lab.DISTRO])
+    """Graceful: the script in the distro stops instances and services in order, then the distro is stopped. It refuses while DevStack installs."""
+    if not distro_exists():
+        print("The lab distro %s does not exist; nothing to stop." % lab.DISTRO)
+        return 0
+    target = lab.lab_dir() / "lab_down.sh"
+    target.write_bytes(DOWN_SCRIPT.read_bytes().replace(bytes([13, 10]), bytes([10])))
+    r = wsl("bash", "/mnt/c/%s" % str(target)[3:].replace("\\", "/") if sys.platform == "win32" else str(target))
+    print((r.stdout or "") + (r.stderr or ""))
+    if r.returncode == 3:
+        return 3
+    subprocess.run(["wsl", "--terminate", lab.DISTRO], cwd=NEUTRAL_DIR)
     print("lab stopped (its data is kept)")
     return 0
 
 
 def main(argv):
+    try:
+        return run(argv)
+    except lab.LabError as exc:
+        print(str(exc))
+        return 2
+
+
+def run(argv):
     cmd = argv[1] if len(argv) > 1 else "status"
     if cmd == "status":
         return status()

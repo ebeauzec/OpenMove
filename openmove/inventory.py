@@ -57,6 +57,7 @@ def normalise_volume(v, snapshots):
         "group_id": v.get("group_id"), "consistencygroup_id": v.get("consistencygroup_id"),
         "replication_status": v.get("replication_status"), "bootable": v.get("bootable"),
         "snapshot_id": v.get("snapshot_id"), "source_volid": v.get("source_volid"),
+        "image_cache": classification.is_image_cache(v.get("name"), v.get("metadata")),
         "image_meta": {k: str(x) for k, x in (v.get("volume_image_metadata") or {}).items() if k in IMAGE_KEYS},
         "attachments": [{"server_id": a.get("server_id"), "device": a.get("device"),
                          "host_name": a.get("host_name")} for a in v.get("attachments", [])],
@@ -69,7 +70,10 @@ def normalise_volume(v, snapshots):
         "created_at": v.get("created_at"), "updated_at": v.get("updated_at"), "source": "api"}
 
 
-def collect(session, nova_microversion=None):
+NOVA_LOCK_VERSION = "2.9"       # the first Nova microversion that shows the lock state; without it "locked" is missing, not False
+
+
+def collect(session, nova_microversion=NOVA_LOCK_VERSION):
     """Read volumes, snapshots and servers. Returns {'volumes', 'servers', 'warnings'}."""
     warnings = []
     vols = session.paginate(BLOCK_STORAGE_TYPES, "/volumes/detail", "volumes", {"all_tenants": 1})

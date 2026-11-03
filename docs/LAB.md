@@ -23,13 +23,50 @@ A lab result is evidence that the engine behaves. It is **not** the lab validati
 
 | Command | What it does |
 |---|---|
-| `OpenMove-Lab.bat` | Starts the lab if it is not answering, then OpenMove in lab mode (it connects by itself). |
+| `OpenMove-Lab.bat` | Starts the lab if it is not answering, then OpenMove in lab mode (it connects by itself). It opens **two browser windows**: OpenMove, and the OpenStack dashboard (Horizon, `/dashboard`), already signed in as `admin`: OpenMove logs in on the browser's behalf, on this machine only. `--no-browser` opens neither. |
 | `OpenMove-Lab.bat up` | Starts the lab: keeps the distro running, loads the kernel modules, re-attaches the loop devices behind the two volume groups, starts the services. |
-| `OpenMove-Lab.bat seed` | Creates the test objects (all named `lab-*`): four detached volumes, two attached to running servers, one boot-from-volume, one with a snapshot (class B), one on a stopped server (class D, held back). |
+| `OpenMove-Lab.bat seed` | Creates the test objects (all named `lab-*`; see "The seeded catalogue" below). |
 | `OpenMove-Lab.bat clean` / `list` | Removes or lists them. |
 | `OpenMove-Lab.bat status` | Says whether Keystone answers. |
-| `OpenMove-Lab.bat down` | Stops the distro. Its data is kept. |
+| `OpenMove-Lab.bat down` or `OpenMove-Lab-Stop.bat` | Stops the lab gracefully: instances first, then the OpenStack services, the web server, the queue and the database, then the volume groups, then the distro. Its data is kept. It refuses while DevStack is still installing. |
 | `OpenMove-Lab.bat reset` | Lab mode with an empty journal and evidence folder. |
+
+## The seeded catalogue
+
+`seed` makes about 35 objects across five volume types, all bound to the source back-end `sf-sim` (`sf-sim`, `sf-gold`, `sf-bulk`, `sf-multiattach`, `sf-encrypted`), so a retype to `pure-sim` has to leave each of them. The "class" column is what the engine should decide; the lab shows whether it does.
+
+| Name | Count | What it is | Expected |
+|---|---|---|---|
+| `lab-a-detached-*` | 8 | Detached, 1 to 5 GiB, types `sf-sim`, `sf-gold`, `sf-bulk` | Class A: moved |
+| `lab-a-image-*` | 3 | Bootable volumes made from the cirros image, so they hold real data | Class A: moved |
+| `lab-a-attached-*` | 4 | Attached to running servers (`lab-srv-*`) | Class A: instance locked around the move |
+| `lab-boot-*` | 2 | Boot volumes of running servers (`lab-srv-boot-*`) | Class A: moved with the instance running |
+| `lab-b-snap-*` | 3 | One to two snapshots each | Class C with API-only access: the API cannot show snapshot history, so rotation is unknown (see below); held back with cause `no_data_mover` |
+| `lab-d-stopped-*` | 2 | Attached to stopped servers (`lab-srv-off-*`) | Class D: held back |
+| `lab-e-multiattach` | 1 | Multi-attach type | Class E: held back |
+| `lab-e-encrypted` | 1 | LUKS-encrypted type (the lab's fixed key manager) | Class E: held back |
+| `lab-t-on-target-*` | 2 | Already on `pure-sim` | Not admitted, cause `already_on_target` |
+| `image-<image id>` | 1 | Not seeded: DevStack's image-volume cache creates it when a volume is made from an image | Class E, cause `image_cache` |
+
+Class B needs the history of deleted snapshots, which only the Cinder database holds. With the APIs only, any volume with snapshots is class C ("rotation unknown"), as the classifier's own rule says. To exercise the class B path in the lab, import a playbook export that carries the churn figures. What the real lab showed beyond the mock: the image-cache volume, and that the "on target" volumes were admitted until the pre-flight learned to leave them out.
+
+If the lab refuses the encryption settings of the encrypted type, the seeder says so and carries on. `seed` stops when `lab-*` objects already exist; run `clean` first. Booting the servers is the slow part (a few minutes).
+
+## What the lab has shown so far
+
+First runs of the real engine against the lab (a detached volume, a volume attached to a running instance, a boot volume; then the way back for the last two). Every result below was read from the cloud itself, not only from the engine's post-check.
+
+| Result | Detail |
+|---|---|
+| The forward move works | Lock, retype with on-demand migration, follow `migration_status`, post-check, unlock. About 25 seconds per volume here (small volumes on local LVM). Types, back-ends, attachments and instance states match the before-state; no instance is left locked. |
+| The way back works | A retype back returns the volume to `sf-sim` with its attachment and a running instance. |
+| **Found: the way back was not locked** | The forward move locked the instance and the reverse did not. Fixed: the reverse locks the instance too and unlocks it at the end. |
+| **Found: Cinder's image-cache volume** | DevStack's cache keeps a read-only volume named `image-<image id>` in an internal project. OpenMove admitted it as class A. Now class E, cause `image_cache`. |
+| **Found: volumes already on the target** | They were admitted and only blocked at the dry run. Now not admitted, cause `already_on_target`. |
+| **Found: the lock state was invisible to the audit** | The inventory read of instances sent no Nova microversion, so `locked` was always empty. Now 2.9, and the engine refuses an instance whose lock state is not shown. |
+| Class B needs the database | With the APIs only, a volume with snapshots is class C (rotation unknown). The class B path (wait for rotation) is covered by the mock tests only. |
+
+Not yet exercised in the lab: failure injection (a refused lock, a stopped service during a move, a failed retype), the halt button during a real move, a retype of a volume with a snapshot, and the Horizon auto-login against the real dashboard.
 
 ## A first run, in order
 

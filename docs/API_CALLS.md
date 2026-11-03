@@ -134,6 +134,8 @@ Protection: every `/api/` call needs the per-run token (printed at start-up and 
 
 Static files (`/`, `/app.js`, `/styles.css`) are served from the program's own resources.
 
+One more address, outside `/api/`, in lab mode only: `GET /lab/dashboard?token=<token>`. It logs in to the lab's own OpenStack dashboard (Horizon, a local throw-away cloud) with the lab user, on this machine, and answers `302` to the dashboard with the session cookies, so the browser arrives signed in. It needs the per-run token, answers 404 outside lab mode, and never puts the password in a page or an address. The two requests it makes to Horizon (`GET` and `POST` of `/dashboard/auth/login/`) go to the lab address only and are not calls to a customer cloud.
+
 ## 5. Journal events
 
 The journal is a local SQLite file (`journal.db`). It is append-only in normal use. Every record is scrubbed of secrets before it is written. Events of kind `phase` are the state of the migration of each volume: the process reads them back to decide what is allowed next.

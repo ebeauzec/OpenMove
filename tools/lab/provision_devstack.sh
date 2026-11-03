@@ -54,7 +54,8 @@ CINDER_LVM_TYPE=default
 # the lab VM has KVM (AMD); fall back to qemu if it is not usable
 LIBVIRT_TYPE=kvm
 
-disable_service horizon tempest
+# Horizon (the OpenStack dashboard) stays on: OpenMove-Lab.bat opens it next to OpenMove
+disable_service tempest
 disable_service n-novnc n-spice n-cauth
 EOF
 chown stack:stack /opt/stack/devstack/local.conf

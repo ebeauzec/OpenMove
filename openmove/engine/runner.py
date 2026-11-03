@@ -410,6 +410,9 @@ class Engine:
                 return self.note(vid, "the reverse failed in the cloud: halted for a person")
             return self.note(vid, "reverse running: migration_status=%s" % mig)
         try:
+            for sid in plan.attached_servers(vol):                      # the way back is a move too: nobody changes the instance meanwhile
+                if not (acts.server(sid) or {}).get("locked"):
+                    acts.lock(vid, sid)
             acts.retype(vid, sp["source_type"], vol.get("volume_type"), name="retype_back")
         except CallFailed as exc:
             return self.note(vid, "the cloud refused the reverse: %s" % exc)

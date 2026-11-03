@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0 (2026-11-03)
+
+### Added
+- Real-lab results: Horizon sign-in, graceful stop, seeded catalogue, image-cache and lock fixes
+
 ## 0.5.0 (2026-11-02)
 
 ### Added

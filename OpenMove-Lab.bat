@@ -4,13 +4,13 @@ REM Proprietary software; see LICENSE.
 REM OpenMove against the OpenStack LAB on this machine (a real Keystone, Nova and Cinder in a WSL distro; see tools\lab\README.md).
 REM This is not the demonstration: the engine really moves volumes, inside the lab only.
 REM
-REM   OpenMove-Lab.bat            start the lab if needed, then OpenMove in lab mode
+REM   OpenMove-Lab.bat            start the lab if needed, then OpenMove in lab mode; opens OpenMove and the OpenStack dashboard (Horizon)
 REM   OpenMove-Lab.bat up         start the lab cloud
 REM   OpenMove-Lab.bat seed       create the test volumes and servers in the lab
 REM   OpenMove-Lab.bat clean      remove them
 REM   OpenMove-Lab.bat list       show them
 REM   OpenMove-Lab.bat status     is the lab cloud answering?
-REM   OpenMove-Lab.bat down       stop the lab (its data is kept)
+REM   OpenMove-Lab.bat down       stop the lab gracefully (its data is kept); OpenMove-Lab-Stop.bat does the same by double-click
 REM   OpenMove-Lab.bat reset      start OpenMove in lab mode with an empty journal and evidence
 setlocal
 cd /d "%~dp0"

@@ -21,7 +21,7 @@ The first run in a test environment is a **dry run**: every step that would chan
 | E4 | **Class A and class B.** The standard path and the rotation watcher. | yes | yes (T1, T12) |
 | E5 | **Class C.** Clones of every snapshot, the migration host logs in, chain copy with byte-for-byte compare (playbook Appendix D), destination record, reconcile loop, freeze, cutover (attached and detached), post-check, safety snapshot, cleanup, rollbacks R1 to R3, recovery 18.1 to 18.3. | yes | yes (T2 to T4, T6 to T10, T14 to T17, T20, T21) |
 | E6 | **Lab tests T1 to T21** as guided, recorded procedures against a test project, producing the evidence for gate G0. | partly | yes |
-| E7 | **Remaining gaps:** image-cache volumes (A7), `provider_id` repair, the batch plan per compute host, the per-batch cleanup 5.12.4 and 5.12.5. | yes | partly |
+| E7 | **Remaining gaps:** internal-tenant volumes other than the image cache (A7), `provider_id` repair, the batch plan per compute host, the per-batch cleanup 5.12.4 and 5.12.5. | yes | partly |
 
 E1 to E4 give a class A and class B path that can be tried in a test environment first. E5 is the larger piece.
 

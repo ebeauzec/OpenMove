@@ -42,7 +42,7 @@ The playbook is the authority. `MIGRATION_METHOD.md` is the working summary. Thi
 | 1.4 | Classify A to E | `classification.py` | **Built** |
 | 1.5 | Batch plan by class, compute host, project | Groups by class, project, attachment, size, snapshots, host, instance, risk. Concurrency setting. No generated batch-plan document that spreads load per compute host. | **Built** (partly) |
 | 1.6 | `classify.py` | Replaced by `classification.py` | **Built** |
-| 1.7 | A7: image-cache and internal tenant volumes, decided per volume | Nothing looks for them | **Not built** |
+| 1.7 | A7: image-cache and internal tenant volumes, decided per volume | The image-cache volume is recognised (read-only, named `image-<image id>`) and held back as class E, cause `image_cache`. Other internal-tenant volumes are not looked for. | **Partly built** (found in the lab) |
 | 1.8 | A8: drift before every batch | V10 | **Built** |
 | 1.9 | Repair `provider_id` | V3 finds a bad one (class E, cause `bad_provider_id`). The repair is not done. | **Check only** (no repair) |
 
@@ -129,11 +129,23 @@ OpenMove adds, around these steps: precheck, validate, copy, sync, **recheck twi
 | G3 | Record and freeze verified, second person signs, per volume | Per-volume sign-off, enforced before the cutover. In this release the freeze is inside the cutover phase, so G3 is signed on the readiness conditions; it moves between the freeze and the swap when the engine splits them. | **Built** (sign-off), checks **check only** |
 | G4 | Cutover verified, second person signs, per volume | Per-volume sign-off, enforced before the soak starts. | **Built** (sign-off), checks **check only** |
 
+## Review feedback on the playbook, and what it means here
+
+A reviewer read the playbook and the script bundle after v1.2. Most of the findings are about the staged class C method and its scripts, which OpenMove does not run; they belong in the playbook and its bundle, not here. What touches OpenMove:
+
+| Finding | Where it lands in OpenMove | Status |
+|---|---|---|
+| The instance lock is never read because the lock field only exists from Nova microversion 2.9 and a Queens-era client defaults to 2.1 (the field comes back empty and is tolerated). | The inventory read of instances sent no microversion, so the pre-flight could not see a lock. The engine read single instances with 2.9 but accepted an answer without the field. Now both send 2.9, and the engine refuses an instance whose lock state is not true or false (safety row 35). | **Fixed** |
+| After a reverse migration the driver may delete the real target volume, which then sits in the array's pending-eradication window (recovery by purevol recover only inside it). | OpenMove's way back for classes A and B is a retype back, which the cloud does itself, so the engine adds no array call. The method text (R3) now carries the finding. For class C, which is not built, an explicit array copy before the record swap is to be designed and proven in the lab. | **Recorded** |
+| The post-check should compare the fields that must not change, not everything (a rename or a metadata edit during the window must not fail it). | The engine's post-check compares status, size, attachments, bootable flag and instance state. It does not compare names, metadata or the tenant snapshot list. | **Already so** |
+| A move of a detached volume should lock the volume, because reserving a volume in Queens does not check the migration status. | The retype path never uses a bare migrate. To observe in the lab: whether an attach is refused while a retype of a detached volume runs. | **Open, lab** |
+| The staged class C method and its scripts are a lot of new surface for a one-off migration; keep it out of the critical path. | Matches the current plan: access level "OpenStack APIs only" is the default, class C is held back with a cause, and nothing in the staged method is built. | **Owner decision** |
+
 ## Gaps that matter
 
 1. **The engine.** Nothing moves a byte. Every "Not built" row above is the engine.
 2. **Per-volume gates G2, G3, G4.** Now built (see the gates table). What stays open: G3 sits at the entry of the cutover phase until the engine separates the freeze from the swap.
-3. **Image-cache and internal-tenant volumes (step 1.7).** Not looked for.
+3. **Internal-tenant volumes (step 1.7).** The image-cache volume is found and held back; other volumes of Cinder's internal project are not looked for.
 4. **`provider_id` repair (step 1.9).** Found, not repaired.
 5. **Phase 0.** No guided lab procedures.
 6. **Checks on hosts and arrays** show "not checked" until the access exists. They need attestations in the meantime.

@@ -4,7 +4,7 @@
 
 Classes, first match wins:
 
-  E  not handled by this method: encrypted, multiattach, in a group, replicated, status not
+  E  not handled by this method: an image-cache volume, encrypted, multiattach, in a group, replicated, status not
      available or in-use, a migration in a non-final state, provider_id missing or malformed
   D  attached to an instance that is not ACTIVE or PAUSED
   A  no snapshots
@@ -20,6 +20,12 @@ class C, which the staged method handles in either case.
 import re
 
 PROVIDER_RE = re.compile(r"^\d+ \d+ \S+$")
+IMAGE_CACHE_RE = re.compile(r"^image-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$")
+
+
+def is_image_cache(name, metadata):
+    """Cinder's own image-volume cache keeps a read-only volume named image-<image id> in an internal project (playbook step 1.7)."""
+    return bool(IMAGE_CACHE_RE.match(str(name or ""))) and str((metadata or {}).get("readonly")).lower() == "true"
 OK_INSTANCE_STATES = ("ACTIVE", "PAUSED")
 FINAL_MIGRATION_STATES = (None, "", "success", "error")
 UNKNOWN = object()
@@ -56,6 +62,8 @@ def classify(vol, churn=None, instance_states=None, root_volumes=None, window_ho
         return result("E", "status %s" % vol.get("status"))
     if vol.get("migration_status") not in FINAL_MIGRATION_STATES:
         return result("E", "migration_status %s" % vol.get("migration_status"))
+    if vol.get("image_cache"):
+        return result("E", "image-cache volume: Cinder keeps it as a cache and builds it again when needed")
     if vol.get("encrypted"):
         return result("E", "encrypted")
     if _truthy(vol.get("multiattach")):

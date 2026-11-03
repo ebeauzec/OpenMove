@@ -73,6 +73,8 @@ def validate(vol, snaps, servers, spec):
         if s is None:
             add("Instance %s can be read" % sid, False, "", "the instance %s could not be read" % sid)
             continue
+        add("Instance %s lock state is known" % sid, isinstance(s.get("locked"), bool), "locked" if s.get("locked") else "not locked",
+            "the answer does not show whether the instance is locked (Nova microversion 2.9 or later is needed); an instance is never locked blind")
         add("Instance %s is running" % sid, s.get("status") == "ACTIVE", "ACTIVE", "the instance is %s; only running instances are handled" % s.get("status"))
         add("Instance %s is idle" % sid, not s.get("OS-EXT-STS:task_state"), "no task", "the instance is busy: %s" % s.get("OS-EXT-STS:task_state"))
     return out

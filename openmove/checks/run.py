@@ -367,11 +367,12 @@ def run_all(platform, inventory, servers=None, root_volumes=(), source_backend=N
     counts = {s: sum(1 for c in allc if c["status"] == s) for s in STATUSES}
     clean = [v for v in inventory["volumes"] if v.get("class") in ("A", "B", "C") and not any(s == "fail" for s in per_volume[v["id"]].values())]
     no_mover = [v["id"] for v in clean if v.get("class") == "C" and access != "full"]
-    admitted = [v["id"] for v in clean if v["id"] not in set(no_mover)]
+    on_target = [v["id"] for v in clean if target_backend and v.get("backend") == target_backend]      # nothing to move
+    admitted = [v["id"] for v in clean if v["id"] not in set(no_mover) and v["id"] not in set(on_target)]
     return {"run_id": run_id, "ran_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "source_backend": source_backend,
             "target_backend": target_backend, "fingerprint": fingerprint(source_backend, target_backend, [v["id"] for v in inventory["volumes"]]),
             "platform": plat, "volume": vol_checks, "later": later_phase_checks(), "counts": counts,
-            "volumes_total": len(inventory["volumes"]), "admitted": admitted, "access": access, "no_mover": no_mover,
+            "volumes_total": len(inventory["volumes"]), "admitted": admitted, "access": access, "no_mover": no_mover, "on_target": on_target,
             "volume_status": {vid: worst(list(s.values())) for vid, s in per_volume.items()},
             "volume_ids": [v["id"] for v in inventory["volumes"]],
             "risk": {vid: dict(a, signature=risk_mod.signature(a), cleared=cleared.get(vid) == risk_mod.signature(a)) for vid, a in risk_map.items()}}

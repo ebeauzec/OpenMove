@@ -4,10 +4,41 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from openmove import demo, handling
+from openmove import classification, demo, handling
+from openmove.checks import run as checks_run
 from openmove import server as S
 from openmove.server import create_server
+
+
+class RealCloudFindingsTests(unittest.TestCase):
+    """Things the real lab showed that the mock did not."""
+
+    def vol(self, vid, backend, **kw):
+        v = {"id": vid, "name": vid, "status": "available", "size": 1, "snapshots": 0, "backend": backend, "attachments": [], "volume_type": "t",
+             "bootable": "false", "project_id": "p", "host": "ctl@%s#%s" % (backend, backend)}
+        v.update(kw)
+        return v
+
+    def test_the_cache_volume_cinder_keeps_for_images_is_recognised_and_never_moved(self):
+        name = "image-e774116a-d380-4a14-aceb-210d89b558fc"
+        self.assertTrue(classification.is_image_cache(name, {"readonly": "True"}))
+        self.assertFalse(classification.is_image_cache(name, {}))                             # a tenant volume that happens to be named like it
+        self.assertFalse(classification.is_image_cache("image-backup", {"readonly": "True"}))
+        r = classification.classify(self.vol("v", "sf", image_cache=True))
+        self.assertEqual(r["class"], "E")
+        self.assertEqual(handling.held_back_cause({"class": "E", "reason": r["reason"]}, []), "image_cache")
+        self.assertIn("image_cache", handling.CAUSES)
+
+    def test_a_volume_already_on_the_target_is_not_admitted_and_says_why(self):
+        inv = {"volumes": [dict(self.vol("a", "sf-sim"), **{"class": "A"}), dict(self.vol("b", "pure-sim"), **{"class": "A"})]}
+        with mock.patch.object(checks_run, "platform_checks", return_value=[]):               # the platform checks are not what this is about
+            r = checks_run.run_all({}, inv, {}, (), "sf-sim", "pure-sim")
+        self.assertEqual(r["admitted"], ["a"])
+        self.assertEqual(r["on_target"], ["b"])
+        self.assertEqual(handling.held_back_cause(inv["volumes"][1], [], False, True), "already_on_target")
+        self.assertIn("already_on_target", handling.CAUSES)
 
 
 class AccessLevelTests(unittest.TestCase):

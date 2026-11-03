@@ -27,7 +27,7 @@ So for snapshots in particular: class B and class C volumes are recognised, kept
 | B | Snapshots that rotate away within the window. | At validation: refused unless the snapshot count is zero at that moment ("wait for the rotation"). Then the class A path. | The rotation watcher that waits and fires the standard path. | snapshots did not rotate away (timeout), then as class A |
 | C | Long-lived snapshots. | The copy must record how many snapshot images it rebuilds. The copy cannot leave `copy` unless every image compared identical and the snapshot ids match (`chain_match`, `snapshots_matched`). Every recheck must reconcile (no tenant snapshot created or deleted since the last pass). | Rollback clone; staging volume built from the oldest snapshot; each snapshot applied in order and taken on the target with the same id; destination record; freeze; swap; postcheck G4. | chain mismatch, tenant snapshot raced the freeze, swap refused (rolled back), plus the class A causes |
 | D | Attached to an instance that is not `ACTIVE` or `PAUSED`. | Refused at precheck. It never enters the order. | After the instance runs it is classified again (A or C). The detached variant needs an admin lock and detach and a recorded decision. | instance not running |
-| E | Encrypted, multiattach, grouped, replicated, wrong status, a migration in a non-final state, or a malformed provider id. | Refused at precheck. It never enters the order. | Nothing: not moved by this method. A follow-up plan per reason. | encrypted, multiattach, grouped, replicated, bad status, migration in flight, bad provider id |
+| E | An image-cache volume (Cinder's own cache), encrypted, multiattach, grouped, replicated, wrong status, a migration in a non-final state, or a malformed provider id. | Refused at precheck. It never enters the order. | Nothing: not moved by this method. A follow-up plan per reason. | encrypted, multiattach, grouped, replicated, bad status, migration in flight, bad provider id |
 
 A volume that fails a per-volume check (for example no volume type, a snapshot that is not available, no room on the target) is held back whatever its class, with the failed check quoted.
 
@@ -58,6 +58,8 @@ The pre-migration report also lists, for every held-back volume, the same propos
 | Cause | Typical class | Source after |
 |---|---|---|
 | encrypted, multiattach, grouped, replicated | E | untouched |
+| image-cache volume (Cinder's own, read-only, named `image-<image id>`) | E | untouched; Cinder builds the cache again on the new back-end |
+| already on the target back-end | not admitted | nothing to move |
 | bad status, migration in flight, bad provider id | E | untouched |
 | instance not running | D | untouched |
 | a pre-flight check failed | A, B, C | untouched |

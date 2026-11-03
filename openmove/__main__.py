@@ -100,6 +100,13 @@ def main(argv=None):
         say("Warning: listening on %s. Anyone who can reach this port and has the token can use OpenMove." % a.host)
     if not a.no_browser:
         open_browser(url, say)
+        if a.lab:                                   # lab mode opens the OpenStack dashboard too, in a second window
+            cfg = lab_mod.load_config()
+            if lab_mod.horizon_answers(cfg):
+                say("OpenStack dashboard: %s   (signed in automatically as %s)" % (lab_mod.horizon_url(cfg), cfg.get("user", "admin")))
+                open_browser("http://%s:%d/lab/dashboard?token=%s" % (shown, port, state.token), say)
+            else:
+                say("The OpenStack dashboard (Horizon) does not answer at %s; it may still be starting, or not installed." % lab_mod.horizon_url(cfg))
     try:
         server.serve_forever()
     except KeyboardInterrupt:

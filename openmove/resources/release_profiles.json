@@ -8,18 +8,35 @@
         "attach_flow": "to be determined in the lab (playbook test T5): old style or attachment-id style",
         "cinder_manage_quota_command": false,
         "destination_helper_interpreter": "the interpreter that runs cinder-volume (may be Python 2); the helper must run on Python 2 and 3",
-        "nova_swap_instance_states": ["ACTIVE", "PAUSED", "RESIZED"],
+        "nova_swap_instance_states": [
+          "ACTIVE",
+          "PAUSED",
+          "RESIZED"
+        ],
         "nova_swap_requires_no_task_state": true,
         "pure_driver_rest_api_versions": "1.2 to 1.5",
         "pure_driver_pod_support": false,
         "pure_driver_update_migrated_volume": false,
         "solidfire_driver_update_migrated_volume": false,
-        "metadata_update_blocked_in": ["maintenance"],
+        "metadata_update_blocked_in": [
+          "maintenance"
+        ],
         "snapshot_delete_blocked_while_migrating": false
       },
       "notes": [
         "Vendor builds carry patches. Lab validation must confirm the behaviour on the actual build.",
-        "Not verified in the playbook and left for the lab: attach flow, boot-from-volume swap, Purity size unit, recover-with-snapshots, scheduler 'or' operator."
+        "Not verified in the playbook and left for the lab: attach flow, boot-from-volume swap, Purity size unit, recover-with-snapshots, scheduler 'or' operator.",
+        "Nova shows whether an instance is locked only from microversion 2.9 (the Queens maximum is 2.60); OpenMove sends 2.9 and refuses an instance whose answer has no lock state.",
+        "After a reverse migration the array may keep the real target volume only for its pending-eradication window; an explicit array copy before the record swap is needed for a longer recovery."
+      ]
+    },
+    "2025.1": {
+      "source": "The OpenMove lab: DevStack stable/2025.1 on the owner's machine (docs/LAB.md). Cinder 3.71 and Nova 2.100 were read from the running lab.",
+      "lab": true,
+      "variants": {},
+      "notes": [
+        "A lab profile. It lets the engine run against the lab and nowhere else; a customer cloud on this release would still need its own recorded validation (gate G0).",
+        "The lab back-ends are LVM, not SolidFire or FlashArray, so nothing here says anything about their drivers."
       ]
     }
   }

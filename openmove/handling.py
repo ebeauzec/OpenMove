@@ -54,7 +54,7 @@ PLANS = {
                        "needs a recorded decision and is not started by this tool on its own.", "none")]},
     "E": {"title": "Not handled by this method", "method": "Not migrated; listed for a follow-up plan",
           "steps": [
-              ("hold", "Never enters the order: the lifecycle refuses it at precheck. Encrypted, multiattach, in a group, replicated, wrong status, a migration in a "
+              ("hold", "Never enters the order: the lifecycle refuses it at precheck. An image-cache volume, encrypted, multiattach, in a group, replicated, wrong status, a migration in a "
                        "non-final state, or a malformed provider id.", "none"),
               ("report", "Each volume appears in the not-migrated report with its reason and the proposed steps.", "none")]},
 }
@@ -85,6 +85,17 @@ CAUSES = {
                   ["Decide with the tenant whether the data can move another way (tenant-side copy to a new encrypted volume on the new type).",
                    "If it must move through Cinder, plan a separate procedure and lab-test it with an encrypted volume first.",
                    "Record the decision against this volume; leave it where it is until then."], "Platform owner and tenant"),
+    "image_cache": ("Image-cache volume",
+                    "Cinder keeps a read-only copy of an image as a volume so that new volumes from that image are made quickly. It belongs to Cinder, not to a tenant, and is rebuilt when needed.",
+                    SAFE_SRC, NO_TGT,
+                    ["Do not move it. Moving it would leave the cache pointing at the old back-end.",
+                     "After the migration, let Cinder build the cache again on the new back-end (the first volume made from each image does it), or delete the old cache volume as the platform owner.",
+                     "Record the decision against this volume (playbook step 1.7)."], "Platform owner"),
+    "already_on_target": ("Already on the target back-end",
+                          "The volume is already on the back-end it would be moved to, so there is nothing to move.",
+                          "Untouched. The volume is where it is meant to end up.", NO_TGT,
+                          ["Nothing to do for this volume.",
+                           "If it should be on the source back-end instead, check its volume type and the source and target chosen in the pre-flight."], "Platform owner"),
     "multiattach": ("Multi-attach volume",
                     "Several instances use the volume at once, so a single swap would leave the others on the old device.",
                     SAFE_SRC, NO_TGT,
@@ -232,7 +243,7 @@ CAUSES = {
 }
 
 # reason text of the classification -> cause code
-_REASONS = (("encrypted", "encrypted"), ("multiattach", "multiattach"), ("group", "grouped"), ("replication", "replicated"),
+_REASONS = (("image-cache", "image_cache"), ("encrypted", "encrypted"), ("multiattach", "multiattach"), ("group", "grouped"), ("replication", "replicated"),
             ("migration_status", "migration_in_flight"), ("status ", "bad_status"), ("provider_id", "bad_provider_id"),
             ("root-wait", "instance_not_running"), ("instance ", "instance_not_running"))
 
@@ -246,7 +257,7 @@ def describe_cause(code):
     return {"code": code, "title": t[0], "why": t[1], "source": t[2], "target": t[3], "steps": list(t[4]), "who": t[5]}
 
 
-def held_back_cause(vol, failed_checks, no_mover=False):
+def held_back_cause(vol, failed_checks, no_mover=False, on_target=False):
     """The cause of a volume that never started, from its class reason and its failed checks. failed_checks: [(id, title, evidence)]."""
     reason = str(vol.get("reason") or "")
     if vol.get("class") in ("D", "E"):
@@ -258,6 +269,8 @@ def held_back_cause(vol, failed_checks, no_mover=False):
         return "risky_workload"
     if failed_checks:
         return "check_failed"
+    if on_target:
+        return "already_on_target"
     if no_mover:
         return "no_data_mover"
     return "not_admitted"
@@ -322,7 +335,7 @@ def unmigrated(journal, inventory, checks, servers=None, project_names=None, hal
             outcome, code, how = "not started", ("halted" if halted else ("not_started" if gate_ok else "gate_closed")), "admitted, no phase recorded"
         else:
             outcome = "held back" if v.get("class") in ("D", "E") else "not admitted"
-            code = held_back_cause(v, failed.get(vid, []), vid in set((checks or {}).get("no_mover") or ()))
+            code = held_back_cause(v, failed.get(vid, []), vid in set((checks or {}).get("no_mover") or ()), vid in set((checks or {}).get("on_target") or ()))
             how = v.get("reason")
         d = describe_cause(code)
         att = [servers.get(a.get("server_id"), {}).get("name") or a.get("server_id") or "" for a in v.get("attachments", [])]

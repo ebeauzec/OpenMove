@@ -359,7 +359,8 @@ class ReverseTests(EngineCase):
         v = self.vol(V2)
         self.assertEqual((v["volume_type"], v["os-vol-host-attr:host"]), ("fast", "ctl@sf-1#pool"))
         self.assertFalse(self.cloud.servers[0]["locked"])
-        self.assertEqual([list(b)[0] for _, b in self.cloud.posts], ["lock", "os-retype", "unlock", "os-retype"])
+        # the way back is a move too: the instance is locked around it, as on the way there (the real lab showed it was not)
+        self.assertEqual([list(b)[0] for _, b in self.cloud.posts], ["lock", "os-retype", "unlock", "lock", "os-retype", "unlock"])
         steps = {r["name"]: r for r in self.state.journal.steps("retype:" + V2)}
         self.assertEqual(steps["retype_back"]["status"], "done")
 
@@ -379,6 +380,17 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(plan.backend_of("ctl@sf-1#pool"), "sf-1")
         self.assertEqual(plan.backend_of("sf-1"), "sf-1")
         self.assertEqual(plan.backend_of(None), "")
+
+    def test_an_instance_whose_lock_state_is_not_shown_is_never_locked_blind(self):
+        vol = {"id": "v", "status": "in-use", "volume_type": "slow", "os-vol-host-attr:host": "ctl@sf-1#pool", "attachments": [{"server_id": "s"}]}
+        spec = {"class": "A", "source_backend": "sf-1", "target_backend": "pure-1", "target_type": "fast",
+                "types": [{"name": "fast", "extra_specs": {"volume_backend_name": "pure-1"}}]}
+        shown = {"s": {"status": "ACTIVE", "locked": False}}
+        hidden = {"s": {"status": "ACTIVE"}}                    # an answer from a Nova microversion older than 2.9
+        self.assertEqual(plan.verdict(plan.validate(vol, [], shown, spec)), "ok")
+        checks = plan.validate(vol, [], hidden, spec)
+        self.assertEqual(plan.verdict(checks), "blocked")
+        self.assertIn("never locked blind", [c["detail"] for c in checks if not c["ok"]][0])
 
 
 if __name__ == "__main__":

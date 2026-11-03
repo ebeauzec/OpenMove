@@ -110,6 +110,29 @@ def make_handler(state, port_getter):
         def _token_ok(self, supplied):
             return bool(supplied) and hmac.compare_digest(supplied.encode(), state.token.encode())
 
+        def _lab_dashboard(self, q):
+            """Lab mode only: log in to the lab's OpenStack dashboard for the browser and send it there, already signed in. The browser keeps
+            cookies by host name, not by port, so the session cookies set from this address are sent to the dashboard on the same host."""
+            if not self._token_ok((q.get("token") or [""])[0]):
+                return self._send(403, b"Open the address that OpenMove printed when it started.", "text/plain; charset=utf-8")
+            if not state.lab:
+                return self._send(404, {"error": "not available outside lab mode"})
+            from . import lab as lab_mod
+            try:
+                cfg = lab_mod.load_config()
+                cookies = lab_mod.horizon_session(cfg)
+            except lab_mod.LabError as exc:
+                return self._send(502, str(exc).encode("utf-8"), "text/plain; charset=utf-8")
+            host = (self.headers.get("Host") or "127.0.0.1").rsplit(":", 1)[0]
+            port = urlsplit(cfg["auth_url"]).port
+            self.send_response(302)
+            self.send_header("Location", "http://%s%s/dashboard/" % (host, ":%d" % port if port else ""))
+            for name, value in cookies.items():
+                self.send_header("Set-Cookie", "%s=%s; Path=/; HttpOnly; SameSite=Lax" % (name, value))
+            self.send_header("Content-Length", "0")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+
         def _body(self):
             n = int(self.headers.get("Content-Length") or 0)
             if n > MAX_REQUEST:
@@ -142,6 +165,8 @@ def make_handler(state, port_getter):
                                           "text/plain; charset=utf-8")
                     html = (web / "index.html").read_text(encoding="utf-8").replace("__TOKEN__", state.token)
                     return self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+                if method == "GET" and path == "/lab/dashboard":
+                    return self._lab_dashboard(parse_qs(url.query))
                 if method == "GET" and path in STATIC:
                     name, ctype = STATIC[path]
                     return self._send(200, (web / name).read_bytes(), ctype)

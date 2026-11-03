@@ -23,7 +23,7 @@
     {"name": "2023.2",   "cinder_max": "3.70", "nova_max": "2.95"},
     {"name": "2024.1",   "cinder_max": "3.71", "nova_max": "2.96"},
     {"name": "2024.2",   "cinder_max": "3.71", "nova_max": "2.96"},
-    {"name": "2025.1",   "cinder_max": null,   "nova_max": "2.100"},
+    {"name": "2025.1",   "cinder_max": "3.71",   "nova_max": "2.100"},
     {"name": "2025.2",   "cinder_max": null,   "nova_max": "2.100"},
     {"name": "2026.1",   "cinder_max": null,   "nova_max": "2.103"},
     {"name": "2026.2",   "cinder_max": null,   "nova_max": "2.104"}

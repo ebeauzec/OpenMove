@@ -240,7 +240,7 @@ Class A and B volumes are moved by Cinder itself, with a retype that uses on-dem
 | postcheck | Compares with the before-state: status, size, attachments, bootable, instance running. If it passes, unlocks the instance (C2). If it fails, halts and leaves the instance locked. | Start the soak after a failed post-check. |
 | G4 | Waits for a second person to sign G4. | |
 | soak | The source is already gone (Cinder deletes it after the migration), so the soak is an observation period for the rollback. After the set days the volume is `done`. | |
-| rollback | A person asks for it (the Reverse button), or a failure leads to it. The engine waits for any move to end, retypes back if the volume is not on its first type, unlocks, and records `done`. | |
+| rollback | A person asks for it (the Reverse button), or a failure leads to it. The engine waits for any move to end, locks the instance (as on the way there), retypes back if the volume is not on its first type, unlocks, and records `done`. | |
 
 The gates G2 and G3 are signed while the volume is in `validate`. A halt stops the engine at the next tick, also while it waits for an unknown answer to be read back.
 

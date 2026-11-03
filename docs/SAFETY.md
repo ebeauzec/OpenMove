@@ -60,6 +60,7 @@ OpenMove runs against production clouds. The owner's requirement (R13, R14) is t
 | 32 | The instance is changed while its volume moves, or is left locked. | The instance is locked before the retype (unless someone else locked it, then it is left alone) and unlocked only after the post-check passed or after the rollback. A failed post-check leaves it locked. | built | `engine/runner.py` | `test_engine.RunTests`, `FailureTests` |
 | 33 | A volume that changed since it was validated is moved. | Everything is read again at the moment of the retype and any difference gives the volume up. | built | `engine/runner.py` | `test_engine.RunTests` |
 | 34 | A failed post-check is accepted. | The post-check halts everything; `lifecycle.enter("soak")` refuses a volume whose post-check failed, also with G4 signed. | built | `lifecycle.py`, `engine/runner.py` | `test_engine.FailureTests` |
+| 35 | An instance is locked, and later unlocked, without knowing that someone else had locked it first, because the lock state was not in the answer (Nova only shows it from microversion 2.9; an older default hides it). | Every Nova read that matters sends microversion 2.9 or later; the engine refuses an instance whose answer has no true/false `locked` and never locks it blind. It unlocks only what its own journal says it locked. | built | `engine/plan.py`, `engine/actions.py`, `inventory.py` | `test_engine.PlanTests` |
 
 ## Tests that must pass before the engine can be released
 

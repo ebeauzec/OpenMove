@@ -1,8 +1,8 @@
 {
-  "version": "0.5.0",
+  "version": "0.6.0",
   "major": 0,
-  "minor": 5,
+  "minor": 6,
   "patch": 0,
-  "date": "2026-11-02",
-  "notes": "Retype engine for class A and B, access levels, Move tab, lab mode (not yet run on the lab)"
+  "date": "2026-11-03",
+  "notes": "Real-lab results: Horizon sign-in, graceful stop, seeded catalogue, image-cache and lock fixes"
 }
