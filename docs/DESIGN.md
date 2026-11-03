@@ -1,5 +1,7 @@
 # Design
 
+> **Status.** This is the original proposal. Part of it is built: the local web interface, the journal, release profiles, the checks and the gate, the safety layer and the retype engine for class A and B (APIs only). The rest (SSH, the data mover, array adapters, the staged method for class C, the container) is not built. `ARCHITECTURE.md` describes what exists.
+
 Initial design, derived from `REQUIREMENTS.md` and the method in `MIGRATION_METHOD.md`. It is a proposal until the owner confirms the open questions in section 9.
 
 ## 1. What the playbook changes about the requirements

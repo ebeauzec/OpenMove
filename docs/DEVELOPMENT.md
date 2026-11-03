@@ -44,6 +44,10 @@ Tests that guard the rules of the project:
 * `tests/test_docs_sync.py`: every outbound call, local route and journal event must be listed in `docs/API_CALLS.md`. Change a call, change that file in the same commit.
 * `tests/test_self_contained.py`: only the standard library is imported and the web files load nothing from outside.
 
+## Testing against a real OpenStack
+
+The automated tests use mock clouds. Behaviour against real Cinder and Nova is tested in the lab (`LAB.md`, `tools/lab/README.md`): `OpenMove-Lab.bat seed` creates 26 volumes and 8 servers of different kinds, and `OpenMove-Lab.bat` runs the real engine against them. Run the lab before a release that changes the engine, and write down in `LAB.md` what it showed. The lab is for the engine's calls and polling. It says nothing about Queens, SolidFire or FlashArray.
+
 ## Sensitive-data guard
 
 `tools/guard_sensitive.py` runs from the hooks. It can also be run by hand:

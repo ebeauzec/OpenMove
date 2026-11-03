@@ -2,6 +2,9 @@
 
 | Document | Contents |
 |---|---|
+| `ARCHITECTURE.md` | How OpenMove is built today: context, layers, runtime, the order of a move with diagrams, the safety architecture, data, modes, tests and what is not built. Start here to understand the code. |
+| `INSTALL.md` | Requirements, installing from source or as a packaged program, checking the installation, data folders, upgrading and removing. |
+| `OPERATIONS.md` | How to run a migration, step by step: roles, preparation, the procedure from Connect to Soak, the way back, halting and restarting, what every note means, checklists. |
 | `DEVELOPMENT.md` | Development workflow: hooks, the sensitive-data guard, versioning, releases. |
 | `REQUIREMENTS.md` | Product requirements from the owner: standalone, minimal communication, control, checks, resilience, rollback. |
 | `MIGRATION_METHOD.md` | The migration method taken from the owner's playbook: classes, phases, gates, rollback, check catalogue, evidence. |
@@ -14,6 +17,6 @@
 | `PLAYBOOK_TRACE.md` | Playbook v1.2 step by step: what OpenMove covers, what is only checked, what is not built, and the gaps. |
 | `ENGINE_PLAN.md` | The plan for building the migration engine for a test environment: milestones, what fakes can prove, what only a lab can prove, and what the environment must provide. |
 | `SAFETY.md` | The safety case: hazards, the control for each, where it is in the code, which test proves it, and what is not yet built. |
-| `DESIGN.md` | Proposed architecture: components, back-end adapters, version detection and release profiles, step contract, open questions. |
+| `DESIGN.md` | The original proposal (partly built; `ARCHITECTURE.md` describes what exists):  components, back-end adapters, version detection and release profiles, step contract, open questions. |
 
 Every document in this folder is kept in step with the code. A change that alters behaviour updates the matching document in the same commit.

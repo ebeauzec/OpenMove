@@ -1,6 +1,6 @@
 # User guide
 
-How to start OpenMove, how to demonstrate it, and how to use every part of it. For what the tool does at each step and which calls it makes, see `PROCESS.md` and `API_CALLS.md`. For the safety rules, see `SAFETY.md`.
+How to start OpenMove, how to demonstrate it, and how to use every part of it. To install it, see `INSTALL.md`. To run a migration step by step, see `OPERATIONS.md`. For how it is built, see `ARCHITECTURE.md`. For what the tool does at each step and which calls it makes, see `PROCESS.md` and `API_CALLS.md`. For the safety rules, see `SAFETY.md`.
 
 ## Table of contents
 
@@ -32,7 +32,9 @@ OpenMove runs on Windows, macOS and Linux. It contacts the OpenStack cloud you g
 
 **To audit, take the inventory, run the pre-flight and build reports (everything in this version):** the address of the OpenStack **identity (Keystone) API**, for example `https://cloud.example:5000`, and an **administrator** account with its project and domains. That is all. Give the identity API address, not the Horizon dashboard address. OpenMove reads the Cinder and Nova addresses from the identity service's catalogue, so the machine running OpenMove must be able to reach those endpoints (public, internal or admin, as chosen on the Connect tab). The administrator role is needed because the all-projects volume, snapshot, instance and backup lists, the Cinder services, the back-end pools, the compute hosts and the project names are visible only to an administrator. With a lesser account OpenMove still works and shows what it could not read; the checks that depended on it say "not checked".
 
-**To migrate (a later version):** the administrator account is not enough. A migration also needs facts and actions that the OpenStack API does not offer:
+**To move class A and B volumes (this version):** the same administrator account is enough, with the APIs only. A change is allowed only when the release has a recorded lab validation (gate G0), the pre-flight gate is approved, and a second person has signed G2 and G3 for each volume. Nothing is installed on any host.
+
+**To move class C volumes (not built):** the administrator account is not enough. That method also needs facts and actions that the OpenStack API does not offer:
 
 | Needed | For |
 |---|---|
@@ -52,6 +54,8 @@ Until that access is given, the checks that need it show "not checked" and need 
 |---|---|
 | `OpenMove.bat` | The real tool. |
 | `OpenMove-Demo.bat` | The demonstration (section 3). Nothing real is touched. |
+| `OpenMove-Lab.bat` | OpenMove against the OpenStack lab on this machine, and the lab's dashboard in a second window (`LAB.md`). It starts the lab if needed. |
+| `OpenMove-Lab-Stop.bat` | Stops the lab gracefully. Close OpenMove first. |
 
 Each file opens a console window and, a moment later, your browser at the OpenMove address. If the browser does not open, copy the address printed in the console ("Open: http://127.0.0.1:...") into your browser. Close the console window, or press Ctrl+C, to stop OpenMove.
 
@@ -140,11 +144,11 @@ The header shows the connection state, the version and the **HALT** button. A th
 
 | Class | Meaning | Route |
 |---|---|---|
-| A | No snapshots. | Standard Cinder move. |
-| B | Snapshots that rotate away within the window. | Wait for them to rotate, then the standard move. |
-| C | Long-lived snapshots. | Staged migration. |
+| A | No snapshots. | Cinder's retype (OpenMove moves it). |
+| B | Snapshots that rotate away within the window. | Wait for them to rotate, then Cinder's retype. Needs the snapshot history from the database. |
+| C | Long-lived snapshots, or snapshots whose rotation is not known (no database access). | Staged migration. **Not built**: held back with the cause "No data mover" and steps to resolve it. |
 | D | Attached to an instance that is not `ACTIVE` or `PAUSED`. | After the instance runs, or after an administrator locks and detaches it. |
-| E | Encrypted, multiattach, in a group, replicated, in an unusable state, mid-migration, or with a bad array volume id. | Not handled by this method. Listed for a separate plan. |
+| E | Cinder's own image-cache volume, encrypted, multiattach, in a group, replicated, in an unusable state, mid-migration, or with a bad array volume id. | Not handled by this method. Listed for a separate plan. |
 
 Class B and the array volume id (`provider_id`) need facts that only the Cinder database holds. Without database access, import the playbook's read-only queries (A1, A2, A4 and the attached-instances list) in the Inventory tab. OpenMove says what it assumed when it did not have them; it never guesses.
 
@@ -171,6 +175,19 @@ The playbook has a second person sign three points for each volume. On the Live 
 * **Sign G4** appears when volumes passed the post-check. Without G4 the soak does not start.
 * The signer must not be the operator of the run (the person who signed the pre-flight gate as operator). You enter your name and what you checked; it is kept in the journal. Volumes that are not yet at that point are skipped.
 * In demonstration mode a button lets a made-up second person sign for you.
+
+### The Move tab: run the engine
+
+The Move tab moves the selected class A and B volumes with Cinder's retype. In short:
+
+1. *Dry run*: reads the cloud and lists the exact calls (a lock, one retype with on-demand migration, an unlock), changing nothing. Read it.
+2. *Start the run*: enter your name. Each volume is validated and waits for a second person to sign G2 and G3.
+3. *Sign G2 and G3 (second person)*, then *Release all for the retype* (if the volumes are held).
+4. The engine locks the instance, sends the retype, follows it, checks the result against the before-state and unlocks.
+5. *Sign G4 (second person)* after the owner has checked the application. The soak starts.
+6. *Reverse* puts a volume back with a retype back.
+
+A real run needs a recorded lab validation of the release (*Record lab validation (G0)*), an approved gate and no halt. Every step, every note and every checklist is in `OPERATIONS.md`.
 
 ### One volume in detail
 
@@ -224,7 +241,7 @@ The Live tab shows what is happening, refreshed about once a second:
 * **Volumes**: every volume with its class, phase, progress and note. Click a row for the detail panel.
 * **Volumes not migrated**: each volume that stopped, was rolled back or held back, with the cause, how it ended and the proposed steps to resolve it. *Volumes not migrated (Word)* on the Reports tab builds the same as a report.
 
-Until the migration engine exists, the tab is empty on a real cloud. In demonstration mode it can run a simulated migration (section 3).
+On a real cloud the tab shows the volumes the engine has taken, with the real phases. In demonstration mode it can run a simulated migration (section 3); the real engine is on the Move tab.
 
 ## 8. Halt
 
@@ -270,6 +287,8 @@ Everything OpenMove reads about a customer's cloud stays on the machine it runs 
 | `--allow-host <name>` | An extra `Host` header value to accept, for example behind a container port mapping. |
 | `--home <folder>` | Where the journal is kept. |
 | `--no-browser` | Print the link; do not open the browser. |
+| `--lab` | Lab mode: connect to the OpenStack lab on this machine and use the real engine (`LAB.md`). Uses `C:\OpenMoveLab\openmove-home`. |
+| `--lab-reset` | With `--lab`: forget the lab's journal and evidence first. |
 
 ## 12. Troubleshooting
 
@@ -286,6 +305,11 @@ Everything OpenMove reads about a customer's cloud stays on the machine it runs 
 | The gate is **stale**. | The pre-flight is older than 24 hours. Run it again and sign again. |
 | The gate is **blocked** and a check cannot be attested. | A failed check cannot be waived. Fix the cause and run the pre-flight again. |
 | "all changes are halted". | Someone pressed HALT. Read the reason in the red banner; resume only when it is resolved. |
+| A volume on the Move tab says "waiting for a second person to sign G2 and G3". | That is the rule. A person who is not the operator signs on the Move tab after checking the volume. |
+| The dry run says a volume is blocked. | Read the failed check beside it. The tool is refusing something unsafe (wrong back-end, a snapshot left, encrypted, a busy instance, a lock state it cannot see). |
+| "the lab validation needs two different people". | Record lab validation (G0) needs two names, and a description of at least 40 characters. |
+| A volume on the Move tab says "the post-check failed: halted". | The result differs from the before-state. Look at the volume and the instance; reverse it, or fix it by hand, then resume. |
+| The engine seems stopped after a restart. | Connect, detect the platform, run the pre-flight, sign again, then press *Start the run* with the same target type. It resumes from the journal (`OPERATIONS.md` section 6). |
 
 ## 13. Words used in the screens
 
@@ -308,3 +332,9 @@ Everything OpenMove reads about a customer's cloud stays on the machine it runs 
 | **Read only** | A cloud whose OpenStack release has no recorded, passed lab validation: OpenMove reads and reports but changes nothing. |
 | **Single host / relay** | The two ways the existing Cinder hosts can do the copy (section 9). |
 | **Journal** | The local, append-only record of everything OpenMove did. |
+| **Retype** | Cinder's own way to move a volume to another volume type, and so to another back-end, with on-demand migration. OpenMove asks for one retype per volume and follows it. |
+| **Dry run** | The Move tab's preview: the checks and the exact calls a run would make. It sends nothing. |
+| **G0** | The recorded lab validation of an OpenStack release. Without it the cloud is read only. |
+| **G1** | The pre-flight gate. |
+| **G2, G3, G4** | Per-volume sign-offs by a second person: the move is ready (G2, G3) and the result is verified (G4). |
+| **Lab** | A real OpenStack on this machine (`LAB.md`) used to test the engine. It is not a customer cloud. |

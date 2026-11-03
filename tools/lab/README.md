@@ -13,3 +13,10 @@ Needs: WSL 2, about 20 GB of free disk space, 8 GB of memory or more, and hardwa
 6. `OpenMove-Lab.bat seed`, then `OpenMove-Lab.bat`.
 
 The kernel pieces WSL does not load by itself (iSCSI initiator and target, device mapper, Open vSwitch) are listed in `/etc/modules-load.d/openmove-lab.conf` by the script; `OpenMove-Lab.bat up` loads them again after a restart.
+
+## Re-running `stack.sh`
+
+Run it again only if you must (for example to turn on another service). Stop the services first, and make sure the automatic updater is not holding the package lock; otherwise the second run fails in the network step or at the first package install. `docs/LAB.md` ("Troubleshooting the lab") gives the cause and the fix of each problem met while setting the lab up, including the harmless error in `create_userrc.sh` at the very end.
+
+`OpenMove-Lab.bat seed` raises the lab project's quotas itself, so no quota step is needed before seeding.
+

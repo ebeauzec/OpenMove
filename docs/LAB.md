@@ -79,3 +79,28 @@ Not yet exercised in the lab: failure injection (a refused lock, a stopped servi
 ## Setting the lab up the first time
 
 See `tools/lab/README.md`. In short: an Ubuntu 24.04 WSL image is imported as the distro `openmove-lab`, and `tools/lab/provision_devstack.sh` installs DevStack with two LVM back-ends. It takes about 40 minutes and several gigabytes of downloads (Ubuntu packages, Python wheels, OpenStack source from opendev.org).
+
+## Troubleshooting the lab
+
+These come from setting the lab up. Where something was not seen but is expected, the text says so.
+
+| Problem | Cause and fix |
+|---|---|
+| A second run of `stack.sh` fails at the first network with "No tenant network is available for allocation". | A re-run recreates the Neutron database while the old Neutron server is still running, so the network-id table is empty (`ml2_geneve_allocations` has no rows) and the OVN hash ring is empty. **Stop every DevStack service before a re-run:** `systemctl stop 'devstack@*'` inside the distro, then run `stack.sh`. |
+| `stack.sh` stops at its first package install with "Could not get lock /var/lib/dpkg/lock-frontend ... unattended-upgr". | After the distro starts, Ubuntu's automatic updater holds the package lock. Stop `unattended-upgrades` and wait until the lock is free, then run `stack.sh` again. |
+| `stack.sh` ends with an error in `create_userrc.sh` ("Failed to discover available identity versions when contacting http://localhost:5000/v3/"). | That step only writes per-user credential files. By then Keystone, Cinder, Nova, Glance, Neutron and Horizon are installed and running. Check with the dashboard (`/dashboard/auth/login/` answers 200) and `OpenMove-Lab.bat status`. Nothing else is needed. |
+| `OpenMove-Lab.bat seed` stops with "Maximum number of volumes allowed (10) exceeded". | DevStack's default quotas are small. The seeder now raises the lab admin project to 200 volumes, 2000 GiB, 200 snapshots, 50 instances and 100 cores before it creates anything. |
+| `Failed to translate 'G:\My Drive\...'` when `wsl` runs. | `wsl` was started from a folder it cannot map (a cloud-drive path). The lab launcher starts it from a neutral folder. For a command of your own, start it from `C:\`. |
+| A helper script run in the distro fails with a strange character error. | The script has Windows line endings. Scripts run by `bash` inside the distro need LF endings. |
+| A path such as `/mnt/c/...` is rewritten when passed to `wsl` from a Unix-style shell on Windows. | Run `wsl` commands from PowerShell, not from Git Bash. |
+| Windows reaches Keystone at `localhost` but not the other services after a restart. | **Expected, not yet seen.** The service catalogue holds the address the distro had when `stack.sh` ran, and WSL can give the distro another one after a restart. Re-run `stack.sh` (stop the services first, see above) to write the catalogue again. |
+| The loop devices behind the two volume groups are gone after a restart. | `OpenMove-Lab.bat up` attaches them again and starts the services. Use `OpenMove-Lab-Stop.bat` rather than closing the window, so the services stop cleanly. |
+| `OpenMove-Lab-Stop.bat` says it refuses. | `stack.sh` is still running. Wait for it, or stop it by hand. |
+| The dashboard does not open in the second window. | Horizon is not installed or still starting. The console says so; open `/dashboard` yourself. The automatic sign-in has been tested against a fake dashboard only; it has not yet been tried against the real one. |
+| `OpenMove-Lab.bat` says the lab cloud does not answer. | Start it: `OpenMove-Lab.bat up`. The launcher does this by itself when it can. |
+
+## Resetting the lab
+
+* **Test objects only:** `OpenMove-Lab.bat clean`, then `OpenMove-Lab.bat seed`. `clean` removes everything named `lab-*` (servers first, then snapshots, then volumes).
+* **OpenMove's records:** `OpenMove-Lab.bat reset` starts lab mode with an empty journal and evidence folder.
+* **The whole cloud:** `wsl --unregister openmove-lab`, then set it up again from `tools/lab/README.md`. Allow about 40 minutes.

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1 (2026-11-03)
+
+### Added
+- Documentation: architecture overview, installation guide, operation guide; README, CONTEXT, user guide and lab troubleshooting brought up to date
+
 ## 0.6.0 (2026-11-03)
 
 ### Added

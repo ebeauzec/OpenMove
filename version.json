@@ -1,8 +1,8 @@
 {
-  "version": "0.6.0",
+  "version": "0.6.1",
   "major": 0,
   "minor": 6,
-  "patch": 0,
+  "patch": 1,
   "date": "2026-11-03",
-  "notes": "Real-lab results: Horizon sign-in, graceful stop, seeded catalogue, image-cache and lock fixes"
+  "notes": "Documentation: architecture overview, installation guide, operation guide; README, CONTEXT, user guide and lab troubleshooting brought up to date"
 }

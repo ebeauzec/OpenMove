@@ -12,7 +12,7 @@ The functional specification (the playbook) is supplied by the owner and is stor
 
 ## 2. Architecture
 
-Proposed in `docs/DESIGN.md` (awaiting the owner's confirmation of the open questions there): platform independent (R10), available as a container and as its own Linux image, pointed at a migration host and controlling every phase from the interface (R11), split into a control plane that runs on any operating system and a data mover helper that runs on a Linux migration host over SSH; a single Python code base with an embedded SQLite journal, a local web GUI, connectors for the OpenStack APIs, the Cinder database, SSH and the arrays, back-end adapters with capability profiles, a version-detecting discovery module with per-release profiles (R9), a step engine with write-ahead journal and a recorded inverse for every step, a check framework, and a report model rendered to Word and other formats. The method it automates is summarised in `docs/MIGRATION_METHOD.md`.
+The architecture as built is in `docs/ARCHITECTURE.md`: one Python process (standard library only) with a local web interface, a journal in SQLite, an engine that moves class A and B volumes with Cinder's retype, and a safety layer (release profile, gate, halt, a permit asked again before every change). `docs/DESIGN.md` is the earlier proposal for the parts that are not built (SSH, data mover, array adapters, the staged method for class C, the container).
 
 ## 3. File Inventory & Purpose
 
@@ -68,6 +68,17 @@ Proposed in `docs/DESIGN.md` (awaiting the owner's confirmation of the open ques
 | `openmove/resources/releases.json` | Microversion table per release, with source and retrieval date. |
 | `openmove/resources/release_profiles.json` | Per-release behaviour (Queens profile from the playbook). |
 | `openmove/resources/web/` | The interface: `index.html`, `styles.css`, `app.js`. Text is inserted as text, never as markup. |
+| `docs/ARCHITECTURE.md` | The architecture as built, with diagrams. |
+| `docs/INSTALL.md` | Installation guide. |
+| `docs/OPERATIONS.md` | Operation guide: the procedure, the way back, halt and restart, notes, checklists. |
+| `docs/LAB.md` | The OpenStack lab: what it proves, commands, the seeded catalogue, what it has shown, troubleshooting. |
+| `OpenMove-Lab.bat`, `OpenMove-Lab-Stop.bat` | Start OpenMove against the lab (and the dashboard); stop the lab gracefully. |
+| `tools/lab/` | `lab.py` (status, up, down, seed, clean, list), `seed.py`, `lab_up.sh`, `lab_down.sh`, `provision_devstack.sh`, `README.md`. |
+| `openmove/engine/` | The retype engine: `runner.py` (what comes next), `plan.py` (checks and dry run), `actions.py` (the only code that sends a change), `evidence.py`. |
+| `openmove/lab/__init__.py` | Lab mode: configuration, connect, the Horizon sign-in. |
+| `openmove/handling.py` | What happens to each class, and the cause and steps for every volume that is not migrated. |
+| `openmove/selection.py`, `openmove/risk.py` | The selection and the settings (R16); workload risk (R17). |
+| `tests/test_engine.py`, `test_access.py`, `test_lab.py`, `test_handling.py`, `test_selection.py` | The engine against a mock cloud with fault injection; access levels and real-lab findings; lab configuration; causes; selection. |
 | `tests/mock_openstack.py` | A mock Keystone, Cinder and Nova cloud with made-up data. |
 | `tests/test_core.py` | Tests for release inference, profiles, journal, classification and exports. |
 | `tests/test_cloud.py` | Tests for discovery, inventory and the web server against the mock cloud. |
@@ -75,40 +86,43 @@ Proposed in `docs/DESIGN.md` (awaiting the owner's confirmation of the open ques
 
 ## 4. Interface
 
-A local web interface, started with `python -m openmove`. It listens on the loopback address only, and the page and every call need the per-run token printed at start. Tabs: **Connect** (Keystone details; the password stays in memory), **Platform** (release, API versions, back-ends, services, compute hosts, read-only status), **Inventory** (read from the cloud or imported from the playbook's query results; counts by class, filter and search), **Audit** (the environment audit), **Pre-flight** (checks, attestations, sign-off, the gate), **Reports** (Word), **Live** (progress meter, the order, the gate, the event feed), **Journal** (recorded events and unresolved steps). The header carries the HALT button. Every table sorts by clicking a column header. In demonstration mode a banner offers three scenarios.
+A local web interface, started with `python -m openmove`. It listens on the loopback address only; the page and every call need the per-run token printed at start. Tabs: **Connect**, **Platform**, **Inventory**, **Audit**, **Pre-flight**, **Select**, **Move**, **Reports**, **Live**, **Journal**, with Back and Next buttons and a red **HALT** button in the header. Text is inserted as text, never as markup. Modes: real, `--demo` (made-up cloud, simulated migration) and `--lab` (a real OpenStack on this machine, with the real engine). See `docs/USER_GUIDE.md` and `docs/OPERATIONS.md`.
 
 ## 5. What Is Complete
 
-- Project scaffold, documentation set, versioning and release helper.
-- Repository safeguards: hooks and sensitive-data guard.
-- Release detection from API versions, with a table verified against the OpenStack documentation, and release profiles that keep an unvalidated release read only.
-- Read-only inventory and classification (classes A-E) through the OpenStack APIs, or from imported playbook exports.
-- Local web interface: connect, platform, inventory, audit, pre-flight, reports, live view, journal, halt; sortable tables.
-- The check framework (P, V, S, C, X catalogue): every check that can run, honest "not checked" for the rest, attestations, four-eyes sign-off and a fail-closed gate.
-- Environment audit (22 rules) and Word reports (pre-migration report with the audit as a separate part).
-- Safety layer: read-only client, permit, halt switch, and the lifecycle (the fixed order and the cutover conditions).
-- Demonstration mode with three scenarios (SolidFire to Pure, SolidFire to ONTAP, a large enterprise cloud) and a simulated migration run.
-- Launchers, and a build script for a standalone program with nothing to install.
-- Documentation of the process and every call, kept in step with the code by a test.
-- Journal with write-ahead steps and recorded inverses (the engine that later steps use).
-- About 135 automated tests against a mock cloud.
+- Project scaffold, documentation set, versioning and release helper; repository safeguards (hooks, sensitive-data guard).
+- Release detection from API versions, release profiles, and read only until a lab validation is recorded.
+- Read-only inventory and classification (classes A-E, including Cinder's image-cache volume as class E) through the OpenStack APIs, or from imported playbook exports.
+- The check framework (P, V, S, C, X), attestations, four-eyes sign-off and a fail-closed gate; the environment audit; Word reports (pre-migration, audit, not migrated).
+- The safety layer: read-only client, permit asked before every change, halt, the fixed order of a migration, per-volume gates G2, G3, G4 signed by a second person.
+- Selection with granular control and settings (R16); workload risk (R17); the per-volume process view (R18); the not-migrated report with causes and steps (R15).
+- The retype engine for class A and B (APIs only): lock, retype with on-demand migration, follow, post-check against the before-state, unlock, soak, reverse by retype back; unknown outcomes halt; resumable from the journal.
+- Access levels: OpenStack APIs only (default) or APIs, hosts and arrays.
+- Demonstration mode (three scenarios, simulated migration) and lab mode (a real OpenStack in WSL, a seeded catalogue of 26 volumes and 8 servers, Horizon sign-in, graceful stop).
+- 252 automated tests; the real engine has moved detached, attached and boot volumes in the lab and reversed two of them.
+- Documentation: architecture, installation, operation, user guide, process, every call, safety case, classes, workload risks, playbook trace, lab.
 
 ## 6. What Is Partially Done
 
-- Classification without database access cannot check `provider_id` or snapshot rotation; the result lists these as not checked. Importing the playbook's query results closes the gap.
+- Classification without database access cannot check `provider_id` or snapshot rotation. A volume with snapshots is then class C ("rotation unknown"). Importing the playbook's query results closes the gap. The class B path (wait for rotation) is covered by mock tests only.
+- Playbook step 1.7 (internal-tenant volumes): the image-cache volume is found; others are not.
+- The failure paths of the engine are tested against a mock with fault injection. In the lab only the forward move and the way back have been run.
 
 ## 7. What Is Not Started
 
+- The class C engine (staged copy, history rebuild, record swap, rollbacks R1 and R2), the data mover host, SSH, database access and array adapters.
+- Lab tests T1 to T21 as guided procedures; recording gate G0 from them.
 - The after report and the before/after comparison.
-- Any step that changes the cloud: class A move, staged migration, rollback runner.
-- Data mover helper, migration host registry, SSH, array adapters.
 - Container image and own Linux image. The standalone program is built by `tools/build/build_exe.py` but has not been run on a machine without Python.
-- Lab validation of any release. Nothing has run against a real cloud.
+- Authentication and roles for the interface.
+- Playbook v1.3: not yet compared with the code (`docs/PLAYBOOK_TRACE.md` is for v1.2).
 
 ## 8. Known Issues / Bugs
 
-- Nothing has run against a real cloud yet; the Queens profile is `untested` until a lab validation is recorded.
-- The authentication model for the interface, the SSH client and the report formats beyond Word are still open questions (`docs/DESIGN.md` section 9).
+- **Nothing has run against a customer cloud.** No customer release has a recorded lab validation; the Queens profile is `untested`.
+- The lab proves the engine against a recent release (2025.1) with LVM back-ends. It says nothing about Queens, SolidFire or FlashArray.
+- The lab's `stack.sh` may stop at its last step (`create_userrc.sh`) with an address error. The cloud is complete when that happens (`docs/LAB.md`).
+- Open questions for the owner (`docs/DESIGN.md` section 9): the SSH client, report formats beyond Word, interface authentication and roles, whether medium-risk volumes should also be blocked.
 
 ## 9. Code Quality Observations
 
@@ -121,12 +135,18 @@ Standard library only (a test enforces it). The standalone program contains the 
 | 0.1.0 | 2026-11-02 | Project scaffold. |
 | 0.2.x | 2026-11-02 | Requirements R1-R11, migration method, design. |
 | 0.3.0 | 2026-11-02 | Version detection, read-only inventory, local web interface, journal, tests. |
-| 0.4.0 | 2026-11-02 | Checks, gate and reports; environment audit; demonstration mode and scenarios; safety layer and the order of a migration; live view; launchers and standalone build; documented process and calls. |
+| 0.4.x | 2026-11-02 | Checks, gate and reports; audit; demonstration mode; safety layer and the order of a migration; selection, workload risk, unmigrated reports; per-volume gates G2, G3, G4; wizard Back and Next. |
+| 0.5.0 | 2026-11-02 | The retype engine for class A and B (APIs only); access levels; the lab. |
+| 0.6.0 | 2026-11-03 | First runs against a real OpenStack lab: Horizon sign-in, graceful stop, a seeded catalogue; fixes found there (the way back is locked, the image-cache volume, volumes already on the target, the Nova lock state). |
+| 0.6.1 | 2026-11-03 | Documentation: architecture overview, installation guide and operation guide; README, CONTEXT, user guide and lab troubleshooting brought up to date. |
 
 Full history is in `CHANGELOG.md` and the git log.
 
 ## 11. Logical Next Steps
 
-1. Owner confirms the remaining open questions in `docs/DESIGN.md` section 9 (SSH client, report formats, authentication).
-2. The migration engine, built on `safety.py` and `lifecycle.py`: class A move with rollback, then the staged migration and the data mover helper; fault-injection tests for every step that changes anything (`docs/SAFETY.md`).
-3. Lab validation of a release; array and database access for the checks that are "not checked" today; the container image.
+1. Compare the code and `docs/PLAYBOOK_TRACE.md` with playbook v1.3 and the script bundle v1.3 (supplied by the owner, kept local).
+2. Failure injection in the lab: a refused lock, a stopped service during a move, the halt button during a real move, a retype of a volume with a snapshot.
+3. The lab tests T1 to T21 as guided procedures, so a lab validation (gate G0) can be recorded from them.
+4. Owner decisions: the SSH client, report formats, interface authentication; whether to build the class C engine (the reviewer advises keeping it out of the critical path).
+5. A test-environment deployment of the packaged program, run first as a dry run.
+

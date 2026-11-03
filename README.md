@@ -2,7 +2,7 @@
 
 OpenMove is a GUI-driven tool that automates the audit, reporting and migration of OpenStack Cinder volumes. It connects directly to an OpenStack cloud and does its work by calling OpenStack's own services and clients, so every action is one the cloud already supports and records.
 
-> **Status:** early development. Version detection, the read-only inventory and classification, the environment audit, the pre-flight checks with the gate, Word reports, the live view and a demonstration mode work and are tested against a mock cloud. The engine that moves class A and B volumes with Cinder's retype is built and tested against a mock cloud; the engine for class C is **not built yet**, and nothing has run against a real cloud. Until a release has a recorded lab validation, the tool is read only. The safety rules and the fixed order of a migration are already built and tested (`docs/SAFETY.md`, `docs/PROCESS.md`).
+> **Status:** version 0.6.1, in development. It reads a cloud, classifies its volumes, runs a pre-flight with a gate, builds Word reports and moves class A and class B volumes with Cinder's retype using only the OpenStack APIs. The move engine has run against a real OpenStack lab on a development machine (detached, attached and boot volumes, and the way back); it has **never run against a customer cloud**, and no customer release is validated, so the tool is read only until people record a lab validation. Class C (long-lived snapshots) needs a data mover and is **not built**. 252 automated tests pass. See `docs/ARCHITECTURE.md` for how it is built and `docs/OPERATIONS.md` for how to run it.
 
 ## Table of Contents
 
@@ -24,6 +24,7 @@ OpenMove is a GUI-driven tool that automates the audit, reporting and migration 
 | **Audit** | Inventory Cinder volumes across projects and backends, and report their state, attachment, type, size and placement. |
 | **Reporting** | Verbose, enterprise-standard reports: every pre-migration check, the volumes to be moved, and progress and update reports for the operations team. |
 | **Migration** | Plan and run volume moves between back-ends, with checks before and after each move and rollback of every action. Volumes are chosen one by one or by group; a volume that hosts a workload that may break is not moved until two people clear it; a volume that is not migrated is explained in a report. Class A and B move with Cinder's retype using only the OpenStack APIs; class C needs a data mover and is not built yet (`docs/PLAYBOOK_TRACE.md`). |
+| **Lab** | A real OpenStack (DevStack) on a Windows machine, with seeded test volumes, so the real engine can be run and tested without a customer cloud (`docs/LAB.md`). |
 
 Back-end support is broad by design, with a focus on moves to and from NetApp SolidFire, NetApp ONTAP and Pure Storage. Each back-end pair is listed in a support matrix with its migration method and verification status.
 
@@ -49,21 +50,23 @@ The detailed behaviour of each area is defined by the specification in `docs/`.
 | Windows | Double-click `OpenMove.bat` (the real tool) or `OpenMove-Demo.bat` (the demonstration). |
 | macOS, Linux | `./openmove.sh` or `./openmove.sh --demo` |
 | From source | `python -m openmove` or `python -m openmove --demo` |
+| The lab (Windows, needs the lab installed) | Double-click `OpenMove-Lab.bat`; stop it with `OpenMove-Lab-Stop.bat` (`docs/LAB.md`) |
 | Build the standalone program | `python -m pip install pyinstaller`, then `python tools/build/build_exe.py`; the result is in `dist/` |
 
 OpenMove starts a web server that only this machine can reach, prints a link with a one-time access token and opens it in your browser.
 
 **Demonstration mode** needs no cloud: a built-in cloud with made-up data, three scenarios (SolidFire to Pure, SolidFire to NetApp ONTAP, and a large enterprise cloud on Mirantis Cloud Platform), a simulated migration with a live progress view, and a temporary data folder. Every screen and report says so.
 
-**On a real cloud**, give the address of the OpenStack identity (Keystone) API and an administrator account. That is enough to audit, take the inventory, run the pre-flight and build reports. Migrating later needs more access (Cinder database, hosts, arrays); see `docs/USER_GUIDE.md`.
+**On a real cloud**, give the address of the OpenStack identity (Keystone) API and an administrator account. That is enough to audit, take the inventory, run the pre-flight and build reports. Moving class A and B volumes needs nothing more than that account, plus a recorded lab validation of the release, an approved gate and a second person's signature for each volume. Class C needs more access (Cinder database, hosts, arrays); see `docs/USER_GUIDE.md` and `docs/OPERATIONS.md`.
 
 1. **Connect:** the password stays in memory and is never written to disk, the journal or a report.
 2. **Platform:** the OpenStack release, API versions, back-ends, Cinder services and compute hosts.
 3. **Inventory:** volumes by class (A to E).
 4. **Audit:** the whole environment, with findings.
 5. **Pre-flight:** every check, attestations, two sign-offs, and the gate.
-6. **Reports:** Word documents, with the audit as a separate part.
-7. **Live:** progress, the order every volume follows, the gate, the halt and the event feed.
+6. **Select:** which volumes move, and the settings.
+7. **Move:** the dry run, the run, the second person's signatures, the way back.
+8. **Reports**, then **Live:** progress, the order every volume follows, the gate, the halt and the event feed.
 
 The red **HALT** button in the header stops all changes at once. The full guide, with the demonstration script, troubleshooting and a glossary, is `docs/USER_GUIDE.md`.
 
@@ -80,10 +83,12 @@ The red **HALT** button in the header stops all changes at once. The full guide,
 | `THIRD_PARTY_NOTICES.md` | Licences of third-party components and trademark notices. |
 | `openmove/` | The application (Python, standard library only). |
 | `OpenMove.bat`, `OpenMove-Demo.bat`, `openmove.sh` | Launchers. |
+| `OpenMove-Lab.bat`, `OpenMove-Lab-Stop.bat` | Start OpenMove against the lab; stop the lab gracefully. |
 | `tests/` | Automated tests and a mock OpenStack cloud. |
 | `docs/` | Specification, design and operating documents. See `docs/README.md`. |
 | `tools/` | Repository tooling, including the sensitive-data guard. |
 | `tools/dev/` | Developer helpers (release bump). |
+| `tools/lab/` | The lab: setup, start, stop, seed (`tools/lab/README.md`). |
 | `tools/build/` | Builds the standalone program. |
 | `.githooks/` | Git hooks that enforce the rules in section 7. |
 | `data/` | Local runtime data. Never committed. |
@@ -97,7 +102,7 @@ Everything in the project is documented, and the documentation changes in the sa
 | `README.md` | Purpose, usage and layout. |
 | `CONTEXT.md` | Architecture and project state. |
 | `CHANGELOG.md` | What changed in each version. |
-| `docs/` | Specification and detailed design, including the user guide, the process, every call, the safety case, the classes, the workload risks and the playbook trace. |
+| `docs/` | The documentation set: `ARCHITECTURE.md` (how it is built), `INSTALL.md` (installation), `OPERATIONS.md` (step-by-step operation), `USER_GUIDE.md`, `PROCESS.md`, `API_CALLS.md`, `SAFETY.md`, `LAB.md`, and the specification and trace documents. Index: `docs/README.md`. |
 
 ## 6. Development
 
