@@ -118,6 +118,15 @@ class DryRunTests(EngineCase):
         by = {x["id"]: x for x in self.engine.dry_run(type_map={"fast": "pure"})["volumes"]}
         self.assertEqual(by[V1]["verdict"], "ok")
 
+    def test_a_dry_run_is_remembered_for_the_volumes_it_covered_and_the_pre_flight_run(self):
+        self.state.checks["run_id"] = "r1"
+        self.assertFalse(self.engine.dry_covers([V1]))
+        self.engine.dry_run([V1], None)
+        self.assertTrue(self.engine.dry_covers([V1]))
+        self.assertFalse(self.engine.dry_covers([V1, V2]))               # V2 was not read
+        self.state.checks["run_id"] = "r2"                               # a new pre-flight run: the dry run is out of date
+        self.assertFalse(self.engine.dry_covers([V1]))
+
     def test_a_dry_run_needs_a_pre_flight(self):
         self.state.checks = None
         with self.assertRaises(EngineError):
@@ -280,6 +289,27 @@ class FailureTests(EngineCase):
         self.assertEqual((self.vol(V1)["volume_type"], self.vol(V1)["os-vol-host-attr:host"]), ("fast", "ctl@sf-1#pool"))
         self.assertIn(V1, self.engine.failed)
 
+    def test_a_retype_that_the_cloud_accepts_and_silently_undoes_is_rolled_back(self):
+        # Seen on a real Cinder: a volume with a snapshot. The call is answered 202, the volume goes back to normal, nothing says why.
+        self.cloud.revert_retype.add(V2)
+        self.go(V2)
+        self.run_until(V2, "cutover", 1)
+        for _ in range(4):
+            self.engine.tick()                                           # the cloud has undone it by now
+        self.assertEqual(self.phase(V2), "cutover")                      # inside the grace time it is still given the benefit of the doubt
+        self.now += timedelta(seconds=60)
+        self.run_until(V2, "done")
+        self.assertIn(V2, self.engine.failed)
+        self.assertEqual(self.vol(V2)["volume_type"], "fast")
+        self.assertFalse(self.cloud.servers[0]["locked"])                # and the instance lock taken for the move is gone
+        reason = [e for e in L.history(self.state.journal, V2) if e["phase"] == "rollback"][0]["reason"]
+        self.assertIn("put the volume back unchanged", reason)
+
+    def test_a_run_for_volumes_that_are_not_class_a_or_b_is_refused_not_ended_quietly(self):
+        with self.assertRaises(EngineError):
+            self.engine.start(ids=[V4], thread=False)                    # V4 is class C: this method does not move it
+        self.assertEqual(self.cloud.posts, [])
+
     def test_an_instance_that_cannot_be_locked_means_no_retype(self):
         self.cloud.reject_lock.add(SRV)
         self.go(V2)
@@ -323,6 +353,25 @@ class FailureTests(EngineCase):
         self.sign(V1, "G4")
         with self.assertRaises(L.LifecycleError):
             L.enter(self.state.journal, V1, "soak", gate=GATE, now=self.now)
+
+    def test_a_changed_identity_field_fails_the_post_check(self):
+        self.go(V1)
+        self.run_until(V1, "cutover", 1)
+        self.vol(V1)["created_at"] = "2020-01-01T00:00:00.000000"      # a retype must never touch what the tenant sees
+        self.run_until(V1, "postcheck")
+        self.assertFalse(L.current(self.state.journal, V1)["ok"])
+        failed = [c["name"] for c in L.current(self.state.journal, V1)["checks"] if not c["ok"]]
+        self.assertEqual(failed, ["Same creation time"])
+
+    def test_a_rename_or_metadata_edit_during_the_move_does_not_fail_the_post_check(self):
+        self.go(V1)
+        self.run_until(V1, "cutover", 1)
+        self.vol(V1)["name"] = "renamed-by-the-tenant"
+        self.vol(V1)["description"] = "edited"
+        self.vol(V1)["metadata"] = {"owner": "someone"}
+        self.run_until(V1, "postcheck")
+        self.assertTrue(L.current(self.state.journal, V1)["ok"])
+        self.assertIsNone(safety.halted(self.state.journal))
 
     def test_too_many_failures_halt_the_run(self):
         self.state.options["stop_after_failures"] = 1

@@ -1,8 +1,8 @@
 {
-  "version": "0.6.1",
+  "version": "0.7.0",
   "major": 0,
-  "minor": 6,
-  "patch": 1,
+  "minor": 7,
+  "patch": 0,
   "date": "2026-11-03",
-  "notes": "Documentation: architecture overview, installation guide, operation guide; README, CONTEXT, user guide and lab troubleshooting brought up to date"
+  "notes": "Gated wizard, silent-undo detection, walkthrough and options documentation"
 }

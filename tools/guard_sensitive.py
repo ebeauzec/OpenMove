@@ -59,7 +59,8 @@ FORBIDDEN_PATHS = re.compile(
     r"|^CLAUD" + "E\\.md$"
     r"|^\.cl" + "aude/"
 )
-ALLOWED_PATHS = re.compile(r"^docs/images/(?:architecture|workflow)_rendered\.png$")
+# The numbered documentation screenshots are taken by tools/dev/screenshots.py from the demonstration (made-up data) and the lab; look at them before a push
+ALLOWED_PATHS = re.compile(r"^docs/images/(?:(?:architecture|workflow)_rendered|\d\d-[a-z0-9-]+)\.png$")
 
 SOURCE_FILES = re.compile(r"\.(?:py|js|ts|html|css|ps1|bat)$", re.I)
 VENDORED = re.compile(r"(?:^|/)(?:vendor|node_modules)/")

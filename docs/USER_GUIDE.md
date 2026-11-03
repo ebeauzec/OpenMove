@@ -1,6 +1,6 @@
 # User guide
 
-How to start OpenMove, how to demonstrate it, and how to use every part of it. To install it, see `INSTALL.md`. To run a migration step by step, see `OPERATIONS.md`. For how it is built, see `ARCHITECTURE.md`. For what the tool does at each step and which calls it makes, see `PROCESS.md` and `API_CALLS.md`. For the safety rules, see `SAFETY.md`.
+How to start OpenMove, how to demonstrate it, and how to use every part of it. To install it, see `INSTALL.md`. To run a migration step by step, see `OPERATIONS.md`. For how it is built, see `ARCHITECTURE.md`. For the whole process with screenshots, see `WALKTHROUGH.md`; for every option and setting, `OPTIONS.md`. For what the tool does at each step and which calls it makes, see `PROCESS.md` and `API_CALLS.md`. For the safety rules, see `SAFETY.md`.
 
 ## Table of contents
 
@@ -135,6 +135,10 @@ The simulated migration uses made-up evidence and a virtual clock, but the real 
 | **8. Reports** | Enter the customer and your name, choose what to include, press a button. | Builds a Word report and your browser saves it. Includes *Volumes not migrated*. |
 | **9. Live** | Watch. | Shows progress, the order, the gate, the halt, the events and the volumes not migrated. |
 | **Journal** | Read. | Lists what OpenMove recorded. |
+
+**The steps are gated.** A step opens only when every step before it is done. A locked step is greyed out and says "(locked)"; clicking it tells you what is missing; Next stays off until the current step is done. The server decides, so a reload or a link such as `/#move` cannot skip a step. Running the pre-flight again, or changing the selection, closes the later steps again; a real run needs a dry run that covered the same volumes. The whole process, with a screenshot of every step, is in `WALKTHROUGH.md`; every option is in `OPTIONS.md`.
+
+![The gated steps, with the pre-flight approved](images/06-preflight-approved.png)
 
 **Back and Next.** A bar at the bottom of every screen walks through the numbered steps in order (Back and Next name the step they lead to). The tabs at the top still work for jumping. The Journal is not a step; Back returns from it to the last step.
 

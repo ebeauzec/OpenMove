@@ -46,7 +46,7 @@ flowchart TB
     gui["Interface<br/>resources/web (index.html, app.js, styles.css)"]
     srv["Local server and routes<br/>server.py, __main__.py"]
     eng["Engine<br/>engine/runner.py, plan.py, actions.py, evidence.py"]
-    dom["Rules<br/>lifecycle.py, safety.py, selection.py, risk.py, handling.py, classification.py"]
+    dom["Rules<br/>lifecycle.py, wizard.py, safety.py, selection.py, risk.py, handling.py, classification.py"]
     chk["Checks and reports<br/>checks/, audit.py, reports/"]
     inv["Reading<br/>discovery.py, inventory.py, releases.py, profiles.py, exports.py"]
     con["Connectors<br/>connectors/httpclient.py, connectors/openstack.py"]
@@ -172,6 +172,8 @@ flowchart LR
 * **Halt.** A button in the header. Needs a name and a reason. Any person may press it. It takes effect before the next change.
 * **One sender.** `actions.py` is the only engine code that calls `session.mutate()`. Reading that one file is enough to review every change the engine can make.
 
+* **Gated wizard.** `wizard.py` decides, on the server, which of the nine steps is open. A step opens only when every earlier step is done; the selection must be confirmed for the exact pre-flight run and volume ids; a real run needs a dry run that covered the same volumes. The page only draws what `/api/status` says (`wizard`).
+
 The hazards and the control for each are listed in `SAFETY.md`.
 
 ## 8. Data
@@ -211,6 +213,24 @@ The files hold cloud answers (ids, states, sizes). They never hold a password or
 | Headers | `Content-Security-Policy` (including `frame-ancestors 'none'`), `X-Content-Type-Options: nosniff`. |
 | Passwords | Sent once to `POST /api/connect`, held in memory, never written to the journal, a report or a response. |
 
+### The gated wizard
+
+The nine steps are not just tabs. `wizard.steps()` computes, from the state the server holds, which step is done and which is open, and `/api/status` returns it. The page draws it and cannot open a step the server did not open.
+
+```mermaid
+flowchart LR
+    c["Connect"] --> p["Platform"] --> i["Inventory"] --> a["Audit"] --> f["Pre-flight<br/>gate approved"]
+    f --> s["Select<br/>selection confirmed<br/>(run id + volume ids)"]
+    s --> m["Move<br/>dry run covers<br/>the volumes"]
+    m --> r["Reports"] & l["Live"]
+    f -. "run again" .-> f
+    s -. "selection changes" .-> s
+```
+
+* A step is **done** by a fact, not a click: a session exists, a platform was read, an inventory exists, an audit exists, the gate is approved, the selection is confirmed, the dry run covered the volumes the engine would move (or a run already exists, or nothing is movable, or this is the demonstration).
+* The confirmation is keyed on the pre-flight run id and the sorted volume ids. A new run or any change to the selection voids it, and every later step closes.
+* `POST /api/engine/start` asks `wizard.start_refusal()` first. A restart that resumes an existing run is allowed without a new dry run.
+
 ## 10. Three modes
 
 | | Real | Demonstration | Lab |
@@ -240,7 +260,7 @@ The lab shortcuts exist in lab mode only and say so in the journal. A failed che
 | Self-containment (`test_self_contained`) | No third-party import. |
 | The real lab (`OpenMove-Lab.bat`) | The engine's calls and polling against a real Cinder and Nova. Manual. |
 
-Run the automated tests with `python -m unittest discover -s tests -t .`. There are 252 of them. A mock proves the logic and the safety rules; it cannot prove how a Queens cloud behaves. The lab proves behaviour against a recent release, and it already found four things the mock did not (`LAB.md`).
+Run the automated tests with `python -m unittest discover -s tests -t .`. There are 275 of them. A mock proves the logic and the safety rules; it cannot prove how a Queens cloud behaves. The lab proves behaviour against a recent release, and it already found four things the mock did not (`LAB.md`).
 
 ## 13. What is not built
 

@@ -23,6 +23,11 @@ from .evidence import Evidence
 
 ROTATION_TIMEOUT = timedelta(hours=72)      # how long a class B volume may wait for its snapshots to rotate away before it is given up
 MIGRATION_TIMEOUT = timedelta(hours=6)      # how long a retype may run before the engine halts and asks a person
+RETYPE_GRACE = timedelta(seconds=30)        # after this long, a volume that is back to normal and not on the target means the retype was undone
+# The fields a retype must never change (playbook step 5.10.5): who owns the volume, where it lives and what it was made from.
+IDENTITY_FIELDS = (("id", "id"), ("creation time", "created_at"), ("project", "os-vol-tenant-attr:tenant_id"), ("user", "user_id"),
+                   ("snapshot origin", "snapshot_id"), ("source volume", "source_volid"), ("availability zone", "availability_zone"),
+                   ("multi-attach flag", "multiattach"))
 MOVED = ("A", "B")
 
 
@@ -105,21 +110,33 @@ class Engine:
             counts[v] += 1
             rows.append({"id": vid, "class": specs[vid]["class"], "verdict": v, "target_type": specs[vid]["target_type"],
                          "checks": checks, "calls": plan.planned_calls(vol, specs[vid], servers) if v != "blocked" else []})
+        self.dry_ok = {"run_id": (self.state.checks or {}).get("run_id"), "ids": set(ids)}       # read: a real run may start for these volumes
         self.state.journal.record("engine_dry_run", "batch", {"volumes": len(rows), "ok": counts["ok"], "wait": counts["wait"], "blocked": counts["blocked"]})
         return {"volumes": rows[:500], "more": max(0, len(rows) - 500), "counts": counts, "access": getattr(self.state, "access", "api"),
                 "types": [{"name": t["name"], "backend": (t.get("extra_specs") or {}).get("volume_backend_name")} for t in specs[ids[0]]["types"]],
                 "note": "Nothing was changed. Every change above would go through a permit that asks again at the moment of the call."}
 
     # ---- running -----------------------------------------------------------------------------------------------
+    def open_volumes(self):
+        """Volumes this engine started earlier (a retype) that have not reached an end: what a restart picks up again."""
+        return [v for v, e in L.states(self.state.journal).items() if L.method_of(L.history(self.state.journal, v)) == L.RETYPE and e["phase"] not in L.TERMINAL]
+
+    def dry_covers(self, ids):
+        """True when a dry run was read for the current pre-flight run and included every one of these volumes."""
+        d = getattr(self, "dry_ok", None)
+        return bool(d) and d["run_id"] == (self.state.checks or {}).get("run_id") and set(ids) <= d["ids"]
+
     def start(self, ids=None, type_map=None, thread=True):
         """Begin a real run. Needs a permit right now (release validated, gate approved, no halt)."""
         with self._mutex:
             if self.status == "running":
                 raise EngineError("a run is already going")
             self._permit()                                    # refuses here, before anything is queued
+            if ids and not any((self.inv(i) or {}).get("class") in MOVED for i in ids):
+                raise EngineError("no class A or B volume is selected")       # as the dry run says; never end a run quietly with nothing to do
             acts = self.acts()
             self.type_map = dict(type_map or self.type_map)
-            started = [v for v, e in L.states(self.state.journal).items() if L.method_of(L.history(self.state.journal, v)) == L.RETYPE and e["phase"] not in L.TERMINAL]
+            started = self.open_volumes()
             ids = [i for i in (ids or self.candidates()) if (self.inv(i) or {}).get("class") in MOVED]
             self.queue = [i for i in ids if self.phase(i) is None]
             self.active = started
@@ -291,13 +308,19 @@ class Engine:
                 return self.note(vid, "the retype is already running in the cloud; following it")
             return self.issue(vid, acts, sp, vol, {s: acts.server(s) for s in plan.attached_servers(vol)})
         st = self.outcome(vol, sp)
+        if st == "running" and self.undone(vid, vol, sp):
+            st = "undone"
         if st == "success":
             return self.complete(vid, acts, sp, vol)
-        if st == "failed":
+        if st in ("failed", "undone"):
             self.failed.add(vid)
             self.ev.save(vid, "failed.json", {"volume": vol})
-            L.enter(self.state.journal, vid, L.ROLLBACK, {"reason": "Cinder reported migration_status=%s; the source volume is expected to be intact" %
-                                                          vol.get("os-vol-mig-status-attr:migstat")}, now=self.clock())
+            why = ("Cinder accepted the retype and then put the volume back unchanged (status %s, type %s, migration_status %s); "
+                   "a real Cinder does this for a volume it cannot move, for example one with a snapshot" % (vol.get("status"), vol.get("volume_type"),
+                                                                                                            vol.get("os-vol-mig-status-attr:migstat"))
+                   if st == "undone" else "Cinder reported migration_status=%s; the source volume is expected to be intact" %
+                   vol.get("os-vol-mig-status-attr:migstat"))
+            L.enter(self.state.journal, vid, L.ROLLBACK, {"reason": why}, now=self.clock())
             return self.note(vid, "the move failed in the cloud: rolling back (checking the volume is where it was)")
         if st == "broken":
             safety.halt(self.state.journal, "OpenMove (automatic)", "volume %s is in status %s after the retype" % (vid, vol.get("status")))
@@ -305,6 +328,15 @@ class Engine:
         if self.clock() - L._parse(L.current(self.state.journal, vid)["at"]) > MIGRATION_TIMEOUT:
             safety.halt(self.state.journal, "OpenMove (automatic)", "the retype of %s has run for more than %d hours" % (vid, MIGRATION_TIMEOUT.total_seconds() // 3600))
         self.note(vid, "retype running: migration_status=%s, status=%s" % (vol.get("os-vol-mig-status-attr:migstat"), vol.get("status")))
+
+    def undone(self, vid, vol, sp):
+        """True when the retype was accepted and then silently undone. Cinder sets 'retyping' before it answers, so a volume that is back to
+        available or in-use, not migrating and not of the target type, some time after the call, is not going to move."""
+        if str(vol.get("status")) not in ("available", "in-use") or vol.get("volume_type") == sp["target_type"]:
+            return False
+        if vol.get("os-vol-mig-status-attr:migstat") in ("migrating", "starting"):
+            return False
+        return self.clock() - L._parse(L.current(self.state.journal, vid)["at"]) > RETYPE_GRACE
 
     @staticmethod
     def outcome(vol, sp):
@@ -335,6 +367,8 @@ class Engine:
         add("Same size", vol.get("size") == bvol.get("size"), "%s GiB now, %s before" % (vol.get("size"), bvol.get("size")))
         add("Same attachments", key(vol) == key(bvol), "%d now, %d before" % (len(key(vol)), len(key(bvol))))
         add("Same bootable flag", vol.get("bootable") == bvol.get("bootable"), "%s now, %s before" % (vol.get("bootable"), bvol.get("bootable")))
+        for label, field in IDENTITY_FIELDS:        # what the tenant sees must not change; a rename or a metadata edit is the tenant's and is not checked
+            add("Same %s" % label, vol.get(field) == bvol.get(field), "%s now, %s before" % (vol.get(field), bvol.get(field)))
         for sid, s in servers.items():
             add("Instance %s is running" % sid, (s or {}).get("status") == "ACTIVE", (s or {}).get("status") or "unreadable")
         ok = all(c["ok"] for c in checks)

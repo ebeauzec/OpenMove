@@ -5,7 +5,7 @@ OpenMove runs against production clouds. The owner's requirement (R13, R14) is t
 ## What this document claims, and what it does not
 
 * **Claimed and tested today.** Everything marked "built" below. Those controls are in the code and covered by automated tests, run against a mock cloud.
-* **Required but not yet built.** The controls marked "planned" belong to the migration engine. The engine does not exist yet. It must not be released until each of them is built, tested with injected faults, and proven in the lab.
+* **Required but not yet built.** The controls marked "planned" belong to the staged method for class C (copy, sync, cutover on arrays), which is not built, and to Phase 0 on a customer cloud. The engine for classes A and B (retype through the OpenStack APIs) is built and has run against the lab; the controls in its path are marked "built". The staged method must not be released until each planned control is built, tested with injected faults, and proven in the lab.
 * **Not claimed.** That nothing can go wrong. No software can promise that. The claim is narrower and checkable: OpenMove changes nothing without passing every gate; the source volume is only read until the cutover; and every failure before the cutover leaves production as it was.
 * **Never tested against a real cloud.** No release is validated. Until a passed lab validation is recorded for a release (playbook Phase 0), OpenMove treats that cloud as read only.
 
@@ -61,12 +61,17 @@ OpenMove runs against production clouds. The owner's requirement (R13, R14) is t
 | 33 | A volume that changed since it was validated is moved. | Everything is read again at the moment of the retype and any difference gives the volume up. | built | `engine/runner.py` | `test_engine.RunTests` |
 | 34 | A failed post-check is accepted. | The post-check halts everything; `lifecycle.enter("soak")` refuses a volume whose post-check failed, also with G4 signed. | built | `lifecycle.py`, `engine/runner.py` | `test_engine.FailureTests` |
 | 35 | An instance is locked, and later unlocked, without knowing that someone else had locked it first, because the lock state was not in the answer (Nova only shows it from microversion 2.9; an older default hides it). | Every Nova read that matters sends microversion 2.9 or later; the engine refuses an instance whose answer has no true/false `locked` and never locks it blind. It unlocks only what its own journal says it locked. | built | `engine/plan.py`, `engine/actions.py`, `inventory.py` | `test_engine.PlanTests` |
+| 36 | A person skips a step: moves volumes without a pre-flight, without a confirmed selection or without having looked at the dry run. | The wizard is gated by the server: a step opens only when every earlier step is done; a link, a reload or a hand-made request cannot skip it. Changing the selection or running the pre-flight again closes the later steps. | built | `wizard.py`, `server.py` | `test_wizard` |
+| 37 | A real run starts on volumes the dry run did not show. | The engine refuses to start unless a dry run covered the same volumes (a restart that resumes an existing run is the exception). | built | `wizard.py`, `engine/runner.py` | `test_wizard`, `test_engine.RunTests` |
+| 38 | The selection moves after it was reviewed. | The selection must be confirmed by a named person, keyed on the pre-flight run and the exact volume ids; any change voids the confirmation. | built | `wizard.py`, `server.py` | `test_wizard.SelectionConfirmationTests` |
+| 39 | Cinder accepts a retype and quietly puts the volume back (seen in the lab with a volume that has a snapshot), and the run records a move that did not happen. | A volume that is back to normal and not on the target 30 seconds after the call counts as an undone retype: rollback, reason recorded, nothing is called a success. | built | `engine/runner.py` | `test_engine.FailureTests` |
+| 40 | A volume is replaced by a different one with the same size and type (re-created, other owner or project), and the post-check passes. | The post-check also compares the identity fields: creation time, project, owner, snapshot id, source volume id, availability zone, multi-attach flag and id. | built | `engine/runner.py` | `test_engine.FailureTests` |
 
 ## Tests that must pass before the engine can be released
 
-1. Fault injection for every step that changes anything: kill OpenMove, drop the network, time out the call, make the array return an error, between every pair of steps. After each, the volume is either unchanged or in a state the journal names and OpenMove can resume or roll back from.
+1. (Partly done for the retype path: the mock cloud injects a refused lock, a timeout, a lost answer, a halt, an undone retype and a failed post-check; the lab has run a failed attach and an undone retype. Stopping a Cinder service during a move is still to do.) Fault injection for every step that changes anything: kill OpenMove, drop the network, time out the call, make the array return an error, between every pair of steps. After each, the volume is either unchanged or in a state the journal names and OpenMove can resume or roll back from.
 2. A property test of the lifecycle: any sequence of calls leaves a volume in a legal state, and no sequence reaches the cutover without the conditions above.
-3. The playbook's lab validation (T1 to T21) on a copy of the real release, signed, recorded as a validation for that release.
+3. The playbook's lab validation (T1 to T22) on a copy of the real release, signed, recorded as a validation for that release.
 4. A measured copy under production-like load, with the rate caps in place.
 
 ## Reviewing this

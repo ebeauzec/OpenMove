@@ -46,6 +46,8 @@ var/
 docs/images/*.png
 !docs/images/architecture_rendered.png
 !docs/images/workflow_rendered.png
+# Documentation screenshots taken by tools/dev/screenshots.py from the demonstration (made-up data) and the lab; numbered NN-name.png
+!docs/images/[0-9][0-9]-*.png
 
 # Local guard configuration (holds the terms that must never reach GitHub)
 .openmove_guard_terms.json

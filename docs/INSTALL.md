@@ -116,7 +116,7 @@ The result is in `dist/`: `OpenMove.exe` (or `OpenMove`) and the launchers. Copy
    python -m unittest discover -s tests -t .
    ```
 
-   The last lines read `Ran 252 tests` and `OK`.
+   The last lines read `Ran 275 tests` and `OK`.
 
 3. Connect to your cloud on the Connect tab and press *Detect version and back-ends* on the Platform tab. You should see the OpenStack release, the back-ends and the Cinder services. A new release shows **Read only**. That is correct.
 

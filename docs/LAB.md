@@ -64,9 +64,13 @@ First runs of the real engine against the lab (a detached volume, a volume attac
 | **Found: Cinder's image-cache volume** | DevStack's cache keeps a read-only volume named `image-<image id>` in an internal project. OpenMove admitted it as class A. Now class E, cause `image_cache`. |
 | **Found: volumes already on the target** | They were admitted and only blocked at the dry run. Now not admitted, cause `already_on_target`. |
 | **Found: the lock state was invisible to the audit** | The inventory read of instances sent no Nova microversion, so `locked` was always empty. Now 2.9, and the engine refuses an instance whose lock state is not shown. |
+| **Found: a detached volume shows `retyping`** | While a detached volume is retyped its status is `retyping`, not `available`, so it cannot be attached in the middle of the move. The mock now does the same. |
+| **Found: Cinder accepts a retype of a volume with a snapshot and silently undoes it** | The call is accepted, the volume goes back to normal, the type is unchanged and there is no error. The engine waits 30 seconds, sees a volume that is normal and not on the target, treats it as an undone retype, rolls back and records why. |
+| **Found: the post-check ignored who the volume belongs to** | It now also compares the creation time, project, owner, snapshot id, source volume id, availability zone and multi-attach flag. |
+| **Found: a class C volume could be started** | Asking the engine for a volume that is not class A or B now fails with a clear message instead of starting nothing. |
 | Class B needs the database | With the APIs only, a volume with snapshots is class C (rotation unknown). The class B path (wait for rotation) is covered by the mock tests only. |
 
-Not yet exercised in the lab: failure injection (a refused lock, a stopped service during a move, a failed retype), the halt button during a real move, a retype of a volume with a snapshot, and the Horizon auto-login against the real dashboard.
+Not yet exercised in the lab: stopping a service during a move (Cinder API, Cinder volume), the halt button during a real move of an attached volume, and a lock that Nova refuses. A retype of a volume with a snapshot has now been exercised (see above). The Horizon auto-login works against the real dashboard.
 
 ## A first run, in order
 
@@ -96,8 +100,12 @@ These come from setting the lab up. Where something was not seen but is expected
 | Windows reaches Keystone at `localhost` but not the other services after a restart. | **Expected, not yet seen.** The service catalogue holds the address the distro had when `stack.sh` ran, and WSL can give the distro another one after a restart. Re-run `stack.sh` (stop the services first, see above) to write the catalogue again. |
 | The loop devices behind the two volume groups are gone after a restart. | `OpenMove-Lab.bat up` attaches them again and starts the services. Use `OpenMove-Lab-Stop.bat` rather than closing the window, so the services stop cleanly. |
 | `OpenMove-Lab-Stop.bat` says it refuses. | `stack.sh` is still running. Wait for it, or stop it by hand. |
-| The dashboard does not open in the second window. | Horizon is not installed or still starting. The console says so; open `/dashboard` yourself. The automatic sign-in has been tested against a fake dashboard only; it has not yet been tried against the real one. |
+| The dashboard does not open in the second window. | Horizon is not installed or still starting. The console says so; open `/dashboard` yourself. The automatic sign-in has been tried against the real dashboard and works. |
 | `OpenMove-Lab.bat` says the lab cloud does not answer. | Start it: `OpenMove-Lab.bat up`. The launcher does this by itself when it can. |
+| The Connect page says "POST http://localhost/v3/auth/tokens failed ... actively refused it". | Two causes. The lab is not running (WSL stops an idle distro; start it with `OpenMove-Lab.bat up`), or the address is wrong: Keystone is at `http://localhost/identity`, not `http://localhost`. In lab mode the Connect form is filled in for you, with the lab's address, `admin`, the project and both domains; leave the password blank and press *Connect* (the lab's own password is used, and only for the lab's own address). |
+| The dashboard login page shows, but I am not signed in. | You opened `http://localhost/dashboard/` yourself. Start the lab with `OpenMove-Lab.bat`; its second window signs in by itself. The user is `admin`, the password is in `C:\OpenMoveLab\lab-secret.json`. A new lab uses whatever password you put there; the lab built here uses the simple value the owner chose, because it is a local lab with nothing in it that matters. |
+| `127.0.0.1` refuses the connection but `localhost` works. | WSL forwards `localhost` to the distro; `127.0.0.1` may not be forwarded. OpenMove uses `localhost` for every address it hands the browser in lab mode, and the browser keeps its cookies by host name, so the dashboard sign-in is set under `localhost` too. |
+| Two OpenMove windows are open and the link in one says "Open the address that OpenMove printed". | The token is different at every start, and the second program could not take the port, so the link points at the first one. Close both and start the lab once. |
 
 ## Resetting the lab
 

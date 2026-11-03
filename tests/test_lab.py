@@ -76,6 +76,23 @@ class LabConnectTests(unittest.TestCase):
         self.assertIn("not a customer cloud", ev["data"]["note"])
         self.assertNotIn(PASSWORD, json.dumps(ev["data"]))
 
+    def test_the_connect_form_is_filled_in_for_the_lab_and_never_carries_the_password(self):
+        self.assertIsNone(S.api_status(self.state, {}, {})["lab_form"])                  # not in lab mode: an empty form
+        lab.connect(self.state)
+        form = S.api_status(self.state, {}, {})["lab_form"]
+        self.assertEqual((form["auth_url"], form["username"], form["project_name"]), (self.cloud.auth_url, "admin", "demo"))
+        self.assertEqual((form["user_domain"], form["project_domain"], form["interface"]), ("Default", "Default", "public"))
+        self.assertNotIn(PASSWORD, json.dumps(S.api_status(self.state, {}, {})))
+
+    def test_a_blank_password_in_lab_mode_is_the_labs_own_and_only_for_the_labs_address(self):
+        lab.connect(self.state)
+        self.state.disconnect()
+        body = {"auth_url": self.cloud.auth_url, "username": "admin", "project_name": "demo", "password": ""}
+        self.assertTrue(S.api_connect(self.state, dict(body), {})["ok"])
+        with self.assertRaises(S.ApiError) as cm:                                         # never handed to another address
+            S.api_connect(self.state, dict(body, auth_url="http://127.0.0.1:9"), {})
+        self.assertNotIn(PASSWORD, str(cm.exception))
+
     def test_a_lab_that_is_not_running_is_reported_with_the_command_to_start_it(self):
         self.cloud.stop()
         with self.assertRaises(lab.LabError) as cm:
@@ -187,6 +204,16 @@ class LabDashboardTests(unittest.TestCase):
         self.assertIn("sessionid=sess1", " ".join(v for k, v in r.getheaders() if k == "Set-Cookie"))
         self.assertEqual(r.getheader("Location"), "http://127.0.0.1:%d/dashboard/" % self.horizon.server.server_address[1])
         self.assertNotIn("lab-pass", str(r.getheaders()))
+
+    def test_a_request_under_another_name_goes_back_under_the_labs_own_name_first(self):
+        # WSL forwards "localhost" but not always 127.0.0.1; cookies belong to a host name, so they must be set under the lab's name.
+        self.state.lab = True
+        (Path(self.dir.name) / "lab.json").write_text(json.dumps({"auth_url": "http://localhost:%d/identity" % self.horizon.server.server_address[1],
+                                                                   "user": "admin"}), encoding="utf-8")
+        r = self.get("/lab/dashboard?token=" + self.state.token)
+        self.assertEqual(r.status, 302)
+        self.assertEqual(r.getheader("Location"), "http://localhost:%d/lab/dashboard?token=%s" % (self.port, self.state.token))
+        self.assertIsNone(r.getheader("Set-Cookie"))
 
     def test_the_route_needs_the_token_and_lab_mode(self):
         self.assertEqual(self.get("/lab/dashboard?token=wrong").status, 403)

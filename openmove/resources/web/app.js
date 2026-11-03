@@ -41,7 +41,9 @@
 
   var currentTab = 'connect';
   // ---- tabs ----
-  function showTab(name) {
+  function showTab(name, force) {
+    var w = wizardInfo(name);
+    if (w && !w.open && !force) { banner('warn', 'Not yet. ' + w.needs); return; }
     document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('active', b.dataset.tab === name); });
     document.querySelectorAll('.panel').forEach(function (p) { p.classList.toggle('hidden', p.id !== 'tab-' + name); });
     if (name === 'journal') loadJournal();
@@ -52,6 +54,13 @@
     currentTab = name;
     drawWizard();
   }
+  // The wizard is gated: the server says which step is open (every step before it is done) and what is missing for the next one.
+  function wizardInfo(tab) {
+    var list = (lastStatus && lastStatus.wizard) || [];
+    for (var k = 0; k < list.length; k++) { if (list[k].id === tab) return list[k]; }
+    return null;
+  }
+  function wizardDone(tab) { var w = wizardInfo(tab); return !w || w.done; }
   // Back and Next walk through the numbered steps in order, so the tabs at the top are not the only way to move
   function wizardSteps() {
     return Array.prototype.filter.call(document.querySelectorAll('#tabs button'), function (b) { return /^\d+\./.test(b.textContent.trim()); });
@@ -59,7 +68,13 @@
   function drawWizard() {
     var steps = wizardSteps(), i = -1;
     steps.forEach(function (b, k) { if (b.dataset.tab === currentTab) i = k; });
-    var back = $('wiz-back'), next = $('wiz-next'), lab = $('wiz-step');
+    var back = $('wiz-back'), next = $('wiz-next'), lab = $('wiz-step'), hint = $('wiz-hint');
+    steps.forEach(function (b) {                   // a step that is not open is shown locked, with what it waits for
+      var w = wizardInfo(b.dataset.tab), locked = !!(w && !w.open);
+      b.classList.toggle('locked', locked); b.setAttribute('aria-disabled', locked ? 'true' : 'false');
+      b.title = locked ? w.needs : (w && w.done ? 'Done' : '');
+    });
+    hint.textContent = '';
     if (i < 0) {                                   // the journal is not a step: Back returns to the last one
       back.disabled = false; back.textContent = 'Back to ' + steps[steps.length - 1].textContent.trim();
       next.disabled = true; next.textContent = 'Next'; lab.textContent = 'Journal';
@@ -67,8 +82,10 @@
     }
     back.disabled = i === 0;
     back.textContent = i === 0 ? 'Back' : 'Back: ' + steps[i - 1].textContent.trim();
-    next.disabled = i === steps.length - 1;
+    var nw = i < steps.length - 1 ? wizardInfo(steps[i + 1].dataset.tab) : null;
+    next.disabled = i === steps.length - 1 || !!(nw && !nw.open);
     next.textContent = i === steps.length - 1 ? 'Next' : 'Next: ' + steps[i + 1].textContent.trim();
+    if (nw && !nw.open) hint.textContent = 'To continue: ' + nw.needs;
     lab.textContent = 'Step ' + (i + 1) + ' of ' + steps.length + ': ' + steps[i].textContent.trim().replace(/^\d+\.\s*/, '');
   }
   function wizardGo(delta) {
@@ -87,7 +104,18 @@
   drawWizard();
 
   // ---- status ----
-  var lastStatus = {};
+  var lastStatus = {}, restoring = {}, deepLink = (window.location.hash || '').replace('#', '');
+  // A step that is done keeps its result on the server. After a reload (or a link to a step) the page draws it again, so a done step is never blank.
+  function restoreViews(s) {
+    [['platform', 'platform-view', 'platform', function (d) { renderPlatform(d); }],
+     ['inventory', 'inv-summary', 'inventory', function (d) { renderInventory(d); }],
+     ['audit', 'audit-view', 'audit', function (d) { renderAudit(d); }],
+     ['checks', 'pf-view', 'checks', function (d) { renderChecks(d); }]].forEach(function (r) {
+      if (!s[r[0]] || $(r[1]).firstChild || restoring[r[0]]) return;
+      restoring[r[0]] = true;
+      api('GET', r[2]).then(r[3]).catch(function () {}).then(function () { restoring[r[0]] = false; });
+    });
+  }
   function refreshStatus() {
     return api('GET', 'status').then(function (s) {
       lastStatus = s;
@@ -101,6 +129,13 @@
       if (s.demo) drawScenarios(s.demo_scenario);
       drawHalt(s.halted);
       $('live-start').classList.toggle('hidden', !s.demo); 
+      if (s.lab_form && !$('connect-form').dataset.labFilled) {          // lab mode: the form is filled in; the password is the lab's own
+        var cf = $('connect-form');
+        Object.keys(s.lab_form).forEach(function (k) { if (cf.elements[k]) cf.elements[k].value = s.lab_form[k]; });
+        cf.elements.password.required = false;
+        cf.elements.password.placeholder = 'filled in automatically (lab)';
+        cf.dataset.labFilled = '1';
+      }
       if (s.demo) {
         var out = $('connect-result');
         if (!out.firstChild) out.appendChild(el('div', { class: 'banner ok', text: 'Demonstration mode: connected to the built-in demonstration cloud. Go to 2. Platform.' }));
@@ -111,6 +146,15 @@
       else if (s.platform && s.read_only) { m.className = 'chip warn'; m.textContent = 'read only'; }
       else if (s.platform) { m.className = 'chip ok'; m.textContent = 'validated release'; }
       else { m.className = 'chip'; m.textContent = 'connected'; }
+      var cur = wizardInfo(currentTab);
+      if (cur && !cur.open) {                      // the step we are on closed (disconnected, a new pre-flight run, a changed selection): go back to the first open one that is not done
+        var open = (s.wizard || []).filter(function (w) { return w.open && !w.done; })[0] || (s.wizard || [])[0];
+        if (open) showTab(open.id, true);
+      }
+      drawWizard();
+      drawMoveGate();
+      restoreViews(s);
+      if (deepLink) { var go = deepLink; deepLink = ''; if (wizardInfo(go) || go === 'journal') showTab(go); }     // a link such as  /#preflight  opens that step if it is open
       return s;
     }).catch(function () {});
   }
@@ -170,7 +214,7 @@
   $('inv-demo-export').addEventListener('click', function () {
     guard($('inv-demo-export'), function () {
       return api('POST', 'demo/db-export', {}).then(function (inv) {
-        renderInventory(inv);
+        renderInventory(inv); refreshStatus();
         banner('ok', 'Loaded the demonstration database export: provider ids and snapshot history are now included, so classes B and the provider_id checks appear.');
       });
     });
@@ -311,14 +355,15 @@
   $('inv-run').addEventListener('click', function () {
     guard($('inv-run'), function () {
       return api('POST', 'inventory/run', { backend: $('inv-backend').value, window_days: Number($('inv-window').value) || 14 })
-        .then(renderInventory);
+        .then(function (inv) { renderInventory(inv); return refreshStatus(); });
     });
   });
   $('inv-import').addEventListener('click', function () {
     guard($('inv-import'), function () {
       return api('POST', 'inventory/import', {
         a1: $('imp-a1').value, a2: $('imp-a2').value, a4: $('imp-a4').value, inst: $('imp-inst').value,
-        backend: $('inv-backend').value, window_days: Number($('inv-window').value) || 14 }).then(renderInventory);
+        backend: $('inv-backend').value, window_days: Number($('inv-window').value) || 14 })
+        .then(function (inv) { renderInventory(inv); return refreshStatus(); });
     });
   });
   document.querySelectorAll('input[type=file][data-for]').forEach(function (inp) {
@@ -651,12 +696,38 @@
   // ---- select: volumes one by one, by group, and the settings ----
   var selData = null, selKind = 'class', selTimer = null;
   function selBy() { return ($('sel-by').value || '').trim(); }
+  $('sel-confirm').addEventListener('click', function () {
+    var by = $('sel-by').value.trim() || window.prompt('Confirm this selection. Your name:');
+    if (!by || by.trim().length < 3) return;
+    guard($('sel-confirm'), function () {
+      return api('POST', 'selection/confirm', { by: by.trim() }).then(function (r) {
+        banner('ok', 'Selection confirmed: ' + r.volumes + ' volume(s). Next: 7. Move.');
+        return refreshStatus();
+      });
+    });
+  });
+  function drawSelConfirm() {
+    var ok = wizardDone('select'), b = $('sel-confirm');
+    b.textContent = ok ? 'Selection confirmed' : 'Confirm this selection';
+    b.disabled = ok;
+    $('sel-confirm-note').textContent = ok ? 'Confirmed. Changing the selection, or running the pre-flight again, asks for it to be confirmed again.' :
+      'Step 7 stays closed until you confirm the selection as it stands.';
+  }
+  function drawMoveGate() {
+    var w = wizardInfo('move');
+    if (w) { drawSelConfirm(); }
+    var st = $('mv-start');
+    if (st) {                                       // a real run needs a dry run read first; the server enforces it too
+      st.disabled = !wizardDone('move');
+      st.title = st.disabled ? 'Run the dry run first (button 1).' : '';
+    }
+  }
   function loadSelection() {
     api('GET', 'selection').then(renderSelection).catch(function (e) {
       $('sel-summary').className = 'banner warn'; $('sel-summary').textContent = 'Not available yet: ' + e.message + ' Run the inventory and the pre-flight first.';
     });
   }
-  function postSelection(body) { body.by = selBy(); return api('POST', 'selection', body).then(function (d) { renderSelection(d); if (d.refused && d.refused.length) banner('warn', d.refused.length + ' volume(s) were not selected: ' + d.refused[0].reason + '.'); }); }
+  function postSelection(body) { body.by = selBy(); return api('POST', 'selection', body).then(function (d) { renderSelection(d); refreshStatus(); if (d.refused && d.refused.length) banner('warn', d.refused.length + ' volume(s) were not selected: ' + d.refused[0].reason + '.'); }); }
   function renderSelection(d) {
     selData = d;
     var sum = $('sel-summary');
@@ -892,7 +963,7 @@
     v.appendChild(el('div', { class: 'table-wrap' }, [t]));
   }
   $('mv-dry').addEventListener('click', function () {
-    guard($('mv-dry'), function () { return api('POST', 'engine/dry-run', { type_map: typeMap() }).then(drawDry); });
+    guard($('mv-dry'), function () { return api('POST', 'engine/dry-run', { type_map: typeMap() }).then(drawDry).then(refreshStatus); });
   });
   $('mv-start').addEventListener('click', function () {
     var by = window.prompt('Start the real run. Volumes are changed in the cloud.' + String.fromCharCode(10, 10) + 'Your name:'); if (!by || by.trim().length < 3) return;

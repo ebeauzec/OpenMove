@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.0 (2026-11-03)
+
+### Added
+- Gated wizard enforced by the server (`wizard.py`): a step opens only when every step before it is done; the selection must be confirmed for the exact pre-flight run and volume ids; a real run is refused until a dry run covered the same volumes; changing the selection or running the pre-flight again closes the later steps
+- Detection of a retype that Cinder accepted and silently undid (seen in the lab with a volume that has a snapshot): rollback with the reason recorded
+- Post-check of the identity fields (creation time, project, owner, snapshot id, source volume id, availability zone, multi-attach flag)
+- Lab: the Connect form is pre-filled, the dashboard link uses the lab's own host name, the lab's admin password is simply `password`
+- Documentation: `docs/WALKTHROUGH.md` (the process with screenshots and diagrams), `docs/OPTIONS.md` (every option and setting), `tools/dev/screenshots.py` (takes the screenshots from the real interface); playbook v1.3 compared in `docs/PLAYBOOK_TRACE.md`; safety rows 36 to 40; README, user guide, operations guide, architecture, lab guide and CONTEXT brought up to date
+
+### Fixed
+- The engine started nothing, without saying why, when asked for class C volumes: it now refuses with a message
+- The inventory step did not refresh the wizard state
+- The demonstration banner contrast
+
 ## 0.6.1 (2026-11-03)
 
 ### Added

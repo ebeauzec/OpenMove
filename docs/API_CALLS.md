@@ -112,6 +112,7 @@ Protection: every `/api/` call needs the per-run token (printed at start-up and 
 | `GET /api/live` | The live view: volumes per phase, overall progress, per-volume progress, the gate, the halt, unresolved steps and the newest journal events. Read from the journal; makes no cloud call. The screen polls it about once a second while the Live tab is open. | | no |
 | `GET /api/unmigrated` | Every volume that is not migrated, with the cause, how it ended, the state left behind and the proposed steps to resolve it (`CLASSES.md`). Read from the inventory, the pre-flight and the journal; makes no cloud call. | | no |
 | `GET /api/selection` | Which volumes are selected for the migration, the eligible ones, the groups (by class, project, attachment, size, snapshots, Cinder host, instance and workload risk), and the settings with their defaults and floors. Read from the inventory, the pre-flight and the journal; makes no cloud call. | | no |
+| `POST /api/selection/confirm` | The operator confirms the selection as it stands. Needs the approved pre-flight gate and a name. It opens the Move step of the wizard and is void when the selection or the pre-flight run changes. Sends nothing to the cloud. | name | no |
 | `POST /api/selection` | Choose volumes by id or by group (`set`, `add`, `remove`, `none`, `reset`), and change the settings. A volume that is not admitted is refused, a setting below its floor is refused (never clamped), and nothing changes while a run is in progress. Every change is recorded. | action, ids, group, options, reset_options, name | no |
 | `POST /api/release` | Release volumes that wait in the sync phase, before the cutover. Needs a name. The cutover rules still apply after the release. | ids or all, name | no |
 | `POST /api/volume-gate` | Sign, or withdraw, the playbook's volume gate G2, G3 or G4 for volumes, as a second person who is not the operator of the run. Each volume is checked on its own: it must be at the point where that gate is signed. | gate, ids or all, name, evidence, withdraw | no |
@@ -155,6 +156,7 @@ The journal is a local SQLite file (`journal.db`). It is append-only in normal u
 | `halt` / `resume` | The halt switch is used. | Name and reason. |
 | `refusal` | The order, the gate or the halt refused a step. | The step attempted and the exact reasons. In the simulation they are marked simulated. |
 | `phase` | A volume enters a phase of the migration order. | Phase, time, evidence (the volume class from the precheck, verification results, snapshot image comparison for class C, fingerprints, lag). An abort or rollback also carries its reason and cause code. |
+| `selection_confirmed` | The operator confirms the selection (step 6). | Name, pre-flight run id, count of volumes, whether it is the default selection. |
 | `selection` | The selection or the settings change. | Action, count, the ids or the group, the settings, name. |
 | `volume_gate` | A second person signs, or withdraws, G2, G3 or G4 for one volume. | Volume, gate, name, evidence, withdrawn. |
 | `release` | A person releases volumes held before the cutover. | Volume ids, name. |
@@ -162,7 +164,7 @@ The journal is a local SQLite file (`journal.db`). It is append-only in normal u
 | `risk_mark` | A person marks a volume as a risk, or withdraws the mark. | Volume, name, note. |
 | `engine_dry_run` | A dry run is made. | Counts of volumes ready, waiting and blocked. |
 | `engine_run` | A real run starts. | Volumes queued and resumed, the type map. |
-| `engine_start` | A person starts a run. | Name, queued and resumed counts. |
+| `engine_start` | A person starts a run. A real run needs a dry run read for the same volumes first (or an earlier run to resume). | Name, queued and resumed counts. |
 | `lab` | Lab mode connects to the lab cloud. | Address, roles, a note that it is not a customer cloud. Never the password. |
 | `demo` | Demo mode starts, or a simulated run starts. | Scenario, or the simulation note. |
 

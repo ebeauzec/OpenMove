@@ -132,6 +132,7 @@
     <h2>Select what to migrate, and how</h2>
     <p class="muted">Nothing is all or nothing. Choose volumes one by one, by group (class, project, attachment, size, snapshots, host, instance, workload risk), or any mix. Only volumes the pre-flight admitted can be chosen; a held-back volume shows why. By default every admitted volume is selected except those that needed a risk clearance. The settings below start at their safe defaults and can only be made stricter than the process minimum. Project names appear after you run the audit (tab 4).</p>
     <div id="sel-summary" class="banner ok"></div>
+    <div class="actions inline"><button class="primary" id="sel-confirm" type="button">Confirm this selection</button> <span id="sel-confirm-note" class="muted"></span></div>
     <div class="actions inline">
       <button class="secondary" id="sel-all">Select all eligible</button>
       <button class="secondary" id="sel-none">Select none</button>
@@ -256,7 +257,7 @@
   </section>
   <div id="wiz" class="wiz" aria-label="Steps">
     <button id="wiz-back" class="secondary" type="button">Back</button>
-    <span id="wiz-step" class="muted"></span>
+    <div class="wiz-mid"><span id="wiz-step" class="muted"></span><span id="wiz-hint" class="wiz-hint"></span></div>
     <button id="wiz-next" class="primary" type="button">Next</button>
   </div>
 </main>

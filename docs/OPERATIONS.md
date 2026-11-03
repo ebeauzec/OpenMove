@@ -41,7 +41,7 @@ Do these first. None needs OpenMove except the first.
 
 ## 4. The procedure, step by step
 
-The numbered tabs are the steps. *Back* and *Next* at the bottom walk through them.
+The numbered tabs are the steps. *Back* and *Next* at the bottom walk through them. The steps are **gated**: a step opens only when every step before it is done, and the page says what is missing. You cannot skip the pre-flight, the selection confirmation or the dry run. Screenshots of every step are in `WALKTHROUGH.md`; every option is in `OPTIONS.md`.
 
 ### Step 1. Connect
 
@@ -87,6 +87,7 @@ Volumes that fail a per-volume check are held back and listed with the reason. V
 * Check the settings. A value stricter than the minimum is fine; a looser one is refused.
 * For a first run in a new environment, **select a handful**: one detached volume, one attached to a running instance, and (if you have one) a boot volume. Add more after those succeed.
 * The selection cannot change while a run is going.
+* **Confirm this selection** (your name). Step 7 stays closed until you do. If you change the selection, or run the pre-flight again, the confirmation is void and you confirm again.
 
 ### Step 7. Move
 
@@ -94,7 +95,7 @@ The Move tab. The note at the top lists the three things a real run needs: a rec
 
 1. **Record lab validation (G0)**, if the release is untested and the lab tests were run. Two different people give their names and describe what was tested and what came out (at least 40 characters: which tests, on which cloud, which result). This is a declaration, kept in the journal. Nothing is tested by pressing the button.
 2. **Target volume type.** Type the name of the target volume type. If you leave it empty, the tool uses the single type bound to the target back-end, and refuses if there are several or none.
-3. **Dry run.** Press *Dry run*. Nothing is sent. Read each row:
+3. **Dry run** (required: *Start the run* is refused until a dry run has covered the same volumes). Press *Dry run*. Nothing is sent. Read each row:
    * the verdict: `ok`, `wait` (a class B volume with snapshots still to rotate) or `blocked`;
    * for `blocked`, the failed check and its reason;
    * the exact calls the run would make, each with its undo: a lock, one retype with `migration_policy: on-demand`, an unlock after the post-check.

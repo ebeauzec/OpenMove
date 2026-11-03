@@ -26,6 +26,11 @@ The architecture as built is in `docs/ARCHITECTURE.md`: one Python process (stan
 | `LEGAL.md` | Ownership and intellectual property declaration. |
 | `THIRD_PARTY_NOTICES.md` | Third-party licences and trademark notices. Updated whenever a dependency is added. |
 | `docs/README.md` | Index of the documents in `docs/`. |
+| `docs/WALKTHROUGH.md` | The process from the first click to the last, with screenshots (`docs/images/`) and diagrams: the nine gated steps, who does what, what happens to each volume, what to do when something goes wrong. |
+| `docs/OPTIONS.md` | Every option and setting in one place: launchers, command line, modes, each screen's fields, defaults and limits, gates, fixed values. |
+| `openmove/wizard.py` | The gating rules of the wizard: which step is open, the selection confirmation, the dry-run-before-run rule. Used by `server.py` (`/api/status` carries `wizard`). |
+| `tests/test_wizard.py` | The gated wizard, through the rules and through the real handlers in demonstration mode. |
+| `tools/dev/screenshots.py` | Takes the documentation screenshots from the real interface with a headless Edge or Chrome, in demonstration mode (and, with `--lab`, the Move step from the lab). |
 | `docs/REQUIREMENTS.md` | Product requirements R1-R18 from the owner (R13 safety, R14 the order, R15 unmigrated volumes, R16 selection, R17 workload risk, R18 per-volume process). |
 | `docs/CLASSES.md` | What is handled for each volume class, and why a volume may not be migrated. |
 | `docs/WORKLOAD_RISKS.md` | Workloads that may fail the migration and how OpenMove identifies them (check V11). |
@@ -96,11 +101,12 @@ A local web interface, started with `python -m openmove`. It listens on the loop
 - The check framework (P, V, S, C, X), attestations, four-eyes sign-off and a fail-closed gate; the environment audit; Word reports (pre-migration, audit, not migrated).
 - The safety layer: read-only client, permit asked before every change, halt, the fixed order of a migration, per-volume gates G2, G3, G4 signed by a second person.
 - Selection with granular control and settings (R16); workload risk (R17); the per-volume process view (R18); the not-migrated report with causes and steps (R15).
-- The retype engine for class A and B (APIs only): lock, retype with on-demand migration, follow, post-check against the before-state, unlock, soak, reverse by retype back; unknown outcomes halt; resumable from the journal.
+- The retype engine for class A and B (APIs only): lock, retype with on-demand migration, follow, post-check against the before-state (status, size, attachments, bootable flag, instance state and the identity fields), unlock, soak, reverse by retype back; a retype that Cinder accepted and silently undid is detected and rolled back; unknown outcomes halt; resumable from the journal.
+- The **gated wizard** (`wizard.py`): a step opens only when every earlier step is done, the selection must be confirmed for the exact pre-flight run and volume ids, a real run needs a dry run that covered the same volumes. Enforced by the server, shown by the page.
 - Access levels: OpenStack APIs only (default) or APIs, hosts and arrays.
 - Demonstration mode (three scenarios, simulated migration) and lab mode (a real OpenStack in WSL, a seeded catalogue of 26 volumes and 8 servers, Horizon sign-in, graceful stop).
-- 252 automated tests; the real engine has moved detached, attached and boot volumes in the lab and reversed two of them.
-- Documentation: architecture, installation, operation, user guide, process, every call, safety case, classes, workload risks, playbook trace, lab.
+- 275 automated tests; the real engine has moved detached, attached and boot volumes in the lab and reversed two of them.
+- Documentation: a walkthrough with screenshots and diagrams, every option, architecture, installation, operation, user guide, process, every call, safety case, classes, workload risks, playbook trace (v1.2 and v1.3), lab.
 
 ## 6. What Is Partially Done
 
@@ -111,11 +117,10 @@ A local web interface, started with `python -m openmove`. It listens on the loop
 ## 7. What Is Not Started
 
 - The class C engine (staged copy, history rebuild, record swap, rollbacks R1 and R2), the data mover host, SSH, database access and array adapters.
-- Lab tests T1 to T21 as guided procedures; recording gate G0 from them.
+- Lab tests T1 to T22 as guided procedures; recording gate G0 from them.
 - The after report and the before/after comparison.
 - Container image and own Linux image. The standalone program is built by `tools/build/build_exe.py` but has not been run on a machine without Python.
 - Authentication and roles for the interface.
-- Playbook v1.3: not yet compared with the code (`docs/PLAYBOOK_TRACE.md` is for v1.2).
 
 ## 8. Known Issues / Bugs
 
@@ -139,14 +144,15 @@ Standard library only (a test enforces it). The standalone program contains the 
 | 0.5.0 | 2026-11-02 | The retype engine for class A and B (APIs only); access levels; the lab. |
 | 0.6.0 | 2026-11-03 | First runs against a real OpenStack lab: Horizon sign-in, graceful stop, a seeded catalogue; fixes found there (the way back is locked, the image-cache volume, volumes already on the target, the Nova lock state). |
 | 0.6.1 | 2026-11-03 | Documentation: architecture overview, installation guide and operation guide; README, CONTEXT, user guide and lab troubleshooting brought up to date. |
+| 0.7.0 | 2026-11-03 | The gated wizard (server-enforced), selection confirmation, dry run before a real run; detection of a silently undone retype; identity fields in the post-check; the lab sign-in and Connect form pre-filled; a walkthrough with screenshots, an options reference, playbook v1.3 compared. |
 
 Full history is in `CHANGELOG.md` and the git log.
 
 ## 11. Logical Next Steps
 
-1. Compare the code and `docs/PLAYBOOK_TRACE.md` with playbook v1.3 and the script bundle v1.3 (supplied by the owner, kept local).
-2. Failure injection in the lab: a refused lock, a stopped service during a move, the halt button during a real move, a retype of a volume with a snapshot.
-3. The lab tests T1 to T21 as guided procedures, so a lab validation (gate G0) can be recorded from them.
+1. Failure injection in the lab that still needs the lab to itself: stopping Cinder API or Cinder volume during a move, a refused lock, the halt button during a real move of an attached volume.
+2. Run the packaged program on a clean machine, first as a dry run.
+3. The lab tests T1 to T22 as guided procedures, so a lab validation (gate G0) can be recorded from them.
 4. Owner decisions: the SSH client, report formats, interface authentication; whether to build the class C engine (the reviewer advises keeping it out of the critical path).
 5. A test-environment deployment of the packaged program, run first as a dry run.
 

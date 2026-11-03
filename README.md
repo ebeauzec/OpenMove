@@ -2,7 +2,7 @@
 
 OpenMove is a GUI-driven tool that automates the audit, reporting and migration of OpenStack Cinder volumes. It connects directly to an OpenStack cloud and does its work by calling OpenStack's own services and clients, so every action is one the cloud already supports and records.
 
-> **Status:** version 0.6.1, in development. It reads a cloud, classifies its volumes, runs a pre-flight with a gate, builds Word reports and moves class A and class B volumes with Cinder's retype using only the OpenStack APIs. The move engine has run against a real OpenStack lab on a development machine (detached, attached and boot volumes, and the way back); it has **never run against a customer cloud**, and no customer release is validated, so the tool is read only until people record a lab validation. Class C (long-lived snapshots) needs a data mover and is **not built**. 252 automated tests pass. See `docs/ARCHITECTURE.md` for how it is built and `docs/OPERATIONS.md` for how to run it.
+> **Status:** version 0.7.0, in development. It reads a cloud, classifies its volumes, runs a pre-flight with a gate, builds Word reports and moves class A and class B volumes with Cinder's retype using only the OpenStack APIs. The move engine has run against a real OpenStack lab on a development machine (detached, attached and boot volumes, and the way back); it has **never run against a customer cloud**, and no customer release is validated, so the tool is read only until people record a lab validation. Class C (long-lived snapshots) needs a data mover and is **not built**. 275 automated tests pass. See `docs/ARCHITECTURE.md` for how it is built and `docs/OPERATIONS.md` for how to run it.
 
 ## Table of Contents
 
@@ -68,7 +68,11 @@ OpenMove starts a web server that only this machine can reach, prints a link wit
 7. **Move:** the dry run, the run, the second person's signatures, the way back.
 8. **Reports**, then **Live:** progress, the order every volume follows, the gate, the halt and the event feed.
 
-The red **HALT** button in the header stops all changes at once. The full guide, with the demonstration script, troubleshooting and a glossary, is `docs/USER_GUIDE.md`.
+The wizard is **gated**: a step opens only when every step before it is done (a locked step says what is missing, and the server enforces it, so a link or a reload cannot skip a step). A real run is refused until a dry run has covered the same volumes, and a changed selection or a new pre-flight closes the later steps again.
+
+![The pre-flight step with the gate approved](docs/images/06-preflight-approved.png)
+
+The red **HALT** button in the header stops all changes at once. The whole process with screenshots and diagrams is `docs/WALKTHROUGH.md`; every option and setting is in `docs/OPTIONS.md`; the full guide, with the demonstration script, troubleshooting and a glossary, is `docs/USER_GUIDE.md`.
 
 ## 4. Repository Layout
 
@@ -87,7 +91,7 @@ The red **HALT** button in the header stops all changes at once. The full guide,
 | `tests/` | Automated tests and a mock OpenStack cloud. |
 | `docs/` | Specification, design and operating documents. See `docs/README.md`. |
 | `tools/` | Repository tooling, including the sensitive-data guard. |
-| `tools/dev/` | Developer helpers (release bump). |
+| `tools/dev/` | Developer helpers (release bump, documentation screenshots). |
 | `tools/lab/` | The lab: setup, start, stop, seed (`tools/lab/README.md`). |
 | `tools/build/` | Builds the standalone program. |
 | `.githooks/` | Git hooks that enforce the rules in section 7. |
@@ -102,7 +106,7 @@ Everything in the project is documented, and the documentation changes in the sa
 | `README.md` | Purpose, usage and layout. |
 | `CONTEXT.md` | Architecture and project state. |
 | `CHANGELOG.md` | What changed in each version. |
-| `docs/` | The documentation set: `ARCHITECTURE.md` (how it is built), `INSTALL.md` (installation), `OPERATIONS.md` (step-by-step operation), `USER_GUIDE.md`, `PROCESS.md`, `API_CALLS.md`, `SAFETY.md`, `LAB.md`, and the specification and trace documents. Index: `docs/README.md`. |
+| `docs/` | The documentation set: `WALKTHROUGH.md` (the process, step by step, with screenshots and diagrams; start here), `OPTIONS.md` (every option and setting), `ARCHITECTURE.md` (how it is built), `INSTALL.md` (installation), `OPERATIONS.md` (step-by-step operation), `USER_GUIDE.md`, `PROCESS.md`, `API_CALLS.md`, `SAFETY.md`, `LAB.md`, and the specification and trace documents. Index: `docs/README.md`. |
 
 ## 6. Development
 

@@ -14,7 +14,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from . import __version__, discovery, exports, handling, inventory, lifecycle, paths, profiles, safety, selection
+from . import __version__, discovery, exports, handling, inventory, lifecycle, paths, profiles, safety, selection, wizard
 from . import risk as risk_mod
 from . import audit as audit_mod
 from .checks import gate as gate_mod
@@ -53,6 +53,7 @@ class AppState:
         self.selection = None      # the volumes chosen for the batch; None means every admitted volume (the default)
         self.options = None        # the operator's options; None means the defaults
         self.released = set()      # volumes the operator released for cutover
+        self.selection_ok = None   # (pre-flight run, selected volumes) the operator confirmed on the Select step; wizard.py
         self.engine = None         # the migration engine (openmove/engine), created on first use
         self.access = "api"        # what OpenMove can reach: "api" (the OpenStack APIs only) or "full" (also hosts and arrays)
         self.auto_sign = None      # demo only: the made-up second person who signs the volume gates
@@ -66,7 +67,7 @@ class AppState:
             self.session = self.platform = self.inventory = self._raw = None
             self.audit = self.checks = None
             self.servers, self.roots, self.extra = {}, (), {}
-            self.selection = self.options = None
+            self.selection = self.options = self.selection_ok = None
             self.released = set()
             if self.engine:
                 self.engine.stop()
@@ -120,11 +121,24 @@ def make_handler(state, port_getter):
             from . import lab as lab_mod
             try:
                 cfg = lab_mod.load_config()
+            except lab_mod.LabError as exc:
+                return self._send(502, str(exc).encode("utf-8"), "text/plain; charset=utf-8")
+            cloud = urlsplit(cfg["auth_url"])
+            host = (self.headers.get("Host") or "127.0.0.1").rsplit(":", 1)[0]
+            if cloud.hostname and host.lower() != cloud.hostname.lower() and ":" not in cloud.hostname:
+                # The lab answers on one name only (WSL forwards "localhost" but not always 127.0.0.1), and cookies belong to a host name.
+                # So go back to this route under the lab's own name first; the cookies are then set where the dashboard will read them.
+                self.send_response(302)
+                self.send_header("Location", "http://%s:%d/lab/dashboard?token=%s" % (cloud.hostname, port_getter(), state.token))
+                self.send_header("Content-Length", "0")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                return
+            try:
                 cookies = lab_mod.horizon_session(cfg)
             except lab_mod.LabError as exc:
                 return self._send(502, str(exc).encode("utf-8"), "text/plain; charset=utf-8")
-            host = (self.headers.get("Host") or "127.0.0.1").rsplit(":", 1)[0]
-            port = urlsplit(cfg["auth_url"]).port
+            port = cloud.port
             self.send_response(302)
             self.send_header("Location", "http://%s%s/dashboard/" % (host, ":%d" % port if port else ""))
             for name, value in cookies.items():
@@ -219,7 +233,21 @@ def api_status(state, body, query):
                 "platform": state.platform is not None, "inventory": state.inventory is not None,
                 "audit": state.audit is not None, "checks": state.checks is not None, "gate": g["status"] if g else None,
                 "read_only": (state.platform or {}).get("read_only", True),
-                "unresolved_steps": len(state.journal.unresolved_steps())}
+                "unresolved_steps": len(state.journal.unresolved_steps()), "lab_form": _lab_form(state),
+                "wizard": wizard.steps(state, g)}
+
+
+def _lab_form(state):
+    """Lab mode only: what the Connect form is filled in with. Never the password; a blank password means the lab's own (see api_connect)."""
+    if not state.lab:
+        return None
+    from . import lab as lab_mod
+    try:
+        cfg = lab_mod.load_config()
+    except lab_mod.LabError:
+        return None
+    return {"auth_url": cfg["auth_url"], "username": cfg.get("user", "admin"), "project_name": cfg.get("project", "admin"),
+            "user_domain": "Default", "project_domain": "Default", "interface": "public"}
 
 
 def api_halt(state, body, query):
@@ -394,6 +422,24 @@ def api_selection_get(state, body, query):
             "volumes": vols, "running": bool(state.sim and state.sim.running), "released": len(state.released)}
 
 
+def api_selection_confirm(state, body, query):
+    """The operator confirms the selection as it stands. It opens the Move step, and it is void as soon as the selection or the pre-flight run changes."""
+    inv = _need(state, "inventory")
+    _need(state, "checks")
+    g = _gate(state)
+    if not g or g["status"] != "approved":
+        raise ApiError("the pre-flight gate is not approved: finish step 5 first", 409)
+    by = (body.get("by") or "").strip()
+    if len(by) < 3:
+        raise ValueError("confirming the selection needs the name of the person who confirms it")
+    chosen = selection.selected_ids(state)
+    if not chosen:
+        raise ApiError("nothing is selected: select at least one volume, or stop here", 409)
+    wizard.confirm_selection(state)
+    state.journal.record("selection_confirmed", "batch", {"by": by, "run_id": state.checks.get("run_id"), "volumes": len(chosen), "default": state.selection is None})
+    return {"ok": True, "volumes": len(chosen)}
+
+
 def api_selection_set(state, body, query):
     """Change what is selected (by volume, by group, all, none or back to the default) and/or the options. Every change is journaled."""
     inv = _need(state, "inventory")
@@ -494,6 +540,9 @@ def api_engine_start(state, body, query):
     if len(by) < 3:
         raise ValueError("starting a run needs the name of the person who starts it")
     e = _engine(state)
+    why = wizard.start_refusal(state, e, body.get("ids"))
+    if why:
+        raise ApiError(why, 409)
     _refusals(lambda: e.start(body.get("ids") or None, body.get("type_map") or None))
     state.journal.record("engine_start", "batch", {"by": by, "queued": len(e.queue), "resumed": len(e.active)})
     return e.view()
@@ -659,8 +708,18 @@ def api_demo_dbexport(state, body, query):
 def api_connect(state, body, query):
     if state.demo:
         raise ApiError("demo mode is connected to the demonstration cloud and stays connected", 409)
+    password = body.pop("password", None)
+    if state.lab and not password:                 # lab mode: the form leaves the password out; it is the lab's own, and only for the lab's own address
+        from . import lab as lab_mod
+        try:
+            cfg = lab_mod.load_config()
+        except lab_mod.LabError as exc:
+            raise ApiError(str(exc), 409) from None
+        if (body.get("auth_url") or "").rstrip("/") != cfg["auth_url"].rstrip("/"):
+            raise ApiError("the lab password is used only for the lab's own address, %s" % cfg["auth_url"], 400)
+        password = cfg["password"]
     s = OpenStackSession(
-        auth_url=body.get("auth_url"), username=body.get("username"), password=body.pop("password", None),
+        auth_url=body.get("auth_url"), username=body.get("username"), password=password,
         project_name=body.get("project_name"), user_domain=body.get("user_domain"),
         project_domain=body.get("project_domain"), region=body.get("region"),
         interface=body.get("interface") or "public", verify=body.get("verify", True) is not False,
@@ -993,6 +1052,7 @@ ROUTES = {
     ("GET", "engine"): api_engine_get,
     ("POST", "engine/dry-run"): api_engine_dry_run,
     ("POST", "engine/start"): api_engine_start,
+    ("POST", "selection/confirm"): api_selection_confirm,
     ("POST", "engine/stop"): api_engine_stop,
     ("POST", "engine/reverse"): api_engine_reverse,
     ("POST", "validation"): api_validation,

@@ -47,6 +47,7 @@ class MockCloud:
         self.pending = {}      # volume id -> a retype that is running: {"left": polls to go, "new_type", "prev_status", "fail"}
         self.retype_polls = 3  # reads of a volume before a retype finishes
         self.fail_retype = set()          # volume ids whose retype ends with migration_status=error
+        self.revert_retype = set()        # volume ids whose retype is accepted and then silently undone (seen on a real Cinder: a volume with a snapshot)
         self.reject_retype = {}           # volume id -> HTTP status the retype call is answered with (nothing is changed)
         self.drop_retype = set()          # volume ids whose retype is carried out but the answer is never sent (outcome unknown)
         self.reject_lock = set()          # server ids whose lock call is answered 409
@@ -205,7 +206,8 @@ class MockCloud:
             return handler._send(400, {"badRequest": {"message": "migration is needed and not allowed"}})
         if vid in self.pending:
             return handler._send(400, {"badRequest": {"message": "a migration is already running"}})
-        self.pending[vid] = {"left": self.retype_polls, "new_type": new, "prev_status": vol["status"], "fail": vid in self.fail_retype}
+        self.pending[vid] = {"left": self.retype_polls, "new_type": new, "prev_status": vol["status"], "fail": vid in self.fail_retype,
+                             "revert": vid in self.revert_retype}
         vol["status"], vol["os-vol-mig-status-attr:migstat"] = "retyping", "migrating"
         if vid in self.drop_retype:
             handler.close_connection = True          # carried out, but no answer reaches the caller
@@ -221,6 +223,9 @@ class MockCloud:
             return
         del self.pending[vol["id"]]
         vol["status"] = p["prev_status"]
+        if p["revert"]:                                  # back as it was, no error shown anywhere
+            vol["os-vol-mig-status-attr:migstat"] = None
+            return
         if p["fail"]:
             vol["os-vol-mig-status-attr:migstat"] = "error"
             return

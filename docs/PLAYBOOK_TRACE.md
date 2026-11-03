@@ -1,6 +1,6 @@
-# Playbook v1.2: what OpenMove covers, step by step
+# Playbook v1.2 and v1.3: what OpenMove covers, step by step
 
-The question: does OpenMove contain every step of the owner's playbook (runbook v1.2)? **No.** This page shows, for each phase and step, what exists today. It does not round up.
+The question: does OpenMove contain every step of the owner's playbook (runbook v1.2, and v1.3 which added the second review round)? **No.** This page shows, for each phase and step, what exists today. It does not round up. The step numbers are the same in both versions; the changes in v1.3 are listed in their own section below.
 
 The playbook is the authority. `MIGRATION_METHOD.md` is the working summary. This page is the audit of the tool against it.
 
@@ -8,7 +8,8 @@ The playbook is the authority. `MIGRATION_METHOD.md` is the working summary. Thi
 
 | Word | Meaning |
 |---|---|
-| **Built** | The logic exists in OpenMove and is tested against the mock cloud and the demo. It has not run on a real cloud. |
+| **Built** | The logic exists in OpenMove and is tested against the mock cloud and the demo. It has not run on a customer cloud. |
+| **Built, lab-proven** | As Built, and it has also run against the OpenStack lab on a development machine (a real Keystone, Nova and Cinder; the storage back-ends are LVM simulations, not SolidFire or FlashArray). See `LAB.md`. |
 | **Check only** | A check for it is in the catalogue. Where OpenMove has no access to the component (database, host, array), the check shows "not checked", and a named person must attest it. Nothing is verified automatically. |
 | **Different** | OpenMove does it in another way, on purpose. The difference is stated. |
 | **Not built** | No code. The step is only described in the documents. |
@@ -18,18 +19,19 @@ The playbook is the authority. `MIGRATION_METHOD.md` is the working summary. Thi
 | Layer | State |
 |---|---|
 | Method, classes A to E, check catalogue, gates, rollback rules, failure modes (documents) | written |
-| Discovery, inventory, classification, pre-flight checks, reports, the rules that order a migration, the safety layer, the GUI | **built** (mock cloud and demo only) |
+| Discovery, inventory, classification, pre-flight checks, reports, the rules that order a migration, the safety layer, the gated GUI wizard | **built** (mock cloud and demo; the read paths and the gates also run against the lab) |
 | Phase 0: the 21 lab tests T1 to T21 as guided, recorded procedures | **not built** (only the record that gate G0 passed is kept) |
-| Phase 3 (retype of class A and B) and rollback R3 as actions that change the cloud | **built** against a mock cloud (`openmove/engine`), not run on a real cloud |
-| Phases 4, 5 and the rollbacks R1, R2 as actions that change the cloud | **not built**. The demo simulates them. |
+| Phase 3 (retype of class A and B) and rollback R3 as actions that change the cloud | **built, lab-proven** (`openmove/engine`): detached, attached and boot volumes, the way back, and the failures listed in `LAB.md`. Never run on a customer cloud. |
+| Phase 4 (class B) as the engine's wait for snapshots to rotate away | **built** against the mock cloud; the lab has no rotating snapshots yet |
+| Phase 5 (class C) and the rollbacks R1, R2 as actions that change the cloud | **not built**. The demo simulates them. Class C needs a data mover and the arrays. |
 | Per-volume gate sign-offs G2, G3, G4 by a second person | built (see "Gaps that matter") |
-| Anything run against a real cloud or a real array | **never done** |
+| Anything run against a customer cloud or a real array | **never done** |
 
 ## Phase 0: lab validation (gate G0)
 
 | Playbook | OpenMove | Status |
 |---|---|---|
-| Tests T1 to T21 | No guided procedures. A validation result for a release can be recorded (`profiles.py`), and check P16 blocks every changing step until it is. | **Not built** (record only) |
+| Tests T1 to T22 (T22 is new in v1.3: the instance lock is read and respected) | No guided procedures. A validation result for a release can be recorded by two different people with their evidence (`profiles.py`, `POST /api/validation`), and check P16 blocks every changing step until it is. The engine itself covers the T22 rule: it reads the lock with microversion 2.9, locks only an unlocked instance and unlocks only what it locked. The retype path was also exercised by hand in the lab (see "What the lab showed"). | **Not built** (record only) |
 | Gate G0, second person signs | The pre-flight gate takes two sign-offs. G0 itself is the P16 check. | **Check only** |
 
 ## Phase 1: discovery and triage
@@ -72,18 +74,18 @@ The playbook is the authority. `MIGRATION_METHOD.md` is the working summary. Thi
 | Step | OpenMove | Status |
 |---|---|---|
 | 3.1 Before state | The inventory of each run is kept in the journal. The raw database rows of Appendix E need the export. | **Built** (partly) |
-| 3.2 Lock the instance | Rule only (C4). No call. | **Not built** |
-| 3.3 Retype with on-demand migration | Simulated in the demo | **Not built** |
-| 3.4 Wait for success | Simulated | **Not built** |
-| 3.5 Unlock, after state | Simulated | **Not built** |
+| 3.2 Lock the instance | `engine/actions.py`: locks only an instance that is not locked; refuses an instance whose lock state cannot be read | **Built, lab-proven** |
+| 3.3 Retype with on-demand migration | One `os-retype` with `migration_policy: on-demand`; never retried; permit checked before it | **Built, lab-proven** |
+| 3.4 Wait for success | Polls `migration_status` every 5 s up to 6 hours; an unknown outcome halts | **Built, lab-proven** |
+| 3.5 Unlock, after state | Post-check against the before-state, then unlock (only what OpenMove locked), then soak | **Built, lab-proven** |
 
-OpenMove adds, around these steps: precheck, validate, copy, sync, **recheck twice or more**, cutover, post-check and a **soak** period. The order is enforced in `lifecycle.py`.
+OpenMove adds, around these steps: validate (G2 and G3 by a second person), hold and release, the retype, the **post-check**, G4 by a second person and a **soak** period. The order is enforced in `lifecycle.py` (`RETYPE_ORDER`). The staged order (copy, sync, rechecks, cutover) belongs to class C and to the demonstration.
 
 ## Phase 4: class B volumes
 
 | Step | OpenMove | Status |
 |---|---|---|
-| 4.1 Watcher: count snapshots once a minute, fire at zero | The rule is built (validate refuses a volume with snapshots). The watcher is not. | **Not built** |
+| 4.1 Watcher: count snapshots once a minute, fire at zero | The engine rechecks the snapshot rule on every tick (5 s) and starts the volume when the count reaches zero; it gives the volume up after 72 hours. It only reads; it never deletes a snapshot. | **Built** (mock cloud; no rotating snapshots in the lab yet) |
 | 4.2 The watcher never deletes a snapshot | Rule of the safety layer (the client is read-only; changing calls need a permit) | **Built** (rule) |
 | 4.3 Concurrency cap per compute host | A global concurrency setting. Not per host. | **Built** (partly) |
 
@@ -113,7 +115,9 @@ OpenMove adds, around these steps: precheck, validate, copy, sync, **recheck twi
 
 | Playbook | OpenMove | Status |
 |---|---|---|
-| R1, R2, R3 | A rolled-back state exists in the lifecycle and in the reports. No rollback action. | **Not built** |
+| R3 (the way back after G4) for class A and B | A retype back to the original type, with the instance locked first, a name and a reason, inside the soak | **Built, lab-proven** |
+| R3 on a failed post-check or a silently undone retype | The engine rolls back by itself and records why | **Built, lab-proven** |
+| R1, R2 | Class C only. A rolled-back state exists in the lifecycle and in the reports. No rollback action. | **Not built** |
 | 18.1 stuck block job | Halt, X4. No recovery action. | **Not built** |
 | 18.2 completion fails | Halt. No recovery action. | **Not built** |
 | 18.3 compute host fails | Halt | **Not built** |
@@ -138,16 +142,43 @@ A reviewer read the playbook and the script bundle after v1.2. Most of the findi
 | The instance lock is never read because the lock field only exists from Nova microversion 2.9 and a Queens-era client defaults to 2.1 (the field comes back empty and is tolerated). | The inventory read of instances sent no microversion, so the pre-flight could not see a lock. The engine read single instances with 2.9 but accepted an answer without the field. Now both send 2.9, and the engine refuses an instance whose lock state is not true or false (safety row 35). | **Fixed** |
 | After a reverse migration the driver may delete the real target volume, which then sits in the array's pending-eradication window (recovery by purevol recover only inside it). | OpenMove's way back for classes A and B is a retype back, which the cloud does itself, so the engine adds no array call. The method text (R3) now carries the finding. For class C, which is not built, an explicit array copy before the record swap is to be designed and proven in the lab. | **Recorded** |
 | The post-check should compare the fields that must not change, not everything (a rename or a metadata edit during the window must not fail it). | The engine's post-check compares status, size, attachments, bootable flag and instance state. It does not compare names, metadata or the tenant snapshot list. | **Already so** |
-| A move of a detached volume should lock the volume, because reserving a volume in Queens does not check the migration status. | The retype path never uses a bare migrate. To observe in the lab: whether an attach is refused while a retype of a detached volume runs. | **Open, lab** |
+| A move of a detached volume should lock the volume, because reserving a volume in Queens does not check the migration status. | The retype path never uses a bare migrate. Observed in the lab: while a detached volume is retyped its status is `retyping`, not `available`, so it cannot be attached. Queens may differ; the post-check also compares the attachments. | **Observed in the lab; confirm on Queens in Phase 0** |
 | The staged class C method and its scripts are a lot of new surface for a one-off migration; keep it out of the critical path. | Matches the current plan: access level "OpenStack APIs only" is the default, class C is held back with a cause, and nothing in the staged method is built. | **Owner decision** |
+
+## What changed in v1.3
+
+The second review round (v1.2 to v1.3) accepted the 13 answers of the first round, withdrew two of its own points, corrected rollback R3 and fixed two script defects. Each point was checked against the Queens source by the playbook's author. What each means for OpenMove:
+
+| v1.3 item | In OpenMove | Status |
+|---|---|---|
+| R3: after a reverse migration Cinder destroys the real array volume, so R3 now takes a safety copy first | A retype back leaves the cloud to do it, and the engine adds no array call. A safety copy of a class C volume belongs to the unbuilt class C method | **Recorded**, class C not built |
+| `--rpc-create` copied `snapshot_id` and `source_volid` into the record | A defect in a script of the staged method. OpenMove does not run it | **Not applicable** |
+| The instance lock is never read (the Nova field exists from microversion 2.9; the Queens client defaults to 2.1) | The inventory and the engine both send microversion 2.9; an instance whose lock state is not true or false is refused; OpenMove unlocks only what it locked. New test T22 | **Fixed** (safety row 35) |
+| The post-check fails on a tenant rename, a metadata edit or a snapshot delete | The post-check compares only the fields that must not change: status, size, attachments, bootable flag, instance state and, since 0.7.0, the identity fields (creation time, project, owner, snapshot id, source volume id, availability zone, multi-attach flag) | **Already so**, extended |
+| `pure_connected` column order; `user_friendly_names no`; `70_cleanup.sh` bypassed the dry run; the unfreeze restored `NULL`; `MODE=migrate` on a detached volume needs `--lock-volume` | Scripts and host settings of the staged method. The host settings are items for the migration host check (P8) | **Not applicable** to the retype path |
+| The compare costs two or three times the I/O | Staged method only | **Not applicable** |
+| Keep OpenMove out of the critical path | A scoping choice. The playbook, its scripts and Phase 0 do not depend on OpenMove | **Owner decision** |
+
+## What the lab showed (real Cinder and Nova, not the mock)
+
+The lab (`LAB.md`) is a DevStack on a development machine with two LVM back-ends standing in for the source and the target array. It proves the OpenStack side of the engine. It says nothing about SolidFire, FlashArray or Queens. What it found:
+
+| Finding | What was done | Where it is tested |
+|---|---|---|
+| A detached volume shows the status `retyping` while it is retyped | The mock does the same, and the engine and the post-check expect the status to return to normal | `test_engine` |
+| Real Cinder **accepts** a retype of a volume that has a snapshot, and then silently puts it back (status normal, type unchanged, no error) | After a 30 second grace a volume that is back to normal and not on the target counts as an undone retype: the engine rolls back and records why. A mock fault mode reproduces it | `test_engine` (undone retype) |
+| A retype call being accepted proves nothing about the snapshot rule | The snapshot rule stays a blocking check; class C is never retyped | `test_engine`, `test_core` |
+| Instances stay SHUTOFF after the WSL distribution restarts, which turns their volumes into class D | Documented as a lab troubleshooting row | `LAB.md` |
+| Nova hides `locked` below microversion 2.9 | As above | safety row 35 |
+| Horizon and Keystone answer on `localhost` but not on `127.0.0.1` | The dashboard link and the Connect form use the lab's own host name | `test_lab` |
 
 ## Gaps that matter
 
-1. **The engine.** Nothing moves a byte. Every "Not built" row above is the engine.
+1. **Class C.** The engine for classes A and B exists and has run in the lab. Class C (the staged method with a data mover, hosts and arrays) is not built; every "Not built" row above is class C or Phase 0.
 2. **Per-volume gates G2, G3, G4.** Now built (see the gates table). What stays open: G3 sits at the entry of the cutover phase until the engine separates the freeze from the swap.
 3. **Internal-tenant volumes (step 1.7).** The image-cache volume is found and held back; other volumes of Cinder's internal project are not looked for.
 4. **`provider_id` repair (step 1.9).** Found, not repaired.
-5. **Phase 0.** No guided lab procedures.
+5. **Phase 0.** No guided lab procedures for T1 to T22. The lab does not replace Phase 0 on the customer's Queens and arrays.
 6. **Checks on hosts and arrays** show "not checked" until the access exists. They need attestations in the meantime.
 
 ## What OpenMove adds beyond the playbook
@@ -161,6 +192,9 @@ A reviewer read the playbook and the script bundle after v1.2. Most of the findi
 | Not-migrated report with cause, state left behind and proposed steps | `handling.py` |
 | Halt switch, automatic halt after failures, hold and release before the cutover | `safety.py`, `server.py` |
 | Demo mode with three scenarios | `openmove/demo/` |
+| A gated wizard: a step opens only when every step before it is done, the selection must be confirmed, and a dry run must cover the volumes before a real run | `wizard.py`, `WALKTHROUGH.md` |
+| Detection of a retype that Cinder accepted and silently undid | `engine/runner.py` |
+| A post-check of the identity fields of the volume | `engine/runner.py` |
 
 ## How this page stays true
 
