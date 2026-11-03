@@ -8,7 +8,8 @@ The demonstration (`OpenMove-Demo.bat`) shows the screens with a **mock** cloud 
 |---|---|
 | The engine's calls are accepted by a real Cinder and Nova: lock, retype with on-demand migration, unlock. | Anything about the customer's **Queens** build. The lab runs a recent release (DevStack `stable/2025.1`). The Queens profile stays unvalidated. |
 | The order, the permit per call, the polling of `migration_status`, the before and after comparison, the reverse (retype back) work against real behaviour, including attached volumes (KVM) and boot-from-volume. | Anything about **SolidFire or FlashArray**. The two back-ends are LVM volume groups on loop devices (`sf-sim` stands in for the source, `pure-sim` for the target). |
-| Failure handling for faults that can be caused in a real cloud (a stopped service, a volume in use, a refused retype). | Class C (long-lived snapshots, staged rebuild): it is not built, and the lab cannot stand in for the arrays. |
+| Failure handling for faults that can be caused in a real cloud (a stopped service, a volume in use, a refused retype). | The **SolidFire and FlashArray adapters**: the lab's class C moves run through the `lvm` adapter, so the copy, the history rebuild, the record swap and the rollbacks are proven against a real Cinder, but not the arrays' own behaviour. |
+| Class C, the staged method: the data mover and the Cinder helper on two separate hosts (two WSL 2 distros), SSH with pinned host keys, the history rebuild, the destination record in Cinder's object layer, the switch, rollback R2. | The impact of a copy on a production array; a compute host that is another machine. |
 
 A lab result is evidence that the engine behaves. It is **not** the lab validation (gate G0) of a customer's release; people must still run the playbook's tests on a copy of the customer's platform.
 
@@ -25,11 +26,39 @@ A lab result is evidence that the engine behaves. It is **not** the lab validati
 |---|---|
 | `OpenMove-Lab.bat` | Starts the lab if it is not answering, then OpenMove in lab mode (it connects by itself). It opens **two browser windows**: OpenMove, and the OpenStack dashboard (Horizon, `/dashboard`), already signed in as `admin`: OpenMove logs in on the browser's behalf, on this machine only. `--no-browser` opens neither. |
 | `OpenMove-Lab.bat up` | Starts the lab: keeps the distro running, loads the kernel modules, re-attaches the loop devices behind the two volume groups, starts the services. |
+| `OpenMove-Lab.bat more` | Adds the second, larger set of volumes of every class on top of the first (see "The larger catalogue"). It grows the two volume groups first. |
+| `python tools/lab/lab.py fresh-host` | Makes (or readies) a third, bare WSL distro `openmove-fresh` with only `sshd` and the root password login, as a customer would hand over a new Linux host. Prints its address, port (2203) and login. Use it to try **Set up a new host from here** on the Hosts tab (see "A bare host for the host setup"). |
 | `OpenMove-Lab.bat seed` | Creates the test objects (all named `lab-*`; see "The seeded catalogue" below). |
 | `OpenMove-Lab.bat clean` / `list` | Removes or lists them. |
 | `OpenMove-Lab.bat status` | Says whether Keystone answers. |
 | `OpenMove-Lab.bat down` or `OpenMove-Lab-Stop.bat` | Stops the lab gracefully: instances first, then the OpenStack services, the web server, the queue and the database, then the volume groups, then the distro. Its data is kept. It refuses while DevStack is still installing. |
+| `python tools/lab/lab_staged.py status` | What each lab volume is (class, status, back-end, snapshots) and the readiness of the two lab hosts. Also `dry`, `run NAME`, `run NAME --resume`, `fill NAME [MiB]` and `snapshot NAME [COUNT]` (class C, below). It refuses any volume not named `lab-*`. |
 | `OpenMove-Lab.bat reset` | Lab mode with an empty journal and evidence folder. |
+
+## What `OpenMove-Lab.bat` starts
+
+One double-click brings up everything the lab needs to operate fully. It does these steps in order and prints what each one found:
+
+| Step | What happens | If it goes wrong |
+|---|---|---|
+| 1 | The WSL distro `openmove-lab` is started and kept running; the kernel modules and the loop devices behind the two volume groups are brought back | The message says which one |
+| 2 | Every DevStack service is started; a unit that failed at boot (for example `nova-compute`, which failed 17 seconds after a restart before the queue and libvirt were ready) is restarted, up to four times | The units still failed are named |
+| 3 | The lab waits for Keystone and for the compute service to report `up` | After 5 minutes it says which is missing |
+| 4 | The lab guests that should run are started if they are not (a guest that Nova calls `ACTIVE` while its compute service was down is read by power state, not by status). The guests that the catalogue keeps stopped, paused or suspended on purpose are left as they are | The guests that did not start are named |
+| 5 | OpenMove starts in lab mode, connects, and **prepares both lab hosts**: the second distro `openmove-mover` (made from the same image if it is missing), `sshd` with key login on 2201 and 2202, OpenMove's key, the host-key pins, the data mover and the Cinder helper, and the readiness checks | The Hosts tab shows the failed check |
+| 6 | Horizon opens, signed in as `admin` | |
+
+The catalogue itself is data, not infrastructure: `OpenMove-Lab.bat seed` makes the first set and `OpenMove-Lab.bat more` the larger one. Neither runs by itself.
+
+## A bare host for the host setup
+
+`python tools/lab/lab.py fresh-host` makes the distro `openmove-fresh` from the same image as the lab, installs only `openssh-server`, sets the root password to the lab password and starts `sshd` on port 2203 with password login. Nothing of OpenMove is on it: no account, no key, no data mover, no LVM tools. That is the state of a new host that a customer prepared.
+
+In OpenMove (lab mode or not), Hosts tab, **Set up a new host from here**: name `fresh-1`, the address the command printed, port 2203, login `root`, the lab password, role migration host. Press **Read the host key**, compare it with `wsl -d openmove-fresh -u root -- ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`, type the fingerprint and a name, and press **Set up the host**. The steps S1, S2 and S5 pass, the host is registered with the service account `openmove`, and H1 to H7 pass: the data mover is placed and the host sees both volume groups (the distros share one kernel).
+
+What this lab cannot show: the iSCSI logins and the multipath maps. Pick the protocol iSCSI and step S4 fails with the reasons (`iscsid` cannot bind its socket because the Cinder host's `iscsid` owns it in the shared network namespace; `multipathd` is skipped inside a container). That is the honest result of the lab; a real machine or virtual machine and the arrays are needed to prove those parts (`COVERAGE.md`).
+
+To start over, `wsl --unregister openmove-fresh`, then the command again.
 
 ## The seeded catalogue
 
@@ -41,7 +70,7 @@ A lab result is evidence that the engine behaves. It is **not** the lab validati
 | `lab-a-image-*` | 3 | Bootable volumes made from the cirros image, so they hold real data | Class A: moved |
 | `lab-a-attached-*` | 4 | Attached to running servers (`lab-srv-*`) | Class A: instance locked around the move |
 | `lab-boot-*` | 2 | Boot volumes of running servers (`lab-srv-boot-*`) | Class A: moved with the instance running |
-| `lab-b-snap-*` | 3 | One to two snapshots each | Class C with API-only access: the API cannot show snapshot history, so rotation is unknown (see below); held back with cause `no_data_mover` |
+| `lab-b-snap-*` | 3 | One to two snapshots each | Class C: the API cannot show snapshot history, so rotation is unknown (see below). Held back with cause `no_data_mover` until the lab hosts are registered; moved by the staged method after that |
 | `lab-d-stopped-*` | 2 | Attached to stopped servers (`lab-srv-off-*`) | Class D: held back |
 | `lab-e-multiattach` | 1 | Multi-attach type | Class E: held back |
 | `lab-e-encrypted` | 1 | LUKS-encrypted type (the lab's fixed key manager) | Class E: held back |
@@ -49,6 +78,31 @@ A lab result is evidence that the engine behaves. It is **not** the lab validati
 | `image-<image id>` | 1 | Not seeded: DevStack's image-volume cache creates it when a volume is made from an image | Class E, cause `image_cache` |
 
 Class B needs the history of deleted snapshots, which only the Cinder database holds. With the APIs only, any volume with snapshots is class C ("rotation unknown"), as the classifier's own rule says. To exercise the class B path in the lab, import a playbook export that carries the churn figures. What the real lab showed beyond the mock: the image-cache volume, and that the "on target" volumes were admitted until the pre-flight learned to leave them out.
+
+### The larger catalogue
+
+`OpenMove-Lab.bat more` adds a second set on top of the first, so that every class can be tested more than once and in more shapes. It first grows the two volume groups (sparse files, so the disk is used only as the volumes are written): `sf-sim` to 220 GiB and `pure-sim` to 260 GiB, because a class C move needs the volume and every snapshot of room on the target. It then waits for Cinder to see the new capacity (Cinder learns it from the back-end's report, once a minute; volumes made earlier are refused with "no valid backend"). It takes several minutes, most of it booting guests.
+
+| Name | Count | What it is | Expected |
+|---|---|---|---|
+| `lab-a2-detached-*` | 12 | Detached, 1 to 4 GiB, all three types | Class A |
+| `lab-a2-image-*` | 3 | Bootable volumes with data | Class A |
+| `lab-a2-attached-*` | 4 | Two volumes each on two running guests (`lab-srv-more-1`, `-2`) | Class A: one instance with two volumes |
+| `lab-a2-boot-*` | 2 | Boot volumes of two running guests | Class A |
+| `lab-a2-paused-1` | 1 | Attached to a paused guest | Class A (a paused guest is allowed) |
+| `lab-c-snap-*` | 6 | Detached, with 1, 2, 3, 4, 2 and 1 snapshots; the last is 2 GiB | Class C |
+| `lab-c-wide-1` | 1 | One volume with 8 snapshots | Class C (many snapshots) |
+| `lab-c-att-*` | 3 | Attached to one running guest (`lab-srv-more-3`), one forced snapshot each | Class C, attached (Nova swap) |
+| `lab-d-stopped-3` to `-5` | 3 | Attached to a stopped guest (`lab-srv-off-3`) | Class D |
+| `lab-d-suspended-1` | 1 | Attached to a suspended guest | Class D |
+| `lab-e-multiattach-2`, `lab-e-encrypted-2` | 2 | A second multi-attach and a second encrypted volume | Class E |
+| `lab-e-error-1` | 1 | In status `error` | Class E |
+| `lab-e-migrating-1` | 1 | `migration_status` set to `migrating`, as if a move were in flight | Class E |
+| `lab-t-on-target-3`, `-4` | 2 | Already on `pure-sim` | Not admitted |
+
+With both sets the lab holds about 70 volumes and 16 guests. OpenMove classes them as 46 class A (before the class C moves of `lab-b-snap-1` and `lab-a-attached-1`), 11 class C, 6 class D and 8 class E, plus the volumes that are not admitted. The volume names carry no class when the cloud is a customer's; here they say what the engine should do, so a result can be compared with the name at a glance.
+
+Class B has no volume of its own. With the APIs only, any volume with snapshots is class C, because rotation can be read only from the Cinder database. To see class B, import a churn export that marks a volume's snapshots as rotating (the playbook's query results; `docs/USER_GUIDE.md`).
 
 If the lab refuses the encryption settings of the encrypted type, the seeder says so and carries on. `seed` stops when `lab-*` objects already exist; run `clean` first. Booting the servers is the slow part (a few minutes).
 
@@ -70,6 +124,31 @@ First runs of the real engine against the lab (a detached volume, a volume attac
 | **Found: a class C volume could be started** | Asking the engine for a volume that is not class A or B now fails with a clear message instead of starting nothing. |
 | Class B needs the database | With the APIs only, a volume with snapshots is class C (rotation unknown). The class B path (wait for rotation) is covered by the mock tests only. |
 
+## Class C in the lab
+
+Class C needs a migration host and a Cinder host (`MOVER.md`). In the lab both are WSL 2 distros on this machine, and OpenMove makes them without a terminal (`openmove/lab/hosts.py`, run when OpenMove starts in lab mode):
+
+| Host | Distro | SSH port | What runs there |
+|---|---|---|---|
+| `lab-cinder` | `openmove-lab` (the DevStack distro) | 2201 | The Cinder helper, run with DevStack's own Python (`/opt/stack/data/venv/bin/python`) |
+| `lab-mover` | `openmove-mover`, a second distro made from the same image | 2202 | The data mover. It is a separate instance; it sees the same volume groups because WSL 2 distros share one kernel, which is what a migration host needs |
+
+The setup does what an administrator would do: it creates the second distro if it is missing, installs OpenSSH, Python and LVM, starts `sshd` with key login only, adds OpenMove's own public key, registers both hosts under the address the distros have now (it changes at every restart), pins the host keys and runs the host checks H1 to H9, C1 and C2. In the lab the fingerprint is read from the distro itself, and the journal says that no person compared it. On a customer site a person does that.
+
+`python tools/lab/lab_staged.py` drives OpenMove's own handlers against the lab (the same ones the screen calls), signs G2, G3 and G4 as a made-up second person, and reads the result back. It does not shorten the method: two rechecks 300 seconds apart still take five minutes.
+
+| Result | Detail |
+|---|---|
+| **A detached volume with one snapshot moved from `sf-sim` to `pure-sim`** | `lab-b-snap-1`: precheck, validate, copy, sync, two rechecks, cutover (all nine steps), postcheck, G4, soak. About 7 minutes, 5 of them the wait between the rechecks. Read from outside OpenMove: Cinder shows the volume and its snapshot on `pure-sim`; the logical volume and the snapshot image on `pure-sim` exist; the SHA-256 of the volume on `sf-sim` and on `pure-sim` is identical. The source stays until the soak ends, as the method says |
+| **An attached volume with one snapshot moved from `sf-sim` to `pure-sim` under a running guest** | `lab-a-attached-1`, with random data written before and after the snapshot. The cutover took the nine steps; the Nova swap ran as a live libvirt block copy (seen at 69% on the guest's second disk) and the guest kept running. Read from outside OpenMove: Cinder shows the volume `in-use` on `pure-sim`, attached to the same instance; libvirt shows the guest's disk on a new device; the snapshot image is on `pure-sim`; the rollback clone is kept for the soak. **Not measured**: guest IO during the copy and the length of the pivot (the lab guest does no workload) |
+| **Found: the Cinder helper refused a source frozen by OpenMove** | `record-create` rejected a source in maintenance, which is what the freeze step had just made it. Fixed in `cinder_helper.py` (a source that OpenMove froze is accepted); test added |
+| **Found: R2 run against real Cinder** | A run stopped in the middle of its rollback left the source frozen. On restart the engine refused to start the volume because a frozen volume reads as class E. Fixed in `engine/runner.py` (a volume the journal holds is allowed to start again); the engine then finished R2: the record deleted, the staging volume and the clones removed, the source unlocked. Test added |
+| **Found: the Nova volume swap body was wrong** | The first attached class C move stopped at the `switch` step: real Nova answered 400, `'volumeId' is a required property`. The engine had sent `volume_id`, and the mock had accepted it. R2 ran by itself and left the lab clean (the record deleted, the staging volume and the clones removed, the volume unfrozen and unlocked). Fixed in `engine/actions.py`; the mock now validates the body as Nova does, so every attached test would fail on the old key |
+| **Found: a swap waits for ever when the compute service is down** | After the laptop shut down, `nova-compute` had failed to start and the guests were off, but Nova still said `ACTIVE` and the API accepted the swap. The volume stayed `retyping`/`migrating` for minutes. Fixed: the plan and the cutover now check the guest's power state, and the cutover checks that the compute service of the instance's host is up (N4); either failure stops the volume before the swap. Cinder's state was reset by hand (an administrator reset of `migration_status`), the engine saw the failed switch and ran R2 by itself |
+| **Found: R2 said "as it was" for a source left `retyping`** | The end of R2 now compares the source's status with the one before the freeze and halts for a person if it differs |
+| Resume after a crash | The laptop shut down in the middle of a run; the next start read the journal and carried on from the step it had reached |
+| Hosts without a terminal | The distro, `sshd`, the key, the host-key pins and all readiness checks (including the real Cinder helper in DevStack's Python) are set up and passed by one start |
+
 **Failure injection in the lab (2026-11-03).** Each was run against the real cloud and read from the cloud itself, not only from the engine:
 
 | Failure | Result |
@@ -79,7 +158,7 @@ First runs of the real engine against the lab (a detached volume, a volume attac
 | The Cinder API stopped for about 25 seconds during a move | The engine said it could not continue, sent nothing, did not guess, did not halt (it only reads); when the API returned it saw the move had finished and ran the post-check |
 | The Cinder volume service stopped for 75 seconds during a move | The engine kept waiting and watching (a retype may legitimately take hours); when the service returned the copy finished and the post-check passed |
 
-Not exercised: a power cut on the Cinder or compute host, and a lock that Nova refuses. The Horizon auto-login works against the real dashboard.
+Not exercised: a power cut on the Cinder or compute host, a lock that Nova refuses, and a soak of real length (the lab soak was not waited out). The Horizon auto-login works against the real dashboard.
 
 ## A first run, in order
 

@@ -2,7 +2,7 @@
 
 This page checks OpenMove against the owner's requirements (`REQUIREMENTS.md`, R1 to R18) and the proposal (`DESIGN.md`). It does not round up. Each line says **met**, **partly**, or **not built**, with the reason and, for what is not built, what is needed to build it.
 
-The short answer to "is there anything the tool cannot do?": **yes**. It does not move class C volumes (volumes with long-lived snapshots), it has no SSH, database or array access, and nothing has run on a customer cloud. Everything in the table below that could be closed without that access has been closed; what is left needs access, an environment or a decision from the owner.
+The short answer to "is there anything the tool cannot do?": **yes**. It moves class C volumes (volumes with long-lived snapshots) only on LVM back-ends, because the SolidFire and FlashArray adapters are not written and there are no arrays to write them against; it has no direct database access (the Cinder helper uses Cinder's own object layer); and nothing has run on a customer cloud or on Queens. Everything in the table below that could be closed without that access has been closed; what is left needs access, an environment or a decision from the owner.
 
 Status words: **met** = built, tested, and (for the retype path) run against the OpenStack lab. **partly** = built for the retype path or for part of the requirement. **not built** = no code.
 
@@ -20,7 +20,7 @@ Status words: **met** = built, tested, and (for the retype path) run against the
 | R8 | As many back-ends as possible; support matrix | **partly** | Back-end families are data (`resources/backends.json`); the engine never tests for a vendor name; check P3 fails for a back-end it does not know ("unsupported", with the reason) and warns for a known pair nobody verified; the support matrix is generated (`SUPPORT_MATRIX.md`) and a test keeps it current | Only one pair is verified (two LVM back-ends in the lab). SolidFire, FlashArray, ONTAP and Ceph are recognised but **not verified**: that needs Phase 0 on real arrays. Array adapters for the staged method are not built |
 | R9 | Detects the OpenStack version and acts on it | **met** | Discovery, release inference, profiles as data, read-only for an untested release | A Queens profile exists but is `untested` until Phase 0 is recorded; that is by design |
 | R10 | Platform independent | **partly** | Pure Python, no shell scripts; the whole test suite passes on Windows and on Linux (Ubuntu in WSL) | **macOS has never been run.** Packaged programs exist only for Windows. Reports and the journal are portable files, but a job opened on a second system has not been tried |
-| R11 | Container, own Linux deployment, everything from the tool | **not built**, except the container file | `Dockerfile` and `.dockerignore` (not yet built or run). Everything on the retype path is controlled from the page; no terminal is needed | The own Linux image; the migration-host registry, readiness checks and preparation; preparing arrays and Cinder (types, access, quota, reference volume) from the tool; database backup; running the lab tests from the tool (they are now guided and recorded, but a person runs them). Needs the data mover, SSH and array access first |
+| R11 | Container, own Linux deployment, everything from the tool | **partly**: the migration-host registry, readiness checks, key and host-key handling and the placing of the data mover are built; the container file is written, not built | `Dockerfile` and `.dockerignore` (not yet built or run). Everything on the retype path is controlled from the page; no terminal is needed | The own Linux image; the migration-host registry, readiness checks and preparation; preparing arrays and Cinder (types, access, quota, reference volume) from the tool; database backup; running the lab tests from the tool (they are now guided and recorded, but a person runs them). Needs the data mover, SSH and array access first |
 | R12 | Works with the existing Cinder hosts alone | **partly** | The retype path uses only the Cinder APIs and the cinder-volume hosts that already exist; it adds no host and installs nothing on any | The data-mover relay between two cinder-volume hosts (for class C) is not built; it needs SSH and a lab with both arrays |
 | R13 | Safe: no failure may cause an outage | **met** for the retype path | Read and change are separated; a permit is checked again for every change; the source is read-only until the retype; HALT; 40 hazards with a control and a test each (`SAFETY.md`) | Proven on the mock and the lab only. Not proven on a customer cloud |
 | R14 | The fixed order | **met** for the retype path | `lifecycle.py` enforces the order; the cutover conditions are asked at the moment of the change | The staged order (copy, sync, recheck twice, cutover) is built as rules and simulated in the demonstration, not as actions |
@@ -35,10 +35,11 @@ Status words: **met** = built, tested, and (for the retype path) run against the
 |---|---|---|
 | Connector: OpenStack API | **met** | `connectors/` |
 | Connector: Cinder database | **not built** | Needs read access to the database. The playbook's query results can be imported instead |
-| Connector: SSH runner | **not built** | Needs the owner's decision on the SSH client (system OpenSSH or a bundled library) and hosts to test on |
-| Connector: array adapters | **not built** | Needs the arrays |
+| Setting up a migration host from OpenMove (a password login once, the host preparation, the iSCSI and multipath paths, the registration) | **partly**, lab-proven for the host preparation | A bare Ubuntu host with only `sshd` and the root password became a registered migration host that passes H1 to H7. The iSCSI logins and the multipath maps are **not proven**: the lab's WSL hosts share one kernel with the Cinder host (`DEPLOYMENT.md`, section 4.1) |
+| Connector: SSH runner | **met**, lab-proven | The system OpenSSH client, keys only, host keys pinned by a person (`MOVER.md`) |
+| Connector: array adapters | **partly** | `lvm` is built and proven in the lab; SolidFire and FlashArray are **not built** and need the arrays |
 | Discovery and release profiles | **met** | |
-| Engine for class A and B | **met**, lab-proven | Class C: **not built** |
+| Engine for class A and B | **met**, lab-proven | Class C: **partly**, built and proven on LVM only (`engine/staged.py`) |
 | Checks (catalogue P, V, S, C, X) | **partly** | See R4 |
 | Reports: Word | **met** | |
 | Reports: Excel, CSV | **met** (volume list) | |

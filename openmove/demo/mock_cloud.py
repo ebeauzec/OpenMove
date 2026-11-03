@@ -51,6 +51,19 @@ class MockCloud:
         self.reject_retype = {}           # volume id -> HTTP status the retype call is answered with (nothing is changed)
         self.drop_retype = set()          # volume ids whose retype is carried out but the answer is never sent (outcome unknown)
         self.reject_lock = set()          # server ids whose lock call is answered 409
+        self.swaps = {}                   # volume id -> a Nova volume swap that is running: {"left", "dest", "server", "fail"}
+        self.swap_polls = 3               # reads of the volume before a swap finishes (Nova then calls Cinder's completion)
+        self.fail_swap = set()            # volume ids whose swap ends with the completion reporting an error
+        self.reject_swap = {}             # volume id -> HTTP status the swap call is answered with (nothing is changed)
+        self.reject_completion = {}       # volume id -> HTTP status the completion call is answered with
+        self.on_force_delete = None       # callback(record): what the driver does with the backing volume of a deleted record
+        self.on_swap_complete = None      # callback(volume id, destination id): the block copy Nova made, for a fake fabric
+        self.swaps = {}                   # volume id -> a Nova volume swap that is running: {"left", "dest", "server"}
+        self.swap_polls = 3               # reads of the volume before a swap finishes (Nova then calls Cinder's completion)
+        self.fail_swap = set()            # volume ids whose swap ends with the completion reporting an error
+        self.reject_swap = {}             # volume id -> HTTP status the swap call is answered with (nothing is changed)
+        self.reject_completion = {}       # volume id -> HTTP status the completion call is answered with
+        self.on_swap_complete = None      # callback(volume id, destination id): the block copy Nova made, for a fake fabric
         self.meta = {}         # facts only the Cinder database holds, used to make the demonstration database export
         self.scenario = None
         self.server = None
@@ -98,6 +111,12 @@ class MockCloud:
                                            "roles": roles, "expires_at": "2099-01-01T00:00:00Z"}},
                            {"X-Subject-Token": TOKEN})
 
+            def do_PUT(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}")
+                cloud.calls.append(("PUT", self.path))
+                self._action(urlsplit(self.path).path, body)
+
             def _action(self, path, body):
                 if self.headers.get("X-Auth-Token") != TOKEN:
                     return self._send(401, {"error": {"message": "unauthorized"}})
@@ -111,6 +130,16 @@ class MockCloud:
                         return self._send(404, {"itemNotFound": {"message": "volume not found"}})
                     if "os-retype" in body:
                         return cloud.retype(self, vol, body["os-retype"])
+                    if "os-migrate_volume_completion" in body:
+                        return cloud.completion(self, vol, body["os-migrate_volume_completion"])
+                    if "os-force_delete" in body:
+                        cloud.volumes.remove(vol)
+                        if cloud.on_force_delete:
+                            cloud.on_force_delete(vol)
+                        return self._send(202, {})
+                if path.startswith(nov) and "/os-volume_attachments/" in path:
+                    sid, vid = path[len(nov):].split("/os-volume_attachments/")
+                    return cloud.swap(self, sid, vid, body)
                 if path.startswith(nov) and path.endswith("/action"):
                     srv = cloud.find(cloud.servers, path[len(nov):-len("/action")])
                     if srv is None:
@@ -214,7 +243,62 @@ class MockCloud:
             return
         handler._send(202, {})
 
+    def swap(self, handler, sid, vid, body):
+        """Nova's volume swap: answers 202, copies under the instance, then calls Cinder's completion (seen as migration_status changing)."""
+        srv, vol = self.find(self.servers, sid), self.find(self.volumes, vid)
+        if srv is None or vol is None:
+            return handler._send(404, {"itemNotFound": {"message": "not found"}})
+        if vid in self.reject_swap:
+            return handler._send(self.reject_swap[vid], {"badRequest": {"message": "swap refused"}})
+        new_id = (body.get("volumeAttachment") or {}).get("volumeId")
+        if not new_id:          # the real Nova validates the body: the key is volumeId (found in the lab; the engine had sent volume_id)
+            return handler._send(400, {"badRequest": {"code": 400, "message": "Invalid input for field/attribute volumeAttachment. 'volumeId' is a required property"}})
+        dest = self.find(self.volumes, new_id)
+        if dest is None or dest["status"] != "available":
+            return handler._send(400, {"badRequest": {"message": "the new volume is not available"}})
+        if vid in self.swaps:
+            return handler._send(409, {"conflictingRequest": {"message": "a swap is already running"}})
+        dest["status"] = "reserved"
+        self.swaps[vid] = {"left": self.swap_polls, "dest": dest["id"], "server": sid}
+        handler._send(202, {})
+
+    def completion(self, handler, vol, spec):
+        """Cinder's migrate_volume_completion: the source record takes the destination's backing and the destination record the old one."""
+        if vol["id"] in self.reject_completion:
+            return handler._send(self.reject_completion[vol["id"]], {"badRequest": {"message": "completion refused"}})
+        dest = self.find(self.volumes, spec.get("new_volume"))
+        if dest is None or dest.get("os-vol-mig-status-attr:migstat") != "target:%s" % vol["id"]:
+            return handler._send(400, {"badRequest": {"message": "the new volume is not the destination of this volume"}})
+        if vol.get("os-vol-mig-status-attr:migstat") != "migrating":
+            return handler._send(400, {"badRequest": {"message": "the volume is not migrating"}})
+        self.finish_migration(vol, dest, spec.get("error", False))
+        handler._send(202, {"save_volume_id": dest["id"]})
+
+    def finish_migration(self, vol, dest, error):
+        back = "in-use" if vol.get("attachments") else "available"
+        if error:
+            vol["status"], vol["os-vol-mig-status-attr:migstat"] = back, "error"
+            dest["status"] = "available"
+            return
+        old = (vol["os-vol-host-attr:host"], vol["volume_type"], vol.get("os-vol-mig-status-attr:name_id") or vol["id"])
+        vol["os-vol-host-attr:host"], vol["volume_type"] = dest["os-vol-host-attr:host"], dest["volume_type"]
+        vol["os-vol-mig-status-attr:name_id"] = dest.get("os-vol-mig-status-attr:name_id") or dest["id"]
+        vol["status"], vol["os-vol-mig-status-attr:migstat"] = back, "success"
+        dest["os-vol-host-attr:host"], dest["volume_type"], dest["os-vol-mig-status-attr:name_id"] = old
+        dest["status"], dest["os-vol-mig-status-attr:migstat"] = "available", None
+
     def progress(self, vol):
+        sw = self.swaps.get(vol["id"])
+        if sw:
+            sw["left"] -= 1
+            if sw["left"] <= 0:
+                del self.swaps[vol["id"]]
+                dest = self.find(self.volumes, sw["dest"])
+                bad = vol["id"] in self.fail_swap
+                if not bad and self.on_swap_complete:
+                    self.on_swap_complete(vol["id"], dest["id"])
+                self.finish_migration(vol, dest, bad)
+            return
         p = self.pending.get(vol["id"])
         if not p:
             return

@@ -2,7 +2,7 @@
 # Proprietary software; see LICENSE.
 """Control of the OpenMove lab: a disposable WSL distro that runs a real single-node OpenStack (DevStack).
 
-    python tools/lab/lab.py status | up | down | seed | clean | list | shell-help
+    python tools/lab/lab.py status | up | down | seed | more | fresh-host | clean | list | shell-help
 
 Windows with WSL 2 is assumed (the lab is a lab for this machine, not part of the shipped program). Setting the lab up the first time
 (downloading the Ubuntu image, importing the distro, running DevStack, about 40 minutes) is described in tools/lab/README.md; the commands
@@ -67,10 +67,46 @@ def up():
     for _ in range(60):
         if lab.reachable(cfg["auth_url"]):
             print("the lab cloud answers at %s" % cfg["auth_url"])
-            return 0
+            return ensure_guests()
         time.sleep(5)
     print("the lab cloud did not answer in 5 minutes; look at the services:  wsl -d %s -u root -- systemctl list-units 'devstack*'" % lab.DISTRO)
     return 1
+
+
+def ensure_guests():
+    """After a restart: wait for the compute service, then start the lab guests that are meant to run (every lab-srv-* except the stopped, paused and suspended ones that the catalogue keeps in that state on purpose).
+    Nova keeps saying ACTIVE for a guest that is not running while the compute service is down, so the power state is read, not the status."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import seed
+    try:
+        c = seed.Cloud(lab.load_config())
+        for _ in range(60):
+            rows = [s for s in c.call("GET", "compute", "/os-services?binary=nova-compute")["services"]]
+            if rows and all(r["state"] == "up" and r["status"] == "enabled" for r in rows):
+                break
+            time.sleep(5)
+        else:
+            print("the compute service is not up after 5 minutes: the lab guests were not started")
+            return 1
+        print("the compute service is up")
+        servers = c.call("GET", "compute", "/servers/detail?all_tenants=1")["servers"]
+        want = [s for s in servers if s["name"].startswith("lab-srv-") and not s["name"].startswith(("lab-srv-off-", "lab-srv-paused-", "lab-srv-susp-"))]
+        todo = [s for s in want if s.get("OS-EXT-STS:power_state") != 1 or s["status"] != "ACTIVE"]
+        for s in todo:
+            act = {"os-start": None} if s["status"] == "SHUTOFF" else {"reboot": {"type": "HARD"}}
+            c.call("POST", "compute", "/servers/%s/action" % s["id"], act, soft=True)
+        for s in todo:
+            c.wait("server " + s["name"], lambda i=s["id"]: _running(c, i), ("yes",), (), 300)
+        print("lab guests running: %d of %d (%d started now)" % (len(want), len(want), len(todo)))
+        return 0
+    except (Exception, SystemExit) as exc:
+        print("could not check the lab guests: %s" % exc)
+        return 1
+
+
+def _running(c, sid):
+    s = c.call("GET", "compute", "/servers/" + sid)["server"]
+    return "yes" if s["status"] == "ACTIVE" and s.get("OS-EXT-STS:power_state") == 1 else "no"
 
 
 def down():
@@ -101,11 +137,18 @@ def run(argv):
     cmd = argv[1] if len(argv) > 1 else "status"
     if cmd == "status":
         return status()
+    if cmd == "fresh-host":
+        from openmove.lab import hosts as lab_hosts
+        r = lab_hosts.ensure_fresh_host()
+        print("A bare host %s: address %s, port %d, login %s, password: the lab password (lab-secret.json)." % ("made" if r["made"] else "is ready", r["address"], r["port"], r["user"]))
+        print("In OpenMove (Hosts tab, Set up a new host from here) give that address, port and login; read the host key and compare it with:")
+        print("  wsl -d %s -u root -- ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub" % lab_hosts.FRESH_DISTRO)
+        return 0
     if cmd == "up":
         return up()
     if cmd == "down":
         return down()
-    if cmd in ("seed", "clean", "list"):
+    if cmd in ("seed", "more", "clean", "list"):
         sys.argv = ["seed.py", cmd]
         import runpy
         runpy.run_path(str(Path(__file__).with_name("seed.py")), run_name="__main__")

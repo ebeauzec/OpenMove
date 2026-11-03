@@ -51,8 +51,9 @@ def validate(vol, snaps, servers, spec):
     mig = vol.get("os-vol-mig-status-attr:migstat")
     add("No move is in flight", mig in MIGRATING_OK, "migration status %s" % (mig or "none"), "migration status is %s: another move is in flight or failed" % mig)
     n = len(snaps or [])
-    add("No snapshot left", n == 0, "no snapshots",
-        "%d snapshot(s) remain; Cinder moves a volume with snapshots only by copying, so it is held until they are gone" % n, wait=spec.get("class") == "B")
+    if not spec.get("staged"):           # the staged method exists for the volumes that have snapshots
+        add("No snapshot left", n == 0, "no snapshots",
+            "%d snapshot(s) remain; Cinder moves a volume with snapshots only by copying, so it is held until they are gone" % n, wait=spec.get("class") == "B")
     add("Not encrypted", not vol.get("encrypted"), "not encrypted", "the volume is encrypted")
     add("Not multi-attach", not vol.get("multiattach"), "single attach", "the volume is multi-attach")
     add("Not replicated", vol.get("replication_status") in REPLICATION_OK, "replication %s" % (vol.get("replication_status") or "off"),
@@ -76,6 +77,9 @@ def validate(vol, snaps, servers, spec):
         add("Instance %s lock state is known" % sid, isinstance(s.get("locked"), bool), "locked" if s.get("locked") else "not locked",
             "the answer does not show whether the instance is locked (Nova microversion 2.9 or later is needed); an instance is never locked blind")
         add("Instance %s is running" % sid, s.get("status") == "ACTIVE", "ACTIVE", "the instance is %s; only running instances are handled" % s.get("status"))
+        ps = s.get("OS-EXT-STS:power_state")
+        add("Instance %s is really running" % sid, ps in (None, 1), "power state %s" % ("not shown" if ps is None else "running"),
+            "Nova says %s but the guest is not running (power state %s); a volume swap needs a running guest" % (s.get("status"), ps))
         add("Instance %s is idle" % sid, not s.get("OS-EXT-STS:task_state"), "no task", "the instance is busy: %s" % s.get("OS-EXT-STS:task_state"))
     return out
 

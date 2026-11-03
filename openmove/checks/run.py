@@ -349,12 +349,34 @@ def fingerprint(source_backend, target_backend, volume_ids):
     return h.hexdigest()[:16]
 
 
+def apply_host_checks(plat, host_checks):
+    """What the registered hosts showed (hosts.readiness) answers P5 and P8. The rest of the array checks still need an attestation."""
+    byid = {}
+    for c in host_checks:
+        byid.setdefault(c["id"], []).append(c)
+    out = list(plat)
+    for i, c in enumerate(out):
+        if c["id"] == "P8":
+            h = [x for x in host_checks if x["id"].startswith("H")]
+            bad = [x for x in h if x["status"] == "fail"]
+            warn = [x for x in h if x["status"] == "warn"]
+            if h:
+                out[i] = rec("P8", "fail" if bad else "warn" if warn else "pass", "The migration host, through SSH",
+                             "; ".join("%s: %s" % (x["title"], x["detail"]) for x in (bad or warn or h)[:8]),
+                             "The data mover host is ready." if not bad and not warn else "Fix what failed on the host first." if bad else "Read the warnings.", "migration_host")
+        elif c["id"] == "P5" and byid.get("C2"):
+            x = byid["C2"][0]
+            out[i] = rec("P5", "pass" if x["status"] == "pass" else "warn" if x["status"] == "warn" else "fail", "cinder.conf, through the Cinder helper", x["detail"],
+                         "The name templates are the defaults the method assumes." if x["status"] == "pass" else x["hint"], "cinder_host")
+    return out
+
+
 ACCESS_LEVELS = ("api", "full")
 NEEDS_ARRAYS = ("P12", "P14", "P15")      # checks that only the staged method (class C) needs: the source array account, the target namespace, the clone call
 
 
 def run_all(platform, inventory, servers=None, root_volumes=(), source_backend=None, target_backend=None, previous_ids=None, clearances=None, marks=None,
-            access="api"):
+            access="api", host_checks=None):
     """All the pre-flight checks. Returns the result stored for the gate and the reports.
 
     access is what OpenMove can reach. "api": the OpenStack APIs only. Classes A and B are moved by Cinder itself (a retype), so they need nothing else;
@@ -366,6 +388,8 @@ def run_all(platform, inventory, servers=None, root_volumes=(), source_backend=N
         pools = [p for p in platform.get("backends", []) if p.get("backend") == target_backend and p.get("free_gb") is not None]
         free = int(sum(float(p["free_gb"]) for p in pools)) if pools else None
     plat = platform_checks(platform, source_backend, target_backend)
+    if host_checks:
+        plat = apply_host_checks(plat, host_checks)
     if access != "full":
         for i, c in enumerate(plat):
             if c["id"] in NEEDS_ARRAYS:

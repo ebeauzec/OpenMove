@@ -18,6 +18,9 @@
 | `API_CALLS.md` | Every call OpenMove makes to a cloud, every call its local interface accepts and every journal event, with the rules each must obey. For review. |
 | `CLASSES.md` | Each volume class: what is enforced today, what the engine must still do, and why a volume might not be migrated. |
 | `WORKLOAD_RISKS.md` | Workloads that may fail this migration (legacy Windows, clusters, databases and more), how sure we are of each, whether OpenMove can see it, and what it does. |
+| `DEPLOYMENT.md` | What to install where so that class A, B and C moves work in production: the migration host and the Cinder host, the setup script, the rights, the network, the checklist. |
+| `MOVER.md` | Class C in practice: the migration host and the Cinder host, SSH (keys only, pinned host keys), the data mover and the Cinder helper, the host checks, and what each one writes. |
+| `DIAGNOSTICS.md` | For dark sites: the logs, the support bundle, the redaction levels (none, standard, strict) and how a bundle is read and decoded. |
 | `LAB.md` | The OpenMove lab: a real OpenStack (DevStack) on this machine for the real engine, what it proves and what it does not, and how to use it. |
 | `PLAYBOOK_TRACE.md` | Playbook v1.2 and v1.3 step by step: what OpenMove covers, what is only checked, what is not built, and the gaps. |
 | `ENGINE_PLAN.md` | The plan for building the migration engine for a test environment: milestones, what fakes can prove, what only a lab can prove, and what the environment must provide. |

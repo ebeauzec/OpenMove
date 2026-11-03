@@ -1,6 +1,6 @@
 # Building the migration engine: plan for a test environment
 
-Status: **in progress**. Built and tested against a mock cloud: the access level, the retype order, E1 (journal, permit, evidence; the shell executor is not needed for the APIs-only level and comes with E5), E3 for lock, unlock and retype, and E4 (class A and B). Not built: E2, E5, E6, E7. This page is the plan. It says what will be built, in what order, what can be proven without a cloud, and what only a lab can prove. Nothing here has run against a real cloud.
+Status: **historical plan**; the staged method (E5 to E7) has since been built, see `MOVER.md` and `engine/staged.py`. Status when this plan was written: **in progress**. Built and tested against a mock cloud: the access level, the retype order, E1 (journal, permit, evidence; the shell executor is not needed for the APIs-only level and comes with E5), E3 for lock, unlock and retype, and E4 (class A and B). Not built: E2, E5, E6, E7. This page is the plan. It says what will be built, in what order, what can be proven without a cloud, and what only a lab can prove. Nothing here has run against a real cloud.
 
 ## What "works" can mean
 
@@ -31,7 +31,7 @@ The engine must work when OpenMove has **only the OpenStack APIs** (no migration
 
 | Level | Reaches | Moves | Held back |
 |---|---|---|---|
-| `api` (default) | Keystone, Cinder, Nova | Class A and B, by Cinder retype with on-demand migration | Class C, cause `no_data_mover`, with steps to resolve it |
+| `api` (default) | Keystone, Cinder, Nova | Class A and B, by Cinder retype with on-demand migration | Class C is held back with the cause `no_data_mover` and steps to resolve it |
 | `full` | also SSH hosts and both arrays | Class A, B and C | none for this reason |
 
 Under `api`, the checks P12, P14 and P15 (source array account, target namespace, clone call) are informational. E1, E3 and E4 need only the `api` level; E2 and E5 need `full`.

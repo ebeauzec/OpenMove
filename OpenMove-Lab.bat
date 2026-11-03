@@ -7,6 +7,7 @@ REM
 REM   OpenMove-Lab.bat            start the lab if needed, then OpenMove in lab mode; opens OpenMove and the OpenStack dashboard (Horizon)
 REM   OpenMove-Lab.bat up         start the lab cloud
 REM   OpenMove-Lab.bat seed       create the test volumes and servers in the lab
+REM   OpenMove-Lab.bat more       add the second, larger set of volumes of every class
 REM   OpenMove-Lab.bat clean      remove them
 REM   OpenMove-Lab.bat list       show them
 REM   OpenMove-Lab.bat status     is the lab cloud answering?
@@ -30,6 +31,7 @@ if "%CMD%"=="" goto :run
 if /i "%CMD%"=="up" goto :tool
 if /i "%CMD%"=="down" goto :tool
 if /i "%CMD%"=="seed" goto :tool
+if /i "%CMD%"=="more" goto :tool
 if /i "%CMD%"=="clean" goto :tool
 if /i "%CMD%"=="list" goto :tool
 if /i "%CMD%"=="status" goto :tool

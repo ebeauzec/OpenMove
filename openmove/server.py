@@ -16,6 +16,8 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
+from . import hosts as hosts_mod
+from . import server_hosts
 from . import __version__, discovery, exports, handling, inventory, lifecycle, paths, phase0, profiles, safety, selection, wizard
 from . import risk as risk_mod
 from . import audit as audit_mod
@@ -61,6 +63,9 @@ class AppState:
         self.selection_ok = None   # (pre-flight run, selected volumes) the operator confirmed on the Select step; wizard.py
         self.engine = None         # the migration engine (openmove/engine), created on first use
         self.access = "api"        # what OpenMove can reach: "api" (the OpenStack APIs only) or "full" (also hosts and arrays)
+        self.diag = None           # the log, the call trace and the support bundle (openmove/diag.py), set by create_server
+        self.fabric = None         # the migration host, the Cinder host and the array adapter for the chosen pair, once they are ready (openmove/hosts.py)
+        self.host_checks = None    # the result of the last host readiness check
         self.auto_sign = None      # demo only: the made-up second person who signs the volume gates
         self.extra_hosts = ()  # Host header values accepted besides loopback; set with --allow-host
         self._raw = None  # last API collection, kept so a back-end filter can be re-applied without calling the cloud
@@ -164,6 +169,10 @@ def make_handler(state, port_getter):
                 raise ValueError("the request body must be a JSON object")
             return data
 
+        def _log(self, level, status, path, exc):
+            if state.diag and path.startswith("/api/"):
+                state.diag.log(level, "API %s answered %d: %s" % (path, status, exc))
+
         # ---- routing ----
         def do_GET(self):
             self._route("GET")
@@ -204,13 +213,18 @@ def make_handler(state, port_getter):
                         "Content-Disposition": 'attachment; filename="%s"' % result.filename})
                 return self._send(200, result)
             except ApiError as exc:
+                self._log("info", exc.status, path, exc)
                 return self._send(exc.status, {"error": str(exc)})
             except ConnectorError as exc:
+                self._log("warn", 502, path, exc)
                 return self._send(502, {"error": str(exc)})
             except (ValueError, KeyError) as exc:
+                self._log("info", 400, path, exc)
                 return self._send(400, {"error": str(exc)})
-            except Exception:  # a defect: say so, without internals
-                return self._send(500, {"error": "internal error; see the journal"})
+            except Exception as exc:  # a defect: say so, without internals on the screen, and keep everything in the log
+                if state.diag:
+                    state.diag.exception("%s %s" % (method, path), exc)
+                return self._send(500, {"error": "internal error (%s); the details are in logs/openmove.log. Make a support bundle from Diagnostics." % type(exc).__name__})
 
     return Handler
 
@@ -924,8 +938,15 @@ def api_checks_run(state, body, query):
     access = body.get("access") or state.access
     if access not in checks_run.ACCESS_LEVELS:
         raise ValueError("access must be 'api' or 'full'")
+    host_checks = None
+    if not state.demo and hosts_mod.load(state.home):
+        hc = server_hosts.refresh_fabric(state, src, tgt)       # the registered hosts are checked as part of the pre-flight
+        host_checks = hc["checks"] or None
+        if hc["ready"]:
+            access = "full"
     state.access = access
-    result = checks_run.run_all(platform, inv, state.servers, state.roots, src, tgt, state.previous_ids, cleared, mk, access)
+    result = checks_run.run_all(platform, inv, state.servers, state.roots, src, tgt, state.previous_ids, cleared, mk, access, host_checks=host_checks)
+    result["hosts"] = getattr(state, "host_checks", None)
     with state.lock:
         state.checks = result
     state.journal.record("preflight", result["run_id"], {
@@ -1128,12 +1149,30 @@ ROUTES = {
     ("POST", "demo/simulate"): api_demo_simulate,
     ("POST", "demo/scenario"): api_demo_scenario,
     ("POST", "demo/db-export"): api_demo_dbexport,
+    ("GET", "hosts"): server_hosts.api_hosts_get,
+    ("GET", "hosts/setup-script"): server_hosts.api_hosts_setup_script,
+    ("POST", "hosts/probe"): server_hosts.api_hosts_probe,
+    ("POST", "hosts/setup"): server_hosts.api_hosts_setup,
+    ("POST", "hosts/save"): server_hosts.api_hosts_save,
+    ("POST", "hosts/remove"): server_hosts.api_hosts_remove,
+    ("POST", "hosts/scan"): server_hosts.api_hosts_scan,
+    ("POST", "hosts/trust"): server_hosts.api_hosts_trust,
+    ("POST", "hosts/check"): server_hosts.api_hosts_check,
+    ("POST", "hosts/mover"): server_hosts.api_hosts_mover,
+    ("GET", "diagnostics"): server_hosts.api_diag_get,
+    ("POST", "diagnostics/bundle"): server_hosts.api_diag_bundle,
+    ("POST", "diagnostics/settings"): server_hosts.api_diag_settings,
+    ("POST", "diagnostics/decode"): server_hosts.api_diag_decode,
+    ("GET", "diagnostics/download"): server_hosts.api_diag_download,
 }
 
 
 def create_server(host="127.0.0.1", port=0, home=None):
     """Create (but do not start) the server. Returns (server, state)."""
     state = AppState(home or paths.app_home())
+    from .diag import Diag
+    state.diag = Diag(state.home)
+    state.diag.attach()
     holder = {}
     handler = make_handler(state, lambda: holder["server"].server_address[1])
     server = ThreadingHTTPServer((host, port), handler)

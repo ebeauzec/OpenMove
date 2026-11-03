@@ -51,6 +51,8 @@
     if (name === 'live') { pollLive(true); loadUnmigrated(true); }
     if (name === 'select') { loadSelection(); loadRisk(); }
     if (name === 'move') loadMove();
+    if (name === 'hosts') loadHosts();
+    if (name === 'diagnostics') loadDiag();
     currentTab = name;
     drawWizard();
   }
@@ -77,7 +79,7 @@
     hint.textContent = '';
     if (i < 0) {                                   // the journal is not a step: Back returns to the last one
       back.disabled = false; back.textContent = 'Back to ' + steps[steps.length - 1].textContent.trim();
-      next.disabled = true; next.textContent = 'Next'; lab.textContent = 'Journal';
+      next.disabled = true; next.textContent = 'Next'; lab.textContent = currentTab === 'hosts' ? 'Hosts' : currentTab === 'diagnostics' ? 'Diagnostics' : 'Journal';
       return;
     }
     back.disabled = i === 0;
@@ -154,7 +156,7 @@
       drawWizard();
       drawMoveGate();
       restoreViews(s);
-      if (deepLink) { var go = deepLink; deepLink = ''; if (wizardInfo(go) || go === 'journal') showTab(go); }     // a link such as  /#preflight  opens that step if it is open
+      if (deepLink) { var go = deepLink; deepLink = ''; if (wizardInfo(go) || go === 'journal' || go === 'hosts' || go === 'diagnostics') showTab(go); }     // a link such as  /#preflight  opens that step if it is open
       return s;
     }).catch(function () {});
   }
@@ -922,6 +924,167 @@
   });
   $('live-release').addEventListener('click', function () { releaseVolumes({ all: true }, $('live-release')); });
 
+  // ---- hosts (the migration host and the Cinder host) ----
+  function fmtBytes(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' MiB' : n > 1024 ? (n / 1024).toFixed(1) + ' KiB' : n + ' B'; }
+  function drawChecks(c) {
+    var tb = $('hs-checks').tBodies[0]; clear(tb);
+    $('hs-status').textContent = c ? (c.ready ? 'Ready: class C volumes can be taken into the run (' + c.family + ').' : 'Not ready. ' + (c.why || '')) : '';
+    (c && c.checks || []).forEach(function (x) {
+      tb.appendChild(el('tr', { class: 'chk-' + x.status }, [el('td', { text: x.id + ' ' + x.title }), el('td', { text: x.status }), el('td', { text: x.detail }), el('td', { text: x.status === 'pass' ? '' : x.hint })]));
+    });
+  }
+  function hostAction(btn, path, body, done) {
+    guard(btn, function () { return api('POST', path, body).then(done || drawHosts); });
+  }
+  function drawHosts(d) {
+    $('hs-key').textContent = d.public_key || '(it is created when you save the first host)';
+    $('hs-notes').textContent = [].concat((d.ssh && d.ssh.notes) || []).join(' ');
+    var tb = $('hs-table').tBodies[0]; clear(tb);
+    (d.hosts || []).forEach(function (h) {
+      var acts = el('td');
+      function btn(label, fn) { var b = el('button', { class: 'secondary', text: label }); b.addEventListener('click', function () { fn(b); }); acts.appendChild(b); }
+      if (h.transport !== 'local' && !h.pinned) btn('Check host key', function (b) {
+        guard(b, function () {
+          return api('POST', 'hosts/scan', { name: h.name }).then(function (r) {
+            var nl = String.fromCharCode(10);
+            var fps = r.keys.map(function (k) { return k.type + ' ' + k.fingerprint; }).join(nl);
+            var fp = window.prompt('The host offers these keys:' + nl + nl + fps + nl + nl + 'Compare with the fingerprint the host administrator gives you. Type the fingerprint you checked (SHA256:...):');
+            if (!fp) return null;
+            var by = window.prompt('Your name:'); if (!by) return null;
+            return api('POST', 'hosts/trust', { name: h.name, fingerprint: fp.trim(), by: by.trim() }).then(drawHosts);
+          });
+        });
+      });
+      btn('Place the data mover', function (b) { hostAction(b, 'hosts/mover', { name: h.name, action: 'install' }, function () { banner('ok', 'The data mover is on ' + h.name + '.'); }); });
+      btn('Remove the data mover', function (b) { hostAction(b, 'hosts/mover', { name: h.name, action: 'remove' }, function () { banner('ok', 'Nothing of OpenMove is left on ' + h.name + '.'); }); });
+      btn('Forget the host', function (b) { if (window.confirm('Remove ' + h.name + ' from OpenMove? Nothing is changed on the host.')) hostAction(b, 'hosts/remove', { name: h.name }); });
+      tb.appendChild(el('tr', {}, [el('td', { text: h.name }), el('td', { text: (h.roles || []).join(', ') }), el('td', { text: h.address ? h.address + ':' + (h.port || 22) : 'this machine' }),
+        el('td', { text: (h.user || '') + (h.sudo ? ' (sudo)' : '') }), el('td', { text: h.transport === 'local' ? 'n/a' : h.pinned ? 'checked and pinned' : 'not checked yet' }), acts]));
+    });
+    drawChecks(d.checks);
+  }
+  function loadHosts() { return api('GET', 'hosts').then(drawHosts).catch(function (e) { banner('bad', e.message); }); }
+  function setupScript(btn, done) {
+    var q = 'hosts/setup-script?role=' + encodeURIComponent($('hs-sc-role').value) + '&user=' + encodeURIComponent($('hs-sc-user').value.trim() || 'openmove') +
+      '&from=' + encodeURIComponent($('hs-sc-from').value.trim());
+    guard(btn, function () { return api('GET', q).then(done); });
+  }
+  $('hs-sc-show').addEventListener('click', function () {
+    setupScript($('hs-sc-show'), function (d) { $('hs-sc-cmd').textContent = d.command + '\n\n' + d.notes.join('\n'); });
+  });
+  $('hs-sc-download').addEventListener('click', function () {
+    setupScript($('hs-sc-download'), function (d) {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([d.script], { type: 'text/x-shellscript' }));
+      a.download = d.filename; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      $('hs-sc-cmd').textContent = d.command + '\n\n' + d.notes.join('\n');
+    });
+  });
+  $('hs-save').addEventListener('click', function () {
+    var roles = []; if ($('hs-role-mover').checked) roles.push('mover'); if ($('hs-role-cinder').checked) roles.push('cinder');
+    hostAction($('hs-save'), 'hosts/save', { host: { name: $('hs-name').value.trim(), address: $('hs-address').value.trim(), port: parseInt($('hs-port').value, 10) || 22,
+      user: $('hs-user').value.trim() || 'root', sudo: $('hs-sudo').checked, roles: roles, python: $('hs-python').value.trim(), cinder_user: $('hs-cuser').value.trim() } });
+  });
+  $('hs-check').addEventListener('click', function () {
+    hostAction($('hs-check'), 'hosts/check', { bench: $('hs-bench').checked }, function (c) { drawChecks(c); });
+  });
+
+  // ---- set up a new host from here ----
+  function suList(id) { return $(id).value.split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean); }
+  function suBody(checkOnly) {
+    var roles = []; if ($('su-role-mover').checked) roles.push('mover'); if ($('su-role-cinder').checked) roles.push('cinder');
+    var arrays = []; if ($('su-arr-pure').checked) arrays.push('pure'); if ($('su-arr-sf').checked) arrays.push('solidfire');
+    var proto = $('su-proto').value;
+    return {
+      name: $('su-name').value.trim(), address: $('su-address').value.trim(), port: parseInt($('su-port').value, 10) || 22, user: $('su-user').value.trim() || 'root',
+      password: $('su-password').value, roles: roles, service_user: $('su-service').value.trim() || 'openmove', from_address: $('su-from').value.trim(),
+      cinder_python: $('su-cpython').value.trim(), fingerprint: $('su-fp').value.trim(), by: $('su-by').value.trim(), check_only: !!checkOnly,
+      storage: proto === 'none' ? { protocol: 'none' } : { protocol: proto, portals: suList('su-portals'), initiator: $('su-initiator').value.trim(),
+        chap_user: $('su-chap-user').value.trim(), chap_secret: $('su-chap-secret').value, arrays: arrays, multipath_extra: $('su-mpextra').value,
+        replacement_timeout: parseInt($('su-timeo').value, 10) || 15 }
+    };
+  }
+  function drawSetup(r) {
+    var box = $('su-result'); clear(box);
+    var tb = el('tbody');
+    (r.steps || []).forEach(function (s) {
+      var det = el('td', { text: s.detail });
+      if (s.output) { var d = el('details', {}, [el('summary', { text: 'Complete output' }), el('pre', { class: 'code', text: s.output })]); det.appendChild(d); }
+      tb.appendChild(el('tr', { class: 'chk-' + (s.status === 'ok' ? 'pass' : s.status === 'fail' ? 'fail' : 'warn') }, [el('td', { text: s.id + ' ' + s.title }), el('td', { text: s.status }), det]));
+    });
+    box.appendChild(el('div', { class: 'table-wrap' }, [el('table', {}, [el('thead', {}, [el('tr', {}, [el('th', { text: 'Step' }), el('th', { text: 'Result' }), el('th', { text: 'What happened' })])]), tb])]));
+    if (r.initiator) box.appendChild(el('p', {}, [el('strong', { text: 'Initiator name to register on each array: ' }), el('code', { text: r.initiator })]));
+    if (r.storage && r.storage.wwpns && r.storage.wwpns.length) box.appendChild(el('p', {}, [el('strong', { text: 'Fibre Channel port names to zone and register: ' }), el('code', { text: r.storage.wwpns.join(', ') })]));
+    if (r.checks && r.checks.length) {
+      var ct = el('tbody');
+      r.checks.forEach(function (x) { ct.appendChild(el('tr', { class: 'chk-' + x.status }, [el('td', { text: x.id + ' ' + x.title }), el('td', { text: x.status }), el('td', { text: x.detail })])); });
+      box.appendChild(el('h4', { text: 'Checks of the new host' }));
+      box.appendChild(el('div', { class: 'table-wrap' }, [el('table', {}, [el('thead', {}, [el('tr', {}, [el('th', { text: 'Check' }), el('th', { text: 'Result' }), el('th', { text: 'What was seen' })])]), ct])]));
+    }
+    $('su-status').textContent = r.ok ? (r.check_only ? 'Nothing is missing.' : 'The host is set up and registered. The password has been dropped.') : 'The setup did not finish. Read the steps; run it again after the fix.';
+  }
+  function runSetup(btn, checkOnly) {
+    var body = suBody(checkOnly);
+    guard(btn, function () {
+      return api('POST', 'hosts/setup', body).then(function (r) {
+        $('su-password').value = ''; $('su-chap-secret').value = '';
+        drawSetup(r);
+        if (r.hosts) drawHosts(r.hosts);
+        banner(r.ok ? 'ok' : 'bad', r.ok ? (checkOnly ? 'The host needs nothing more.' : 'The host ' + body.name + ' is set up.') : 'The host setup did not finish: see the steps.');
+      });
+    });
+  }
+  $('su-proto').addEventListener('change', function () { $('su-storage').classList.toggle('hidden', $('su-proto').value === 'none'); });
+  $('su-probe').addEventListener('click', function () {
+    guard($('su-probe'), function () {
+      return api('POST', 'hosts/probe', { address: $('su-address').value.trim(), port: parseInt($('su-port').value, 10) || 22 }).then(function (r) {
+        $('su-keys').textContent = r.keys.map(function (k) { return k.type + ' ' + k.fingerprint; }).join('\n') + (r.pinned ? '\n\nThis key is already pinned: no need to type the fingerprint again.' : '');
+      });
+    });
+  });
+  $('su-check').addEventListener('click', function () { runSetup($('su-check'), true); });
+  $('su-run').addEventListener('click', function () { runSetup($('su-run'), false); });
+
+  // ---- diagnostics (the log, the call trace, the support bundle) ----
+  var diagInfo = null;
+  function drawDiag(d) {
+    diagInfo = d;
+    $('dg-level').value = d.settings.redaction; $('dg-log-level').value = d.settings.log_redaction;
+    $('dg-text').textContent = d.text[$('dg-level').value] || '';
+    var tb = $('dg-bundles').tBodies[0]; clear(tb);
+    (d.bundles || []).forEach(function (b) {
+      var a = el('a', { text: 'Download', href: '#' });
+      a.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        fetch('/api/diagnostics/download?name=' + encodeURIComponent(b.name), { headers: { 'X-OpenMove-Token': TOKEN } }).then(function (r) { return r.blob(); }).then(function (blob) {
+          var u = URL.createObjectURL(blob), x = el('a', { href: u, download: b.name }); document.body.appendChild(x); x.click(); document.body.removeChild(x); URL.revokeObjectURL(u);
+        });
+      });
+      tb.appendChild(el('tr', {}, [el('td', { text: b.name }), el('td', { text: (b.at || '').replace('T', ' ').replace('Z', '') }), el('td', { text: fmtBytes(b.bytes) }), el('td', {}, [a])]));
+    });
+    var lt = $('dg-logs').tBodies[0]; clear(lt);
+    (d.logs || []).forEach(function (f) { lt.appendChild(el('tr', {}, [el('td', { text: f.name }), el('td', { text: fmtBytes(f.bytes) })])); });
+    $('dg-folder').textContent = 'Bundles are kept in ' + d.folder + '. They stay on this machine until you copy them.';
+  }
+  function loadDiag() { return api('GET', 'diagnostics').then(drawDiag).catch(function (e) { banner('bad', e.message); }); }
+  $('dg-level').addEventListener('change', function () { if (diagInfo) $('dg-text').textContent = diagInfo.text[$('dg-level').value] || ''; });
+  $('dg-refresh').addEventListener('click', loadDiag);
+  $('dg-bundle').addEventListener('click', function () {
+    guard($('dg-bundle'), function () {
+      return api('POST', 'diagnostics/bundle', { level: $('dg-level').value, remote: $('dg-remote').checked, reason: 'requested from the screen' }).then(function (r) {
+        banner('ok', 'Support bundle written: ' + r.name + ' (' + r.files + ' files, redaction ' + r.redaction + ').'); return loadDiag();
+      });
+    });
+  });
+  $('dg-log-save').addEventListener('click', function () {
+    guard($('dg-log-save'), function () { return api('POST', 'diagnostics/settings', { log_redaction: $('dg-log-level').value, redaction: $('dg-level').value }).then(drawDiag); });
+  });
+  $('dg-decode').addEventListener('click', function () {
+    guard($('dg-decode'), function () {
+      return api('POST', 'diagnostics/decode', { token: $('dg-token').value.trim() }).then(function (r) { $('dg-decoded').textContent = r.token + ' = ' + r.value; });
+    });
+  });
+
   // ---- move (the engine) ----
   var moveTimer = null;
   function typeMap() { var t = $('mv-type').value.trim(); return t ? { '*': t } : {}; }
@@ -934,15 +1097,18 @@
       if (r.reversible) {
         var b = el('button', { class: 'secondary', text: 'Reverse' });
         b.addEventListener('click', function () {
-          var by = window.prompt('Reverse ' + r.id + ' with a retype back.' + String.fromCharCode(10, 10) + 'Your name:'); if (!by) return;
+          var by = window.prompt('Reverse ' + r.id + (r.method === 'staged' ? ' (a staged move the other way, with a safety copy).' : ' with a retype back.') + String.fromCharCode(10, 10) + 'Your name:'); if (!by) return;
           var why = window.prompt('Reason (at least 8 characters):'); if (!why) return;
           guard(b, function () { return api('POST', 'engine/reverse', { id: r.id, by: by.trim(), reason: why.trim() }).then(drawMove); });
         });
         act.appendChild(b);
       }
-      tb.appendChild(el('tr', {}, [el('td', { text: r.id }), el('td', { text: r.class || '' }), el('td', { text: r.phase }),
+      var st = r.stage, prog = st ? ('images ' + st.verified + '/' + st.images + (st.cut ? ', step ' + st.cut : '') + (st.frozen ? ', frozen' : '') + '. ') : '';
+      var what = el('td', { text: prog + (r.note || '') });
+      if (r.error) what.appendChild(el('div', { class: 'muted', text: 'Last error: ' + r.error }));
+      tb.appendChild(el('tr', {}, [el('td', { text: r.id }), el('td', { text: r.class || '' }), el('td', { text: r.method === 'staged' ? 'staged' : 'retype' }), el('td', { text: r.phase }),
         el('td', { text: r.gates.G2 ? 'signed' : '' }), el('td', { text: r.gates.G3 ? 'signed' : '' }), el('td', { text: r.gates.G4 ? 'signed' : '' }),
-        el('td', { text: r.note || '' }), act]));
+        what, act]));
     });
     $('mv-more').textContent = m.more ? m.more + ' more volume(s) not shown.' : '';
     $('mv-status').textContent = m.halted ? 'HALTED by ' + m.halted.by + ': ' + m.halted.reason : '';

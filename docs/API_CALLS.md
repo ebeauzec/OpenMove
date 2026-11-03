@@ -3,7 +3,7 @@
 Every call OpenMove makes or accepts, in one place, so it can be reviewed line by line. Three groups:
 
 1. **Outbound calls to the cloud** (section 2). In this release there are 17 distinct read calls and the login, a `POST` that creates a token and changes nothing.
-2. **Outbound calls that change the cloud** (section 3). Three exist in this release (lock, unlock, retype), used only for class A and B volumes. The rules every one must obey are fixed here.
+2. **Outbound calls that change the cloud** (section 3). Six exist in this release: lock, unlock and retype for class A and B volumes, and the volume swap, the migration completion and the forced delete of the old record for class C volumes (the staged method). Section 3 also lists the operations the staged method makes on the migration host and the Cinder host over SSH. The rules every one must obey are fixed here.
 3. **The local interface** (section 4): the calls the browser makes to OpenMove on this machine.
 
 Section 5 lists the events OpenMove writes to its journal. Section 6 lists everything it writes to disk.
@@ -48,13 +48,14 @@ Every call below sends `Accept: application/json`. Calls to the services also se
 | B8 | `GET {block}/volumes/{id}` | administrator | One volume, read afresh by the engine before and after each step: status, migration status, back-end, type, size, attachments, bootable. | The engine does not continue with that volume; it looks again at the next tick. |
 | B9 | `GET {block}/snapshots/detail?volume_id={id}&all_tenants=1` | administrator | The snapshots of one volume, read afresh before a move (class A and B are moved only with none). | As B8. |
 | N3 | `GET {compute}/servers/{id}`, with compute microversion 2.9 so that the lock state is shown | administrator | One instance, read before a move (running, idle, locked) and after it. | As B8. |
+| N4 | `GET {compute}/os-services?binary=nova-compute&host=<host>` | administrator | Before the swap of an attached class C volume: is the compute service of the instance's host up and enabled. Found in the lab, where a dead compute service made the swap wait for ever. The same read of the instance also checks the guest's power state. | The cutover does not start: rolled back before the swap (R2). |
 
 Notes:
 
 * B0, N0 and K1 are the unauthenticated version documents. The login (K2) is the only `POST`.
 * The Platform tab runs K1, B0, N0, B1, B2 and N1. The Inventory tab runs B3, B4 and N2. The Audit tab runs B1 to B7, K3 and the inventory calls. The pre-flight and the reports make **no** call: they use what was read.
 * Page size is 500; the marker is the id of the last item of the previous page.
-* No call is ever made to a Cinder host, a compute host or an array in this release. Those need SSH or an array API and arrive with the migration engine (section 3).
+* The reads above go to the cloud's API only. A Cinder host, a migration host or an array is reached only by the staged method and the Hosts and Diagnostics screens, over SSH to hosts a person registered (section 3, `MOVER.md`, `NETWORK.md`).
 
 ## 3. Calls that change the cloud
 
@@ -65,21 +66,24 @@ Every change goes through `OpenStackSession.mutate(permit, ...)` and obeys `SAFE
 | C1 | `POST {compute}/servers/{id}/action` with `{"lock": null}` | administrator | Locks the instance that uses the volume, so that nobody changes it while the volume moves (playbook 3.2). Skipped if the instance is already locked by someone else. | C2 | A refusal by the cloud: nothing is moved, the volume is marked rolled back. |
 | C2 | `POST {compute}/servers/{id}/action` with `{"unlock": null}` | administrator | Unlocks the instance after the post-check passed, or after a rollback. Only an instance that OpenMove locked. | C1 | The step is retried at the next tick; the instance stays locked until it works. |
 | C3 | `POST {block}/volumes/{id}/action` with `{"os-retype": {"new_type": T, "migration_policy": "on-demand"}}` | administrator | The move itself (playbook 3.3): Cinder asks Nova to copy the volume to the target back-end and switch the guest, with the instance running. The same call, with the first type, is the rollback (R3). | C3 with the first type | A refusal (4xx): nothing was moved. A lost answer or a 5xx: the outcome is unknown, everything halts, and the volume is read back before anything else is done. |
+| C4 | `PUT {compute}/servers/{server}/os-volume_attachments/{volume}` with `{"volumeAttachment": {"volumeId": new}}` | administrator | The cutover of an attached class C volume (staged method): Nova copies the disk under the running instance from the old volume to the destination volume and switches the instance. | The old volume is untouched until the completion; reverse (R3) uses the same method with the roles swapped. | A refusal: the volume is rolled back (R2). A lost answer or a 5xx: the outcome is unknown, everything halts, and the attachment is read back. |
+| C5 | `POST {block}/volumes/{id}/action` with `{"os-migrate_volume_completion": {"new_volume": new, "error": false}}` | administrator | The two Cinder records trade places, so the volume keeps its id and now sits on the target array. Sent by the tool itself for a detached volume; Nova sends it after a swap for an attached one. | Reverse (R3). | As C4. |
+| C6 | `POST {block}/volumes/{id}/action` with `{"os-force_delete": null}` | administrator | Deletes the temporary record that holds the old backing volume, after the soak. The old backing volume is left alone if Cinder's driver cannot delete it; this is logged as a leftover. | None: the source is released only after the soak and the post-check. | The step is retried at the next tick. |
 
 A call is never repeated by the engine. After an answer is lost, the next tick reads the volume (B8) and closes the open step with what the cloud shows: moving or moved is "done", unchanged is "failed" and the volume is rolled back.
 
-### Still candidates (class C, the staged method)
+### Operations on the migration host and the Cinder host (class C, the staged method)
 
-These are taken from the owner's playbook, are **not** implemented, and are listed so they can be reviewed before any of them is written. They need a data mover host and the arrays, so they are only for the `full` access level.
+These are not calls to the cloud. They run over SSH, through `connectors/ssh.py`, on hosts a person registered on the Hosts tab and whose host key a person pinned. Each is made through `Actions.op`, which holds the same rules as a cloud change: a permit now, the intent and its undo in the journal first, the result after, no retry of an unknown outcome. Every operation is safe to repeat: it returns what the first call made. Details and the job contract are in `MOVER.md`.
 
-| Step (see `PROCESS.md`) | Candidate call | Changes |
+| Operation | Runs on | Changes |
 |---|---|---|
-| Cutover, attached volume | Nova volume swap: `PUT {compute}/servers/{server}/os-volume_attachments/{volume}` | The instance's disk is copied to the destination by the hypervisor and switched, with the instance running. |
-| Cutover, completion | Cinder migration completion for the pair of volume records | The two Cinder records swap. The volume keeps its id and gains the destination as its backing volume. |
-| Freeze and unfreeze | Setting the migration status of the source record (through Cinder's own interfaces on the Cinder host) | The source record stops accepting changes during the cutover and is released after. |
-| Destination record and cleanup | Cinder's object layer and `cinder-manage`, on a Cinder host, over SSH | Creates and, on rollback, removes the destination record. |
-| Copy | A self-contained data mover script run on a Cinder host over SSH, reading the source array and writing the target array | Writes the staging volume on the target array. Reads the source only. |
-| Array calls | The source array's snapshot-clone call; the target array's volume and snapshot calls | Creates clones and the staging volume. Never writes to a source volume. |
+| Data mover file placed, removed | migration host | One file (`mover.py`) in OpenMove's own folder on the host. Removal leaves nothing behind and is refused while a job runs. |
+| Logical-volume list, create, snapshot, rename, remove, remove the source snapshots, free space (`lv.list`, `lv.create`, `lv.snapshot`, `lv.rename`, `lv.remove`, `lv.remove_source_snapshots`, `vg.free`) | migration host | Creates and removes only the staging volumes, clones and safety copies that OpenMove made (named `om-...`). Never a volume it did not make. |
+| Copy and compare jobs (`job.start`, `job.status`, `job.cancel`, `cleanup`) | migration host | A background job (one id per snapshot, generation and try) copies the image of one snapshot onto the staging volume of the target array, or reads both sides back and compares them. Reads the source only; the job keeps its status and log in its own folder. |
+| Record operations (`show`, `find-host`, `record-create`, `freeze`, `unfreeze`, `sync-fields`, `record-delete`, `conf`) | Cinder host | Creates the destination record through Cinder's object layer, freezes the source record during the cutover, and on rollback unfreezes it and deletes the destination record. |
+| Readiness, diagnostics and benchmark (`probe`, `diag`, `bench`) | both | Reads only (checks `H1` to `H9`), plus a small write-and-delete test in the staging area when a person asks for the benchmark. |
+| Host setup (`hosts/setup`): a login with the administrator password, `prepare_host.sh`, `configure_storage.sh` | a new host, once, when a person asks | Installs packages; creates the service account, its key and its sudo rights (`/etc/sudoers.d/openmove`); starts `sshd`; for storage paths changes `/etc/iscsi/iscsid.conf` (the original is kept), the initiator name, `/etc/multipath/conf.d/openmove.conf`, `/etc/modules-load.d/openmove-storage.conf`, starts `iscsid` and `multipathd` and logs in to the portals given. Uses a private temporary folder `/tmp/openmove-setup.*` that it removes. Never creates, maps or deletes a volume. The password is given to `ssh` only through the environment. |
 
 A change that cannot be undone is shown as such in the plan and needs its own approval.
 
@@ -129,6 +133,21 @@ Protection: every `/api/` call needs the per-run token (printed at start-up and 
 | `GET /api/phase0` | The Phase 0 lab tests (T1 to T22 and M1 to M4) as guided procedures, with the newest recorded result of each for the detected release, and the count still open. | | no |
 | `POST /api/phase0/record` | Record one test's result (pass or fail) with a name and at least 40 characters of what was done and seen. The newest result of a test counts. | test, result, name, evidence, environment | no |
 | `POST /api/lab/approve` | Lab mode only: record the lab validation of the lab release (only for a release whose profile is marked as a lab), attest the open items and sign as two lab users, labelled as the lab's. A failed check still blocks; it cannot be waived. | | no |
+| `GET /api/hosts/setup-script` | Query: `role`, `user`, `cinder_user`, `from`. The host setup script (`prepare_host.sh`) and the command to run it, with OpenMove's public key filled in. Makes OpenMove's key if it does not exist. Changes nothing on any host. Refuses a role or account name that is not plain (400). |
+| `GET /api/hosts` | The registered hosts (migration host, Cinder host), OpenMove's own public key to add to each host, the last readiness checks, the back-end families and whether the fabric is ready. Makes no call. | | no |
+| `POST /api/hosts/probe` | Read the host key a machine offers before it is registered (the first step of a host setup). Nothing is trusted. Over SSH, no login. | address, port | no |
+| `POST /api/hosts/setup` | Set up a new host: log in once with the administrator password, prepare the host, set up its storage paths, register it and check it (`DEPLOYMENT.md`, section 4.1). The password and the CHAP secret are used for this call only and are never stored, logged or returned. The host key must be pinned first, or the fingerprint a person checked and the person's name must be given: the password is not sent before that. With `check_only` nothing is changed or registered. Over SSH. | name, address, port, user, password, roles, service_user, cinder_user, cinder_python, from_address, jump, fingerprint, by, storage, check_only | no (changes the host being set up) |
+| `POST /api/hosts/save` | Register or change a host: name, roles, address, port, user, transport (`ssh` or `local`), the back-end family. Nothing is contacted. | host | no |
+| `POST /api/hosts/remove` | Forget a host. | name | no |
+| `POST /api/hosts/scan` | Read the host key the machine offers now (SSH key scan) and show its fingerprint. Nothing is trusted yet. | name | no |
+| `POST /api/hosts/trust` | Pin the host key whose fingerprint a person confirmed. The host is scanned again and a different key is refused. Needs the name of the person. | name, fingerprint, by | no |
+| `POST /api/hosts/check` | Run the host readiness checks (`H1` to `H9`) for a pair of back-ends, placing the data mover where it is needed. With `bench` it also measures the copy speed. Over SSH. | source, target, bench | no (writes the data mover file on the host) |
+| `POST /api/hosts/mover` | Place (`install`) or remove (`remove`) the data mover file on one host. Removal is refused while a job runs. Over SSH. | name, action | no (host only) |
+| `GET /api/diagnostics` | The diagnostics settings (redaction level, log redaction), the log files, the support bundles made so far and what each level removes. | | no |
+| `POST /api/diagnostics/bundle` | Build a support bundle (a zip of the logs, the journal, the evidence, the screen state and, when asked, a read-only collection from each registered host) at a redaction level. | level, remote, reason | no |
+| `POST /api/diagnostics/settings` | Change the redaction level of bundles and of the log. | redaction, log_redaction | no |
+| `GET /api/diagnostics/download` | Download a support bundle made earlier (the name must be one OpenMove made). | name (query) | no |
+| `POST /api/diagnostics/decode` | Turn a redaction token back into the value it stands for. Works only on the site that made the bundle: the token map never leaves it. | token | no |
 | `POST /api/demo/validate` | Demo mode only: record a labelled, synthetic lab validation. | | no |
 | `POST /api/demo/approve` | Demo mode only: attest the open items and sign as two made-up people, labelled synthetic. A failed check still blocks; it cannot be waived. | | no |
 | `POST /api/demo/simulate` | Demo mode only: start or stop a simulated migration run with made-up evidence and a virtual clock. It uses the real lifecycle, gate and halt rules and sends nothing to any system. It cannot start unless the gate is approved. | action (`start` or `stop`) | no |
@@ -169,6 +188,12 @@ The journal is a local SQLite file (`journal.db`). It is append-only in normal u
 | `engine_run` | A real run starts. | Volumes queued and resumed, the type map. |
 | `engine_start` | A person starts a run. A real run needs a dry run read for the same volumes first (or an earlier run to resume). The run may carry a window (UTC start and stop): outside it no new volume is taken and no retype is sent. | Name, queued and resumed counts, the window. |
 | `engine_reverse_all` | A person puts the whole run back. | Name, reason, number of volumes. |
+| `stage` | The staged method (class C) records one fact about one volume: a state change, a counter, a job id, a gate, an error. The engine reads these back after a restart, so every step can be repeated safely. | Volume, the keys that changed. Cloud and host answers; never a password or token. |
+| `host_saved` / `host_removed` | A person registers, changes or forgets a migration host or Cinder host. | Name, roles, transport, address, port, user. No key material. |
+| `host_setup` | A person sets up a new host from the Hosts tab, or tries to (also when it fails or is only checked). | Host, address, login, roles, service account, storage description without secrets and without the extra multipath text, the status of each step, the initiator name, the error if the login failed. Never the password or the CHAP secret. |
+| `host_trusted` | A person pins a host key after checking its fingerprint. | Host, fingerprint, key type, name of the person. |
+| `mover_installed` / `mover_removed` | The data mover file is placed on, or removed from, a host. | Host, path, SHA-256 of the file. |
+| `support_bundle` | A support bundle is built. | File name, redaction level, number of files, size. |
 | `lab` | Lab mode connects to the lab cloud. | Address, roles, a note that it is not a customer cloud. Never the password. |
 | `demo` | Demo mode starts, or a simulated run starts. | Scenario, or the simulation note. |
 
@@ -180,4 +205,8 @@ The journal is a local SQLite file (`journal.db`). It is append-only in normal u
 | Reports | Only where the browser saves a download. OpenMove keeps no copy. |
 | `evidence/<volume id>/` in the data folder | Per volume the engine moves: `validated.json`, `before.json`, `after.json`, `calls.jsonl` (every change sent or refused, with time and result) and, after a failure or a reverse, `failed.json` or `after-reverse.json`. Cloud answers only; never a password or token. |
 
-OpenMove writes nothing on any Cinder host, compute host or array in this release.
+| `hosts.json`, `ssh/` (OpenMove's own key pair and `known_hosts`) in the data folder | The registered hosts and the keys. The private key never leaves the folder and never goes into a bundle. |
+| `logs/openmove.log`, `logs/calls.jsonl`, `diag/` in the data folder | The diagnostic log (every start, run, stage, refusal and traceback, redacted as set), the settings and the local token map for redaction. The token map is never put in a bundle. |
+| `bundles/openmove-support-*.zip` in the data folder | Support bundles. They are made when a person asks, and automatically (a light bundle without the remote collection) when a run halts or an unexpected error occurs, once per reason, at most eight. |
+
+On the migration host and the Cinder host OpenMove writes only inside its own folder (`mover.py`, the job folders and the staging volumes it names `om-...`), and never touches a volume it did not make. See `MOVER.md`.

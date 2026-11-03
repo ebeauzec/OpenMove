@@ -76,6 +76,19 @@ The architecture as built is in `docs/ARCHITECTURE.md`: one Python process (stan
 | `docs/ARCHITECTURE.md` | The architecture as built, with diagrams. |
 | `docs/INSTALL.md` | Installation guide. |
 | `docs/OPERATIONS.md` | Operation guide: the procedure, the way back, halt and restart, notes, checklists. |
+| `docs/MOVER.md` | Class C in practice: the hosts, SSH, the data mover and the Cinder helper, the host checks. |
+| `docs/DIAGNOSTICS.md` | Logs, support bundles and redaction for dark sites. |
+| `openmove/engine/staged.py` | The staged method for class C (`StagedMixin`): copy, sync, rechecks, the cutover steps, R1, R2, R3, per-volume state in the journal. |
+| `openmove/hosts.py`, `openmove/server_hosts.py` | The host registry (`hosts.json`), the readiness checks H1 to H9, C1, C2, the routes of the Hosts and Diagnostics tabs. |
+| `openmove/connectors/ssh.py` | SSH with the system OpenSSH client: keys only, OpenMove's own key, pinned host keys, a trace of every call. |
+| `openmove/resources/mover/` | `mover.py` (the data mover, Python 3.6+, standard library) and `cinder_helper.py` (run with Cinder's own Python); placed on the hosts by the tool. |
+| `openmove/arrays/` | Array adapters: `base.py`, `lvm.py` (the only one built). |
+| `openmove/diag.py`, `openmove/redact.py` | Logs, trace, support bundles; redaction at three levels with a local token map. |
+| `openmove/lab/hosts.py` | Makes, starts, registers and checks the two lab hosts (WSL 2 distros). |
+| `tests/test_staged.py`, `test_mover.py`, `test_diag.py`, `test_redact.py`, `test_lab_hosts.py` | The staged method against the fake fabric, the data mover and the Cinder helper, the hosts registry, diagnostics and bundles, redaction, the lab host setup (calls stubbed). |
+| `openmove/bootstrap.py`, `openmove/resources/deploy/configure_storage.sh`, `tests/test_bootstrap.py` | Set up a new host from OpenMove: one login with the administrator password (`ssh.RootLogin`), `prepare_host.sh`, the storage paths (iSCSI initiator, multipath, logins), registration, the key-only proof. Route `POST /api/hosts/setup`; the password is never kept. |
+| `openmove/selfcheck.py`, `openmove/resources/deploy/prepare_host.sh`, `docs/DEPLOYMENT.md`, `tests/test_deploy.py` | The installation self-check; the host setup script (account, packages, key, narrow sudo rights, sshd); the production deployment guide; their tests. |
+| `tools/lab/lab_staged.py` | Drives a real class C move against the lab. |
 | `docs/LAB.md` | The OpenStack lab: what it proves, commands, the seeded catalogue, what it has shown, troubleshooting. |
 | `OpenMove-Lab.bat`, `OpenMove-Lab-Stop.bat` | Start OpenMove against the lab (and the dashboard); stop the lab gracefully. |
 | `tools/lab/` | `lab.py` (status, up, down, seed, clean, list), `seed.py`, `lab_up.sh`, `lab_down.sh`, `provision_devstack.sh`, `README.md`. |
@@ -110,19 +123,20 @@ A local web interface, started with `python -m openmove`. It listens on the loop
 - The **gated wizard** (`wizard.py`): a step opens only when every earlier step is done, the selection must be confirmed for the exact pre-flight run and volume ids, a real run needs a dry run that covered the same volumes. Enforced by the server, shown by the page.
 - Access levels: OpenStack APIs only (default) or APIs, hosts and arrays.
 - Demonstration mode (three scenarios, simulated migration) and lab mode (a real OpenStack in WSL, a seeded catalogue of 26 volumes and 8 servers, Horizon sign-in, graceful stop).
-- 307 automated tests; the real engine has moved detached, attached and boot volumes in the lab and reversed two of them.
+- Class C, the staged method (`engine/staged.py`), the data mover and the Cinder helper, SSH, the Hosts tab, the `lvm` adapter and a fake fabric; diagnostics and redaction for dark sites. Run against the real lab: a detached and an attached volume with a snapshot moved end to end (detached data identical), R2 on real Cinder, a resume after a crash.
+- 403 automated tests; the real engine has moved detached, attached and boot volumes in the lab and reversed two of them.
 - Documentation: a walkthrough with screenshots and diagrams, every option, architecture, installation, operation, user guide, process, every call, safety case, classes, workload risks, playbook trace (v1.2 and v1.3), lab.
 
 ## 6. What Is Partially Done
 
 - Classification without database access cannot check `provider_id` or snapshot rotation. A volume with snapshots is then class C ("rotation unknown"). Importing the playbook's query results closes the gap. The class B path (wait for rotation) is covered by mock tests only.
 - Playbook step 1.7 (internal-tenant volumes): the image-cache volume is found; others are not.
-- The failure paths of the engine are tested against a mock with fault injection. In the lab only the forward move and the way back have been run.
+- The failure paths of the engine are tested against a mock and the fake fabric with fault injection. In the lab: the failures listed in `LAB.md`; a copy killed in the middle and a mover killed are only in the fake fabric.
+- Class C is proven on LVM only. The SolidFire and FlashArray adapters are not written; Queens and a customer cloud were never reached.
 
 ## 7. What Is Not Started
 
-- The class C engine (staged copy, history rebuild, record swap, rollbacks R1 and R2), the data mover host, SSH, database access and array adapters.
-- The after report and the before/after comparison.
+- The SolidFire and FlashArray array adapters, direct database access, PDF reports.
 - Container image and own Linux image. The standalone program is built by `tools/build/build_exe.py` but has not been run on a machine without Python.
 - Authentication and roles for the interface.
 
@@ -149,6 +163,8 @@ Standard library only (a test enforces it). The standalone program contains the 
 | 0.6.0 | 2026-11-03 | First runs against a real OpenStack lab: Horizon sign-in, graceful stop, a seeded catalogue; fixes found there (the way back is locked, the image-cache volume, volumes already on the target, the Nova lock state). |
 | 0.6.1 | 2026-11-03 | Documentation: architecture overview, installation guide and operation guide; README, CONTEXT, user guide and lab troubleshooting brought up to date. |
 | 0.7.0 | 2026-11-03 | The gated wizard (server-enforced), selection confirmation, dry run before a real run; detection of a silently undone retype; identity fields in the post-check; the lab sign-in and Connect form pre-filled; a walkthrough with screenshots, an options reference, playbook v1.3 compared. |
+| 0.8.0 | 2026-11-03 | Gap closure: update and after reports, Excel and CSV, the support matrix, Phase 0 as guided procedures, run window, whole-run reverse, Dockerfile (not built), lab failure injection. |
+| 0.9.0 | 2026-11-03 | Class C: the staged method, the data mover and the Cinder helper, SSH, hosts, diagnostics and redaction for dark sites, the lab hosts made without a terminal; proven on LVM in the lab. |
 
 Full history is in `CHANGELOG.md` and the git log.
 
@@ -157,6 +173,6 @@ Full history is in `CHANGELOG.md` and the git log.
 1. Run the packaged program and the container image on clean machines, first with `--demo`; run the tests on macOS.
 2. A power cut on a real host as a failure test.
 3. Phase 0 on the customer's cloud (the tests are guided and recorded; a person runs them), so a lab validation (gate G0) can be recorded from them.
-4. Owner decisions: the SSH client, report formats, interface authentication; whether to build the class C engine (the reviewer advises keeping it out of the critical path).
+4. Owner decisions: report formats (PDF), interface authentication and roles, whether to block medium-risk volumes. Write the SolidFire and FlashArray adapters (`arrays/base.py` is the contract; `arrays/lvm.py` the model) as soon as an array is reachable, and repeat the lab proofs there.
 5. A test-environment deployment of the packaged program, run first as a dry run.
 

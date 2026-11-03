@@ -1,8 +1,8 @@
 {
-  "version": "0.8.0",
+  "version": "0.9.0",
   "major": 0,
-  "minor": 8,
+  "minor": 9,
   "patch": 0,
   "date": "2026-11-03",
-  "notes": "Gap closure: after report, Excel and CSV, support matrix, Phase 0 tests, run window, whole-run reverse, container file"
+  "notes": "Class C: staged method, data mover, SSH, host setup from the interface, deployment guide, larger lab"
 }

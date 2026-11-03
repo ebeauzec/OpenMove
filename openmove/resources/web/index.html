@@ -39,6 +39,8 @@
     <button role="tab" data-tab="reports">8. Reports</button>
     <button role="tab" data-tab="live">9. Live</button>
     <button role="tab" data-tab="journal">Journal</button>
+    <button role="tab" data-tab="hosts">Hosts</button>
+    <button role="tab" data-tab="diagnostics">Diagnostics</button>
   </nav>
 
   <div id="banner" class="banner hidden" role="status"></div>
@@ -164,9 +166,9 @@
   </section>
 
   <section id="tab-move" class="panel hidden">
-    <h2>Move volumes with Cinder's retype</h2>
-    <p class="muted">Class A and B volumes are moved by Cinder itself: OpenMove locks the instance, sends one retype with on-demand migration, follows it, checks the result against the before-state and unlocks. It needs only the OpenStack APIs. Always run the dry run first: it reads the cloud and lists the exact calls, and changes nothing.</p>
-    <div id="mv-note" class="banner warn">A real run needs three things: a recorded lab validation of the OpenStack release (gate G0), an approved pre-flight gate, and no halt. Class C volumes are not moved here.</div>
+    <h2>Move volumes</h2>
+    <p class="muted">Class A and B volumes are moved by Cinder itself: OpenMove locks the instance, sends one retype with on-demand migration, follows it, checks the result against the before-state and unlocks. It needs only the OpenStack APIs. Class C volumes are copied to the target through the data mover, image by image and checked, and then switched over. Always run the dry run first: it reads the cloud and lists the exact calls, and changes nothing.</p>
+    <div id="mv-note" class="banner warn">A real run needs three things: a recorded lab validation of the OpenStack release (gate G0), an approved pre-flight gate, and no halt. Class C volumes (snapshots that stay) are moved too, by the staged method, once a migration host and a Cinder host are registered and ready on the Hosts tab; until then they are held back.</div>
     <div class="actions inline">
       <label>Target volume type<input id="mv-type" placeholder="empty: chosen if only one type fits"></label>
       <label>Run window opens (UTC)<input id="mv-from" placeholder="optional: 2026-11-07T22:00"></label>
@@ -193,7 +195,7 @@
     </div>
     <div id="mv-dry-view"></div>
     <div id="mv-cards" class="cards"></div>
-    <div class="table-wrap"><table id="mv-table"><thead><tr><th>Volume</th><th>Class</th><th>Phase</th><th>G2</th><th>G3</th><th>G4</th><th>What is happening</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="mv-table"><thead><tr><th>Volume</th><th>Class</th><th>Method</th><th>Phase</th><th>G2</th><th>G3</th><th>G4</th><th>What is happening</th><th></th></tr></thead><tbody></tbody></table></div>
     <p id="mv-more" class="muted"></p>
   </section>
 
@@ -273,6 +275,132 @@
     <div class="actions"><button id="journal-refresh" class="secondary">Refresh</button></div>
     <div id="journal-view"></div>
   </section>
+  <section id="tab-hosts" class="panel hidden">
+    <h2>Hosts</h2>
+    <p class="muted">Class C volumes (volumes with snapshots that stay) are copied by a small program, the <strong>data mover</strong>, on a Linux <strong>migration host</strong> that sees both back-ends' storage. A <strong>Cinder host</strong> runs the Cinder helper that creates the destination record. One host can do both. OpenMove logs in over SSH with its own key and only to a host whose key you have checked. The one use of a password is the setup of a new host (below); it is not kept. OpenMove places the mover itself and removes it again.</p>
+    <details class="box" open>
+      <summary><strong>OpenMove's public key</strong></summary>
+      <p class="muted">Add this line to <code>~/.ssh/authorized_keys</code> of the login user on each host. It is the only credential OpenMove keeps; a password is used only to set up a new host and is never saved.</p>
+      <pre id="hs-key" class="code"></pre>
+      <p id="hs-notes" class="muted"></p>
+    </details>
+    <details class="box" open id="su-box">
+      <summary><strong>Set up a new host from here</strong></summary>
+      <p class="muted">Prepare a Linux host on the customer network (it must see the arrays' storage network), then give OpenMove its address and the administrator login. OpenMove logs in once with the password, installs its own key, prepares the host (packages, a service account, narrow sudo rights, sshd), sets up the storage paths you describe below (iSCSI initiator, multipath, logins to the arrays), registers the host and checks it. <strong>The password is used for this setup only. It is not saved, not written to the journal or a log, and not left on the host.</strong> After the setup OpenMove uses only its key. The setup can be run again; every step looks first and changes only what differs.</p>
+      <div class="actions inline">
+        <label>Name<input id="su-name" placeholder="mover-1"></label>
+        <label>Address<input id="su-address" placeholder="192.0.2.10 or host name"></label>
+        <label>Port<input id="su-port" value="22" size="5"></label>
+        <label>Administrator login<input id="su-user" value="root"></label>
+        <label>Administrator password<input id="su-password" type="password" autocomplete="off" placeholder="used once, never saved"></label>
+        <label><input type="checkbox" id="su-role-mover" checked> migration host</label>
+        <label><input type="checkbox" id="su-role-cinder"> Cinder host</label>
+      </div>
+      <h4>1. Check the host key</h4>
+      <p class="muted">The password is sent only to a host whose key a person has compared. Read the key, compare the fingerprint with the host's console or its administrator, and type what you checked.</p>
+      <div class="actions inline">
+        <button class="secondary" id="su-probe">Read the host key</button>
+        <label>Fingerprint you checked<input id="su-fp" placeholder="SHA256:..." size="50"></label>
+        <label>Your name<input id="su-by" placeholder="who checked it"></label>
+      </div>
+      <pre id="su-keys" class="code"></pre>
+      <h4>2. Storage paths</h4>
+      <div class="actions inline">
+        <label>Protocol<select id="su-proto"><option value="none">none (the host sees its storage already)</option><option value="iscsi">iSCSI</option><option value="fc">Fibre Channel</option></select></label>
+      </div>
+      <div id="su-storage" class="hidden">
+        <div class="actions inline">
+          <label>Array portals (one per line, IP or IP:port)<textarea id="su-portals" rows="3" cols="30" placeholder="192.0.2.21&#10;192.0.2.22"></textarea></label>
+          <label>Initiator name (empty: keep the host's)<input id="su-initiator" placeholder="iqn.1994-05.com.example:migration-1" size="40"></label>
+          <label>CHAP user (if the arrays need it)<input id="su-chap-user"></label>
+          <label>CHAP secret<input id="su-chap-secret" type="password" autocomplete="off" placeholder="used once, never saved"></label>
+          <label>Path replacement timeout (s)<input id="su-timeo" value="15" size="4"></label>
+          <label><input type="checkbox" id="su-arr-pure"> Pure FlashArray multipath settings</label>
+          <label><input type="checkbox" id="su-arr-sf"> SolidFire multipath settings</label>
+        </div>
+        <details><summary>Extra multipath text</summary>
+          <p class="muted">Added to OpenMove's drop-in file <code>/etc/multipath/conf.d/openmove.conf</code>. The ready-made settings are starting values: check them against the array vendor's current guide.</p>
+          <textarea id="su-mpextra" rows="6" cols="70" placeholder="devices { device { ... } }"></textarea>
+        </details>
+      </div>
+      <h4>3. Run</h4>
+      <div class="actions inline">
+        <label>Allow only this address to use the key<input id="su-from" placeholder="the address of this machine (recommended)"></label>
+        <label>Service account<input id="su-service" value="openmove"></label>
+        <label>Cinder interpreter (Cinder host)<input id="su-cpython" placeholder="empty: read from the cinder-volume program"></label>
+        <button class="secondary" id="su-check">Check only (changes nothing)</button>
+        <button class="primary" id="su-run">Set up the host</button>
+        <span id="su-status" class="muted"></span>
+      </div>
+      <div id="su-result"></div>
+    </details>
+    <details class="box">
+      <summary><strong>Prepare a host (script)</strong></summary>
+      <p class="muted">The same preparation by hand, when the administrator password is not given to OpenMove: a new Linux host needs a service account, OpenMove's key, a few packages and sudo rights. This script does it and can be run again. It changes nothing in OpenStack or on any storage. Copy it to the host and run the command as an administrator.</p>
+      <div class="actions inline">
+        <label>Role<select id="hs-sc-role"><option value="both">migration host and Cinder host</option><option value="mover">migration host</option><option value="cinder">Cinder host</option></select></label>
+        <label>Service account<input id="hs-sc-user" value="openmove"></label>
+        <label>Allow only this address<input id="hs-sc-from" placeholder="the address of this machine (recommended)"></label>
+        <button class="secondary" id="hs-sc-show">Show command</button>
+        <button class="secondary" id="hs-sc-download">Download prepare_host.sh</button>
+      </div>
+      <pre id="hs-sc-cmd" class="code"></pre>
+    </details>
+    <h3>Add or change a host</h3>
+    <div class="actions inline">
+      <label>Name<input id="hs-name" placeholder="mover-1"></label>
+      <label>Address<input id="hs-address" placeholder="192.0.2.10 or host name"></label>
+      <label>Port<input id="hs-port" value="22" size="5"></label>
+      <label>Login user<input id="hs-user" value="root"></label>
+      <label>Cinder Python<input id="hs-python" placeholder="empty: python3 (the interpreter Cinder uses)"></label>
+      <label>Cinder user<input id="hs-cuser" placeholder="optional: the user that reads cinder.conf"></label>
+      <label><input type="checkbox" id="hs-role-mover" checked> migration host</label>
+      <label><input type="checkbox" id="hs-role-cinder" checked> Cinder host</label>
+      <label><input type="checkbox" id="hs-sudo"> use sudo (passwordless)</label>
+      <button class="primary" id="hs-save">Save host</button>
+    </div>
+    <div class="table-wrap"><table id="hs-table"><thead><tr><th>Name</th><th>Roles</th><th>Address</th><th>Login</th><th>Host key</th><th></th></tr></thead><tbody></tbody></table></div>
+    <h3>Readiness</h3>
+    <p class="muted">Checks the key login, Python, rights, tools, that the host sees both back-ends' storage, and that the Cinder helper runs. It needs the source and target back-end chosen in the pre-flight. Press it again after a fix.</p>
+    <div class="actions inline">
+      <label><input type="checkbox" id="hs-bench"> also measure copy speed (reads 64 MiB)</label>
+      <button class="secondary" id="hs-check">Check the hosts</button>
+      <span id="hs-status" class="muted"></span>
+    </div>
+    <div class="table-wrap"><table id="hs-checks"><thead><tr><th>Check</th><th>Result</th><th>What was seen</th><th>What to do</th></tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section id="tab-diagnostics" class="panel hidden">
+    <h2>Diagnostics</h2>
+    <p class="muted">If anything goes wrong, a <strong>support bundle</strong> holds everything needed to find the fault without access to this site: the journal, every step with its intent and result, every call to the cloud and to the hosts with the complete output, the log, and what each host reports about itself. OpenMove also writes one by itself when it halts or meets an unexpected error.</p>
+    <div class="actions inline">
+      <label>Redaction in the bundle
+        <select id="dg-level"><option value="standard">standard</option><option value="strict">strict</option><option value="none">none</option></select></label>
+      <label><input type="checkbox" id="dg-remote" checked> also collect from the registered hosts</label>
+      <button class="primary" id="dg-bundle">Create a support bundle</button>
+      <button class="secondary" id="dg-refresh">Refresh</button>
+    </div>
+    <p id="dg-text" class="muted"></p>
+    <div class="table-wrap"><table id="dg-bundles"><thead><tr><th>Bundle</th><th>Created</th><th>Size</th><th></th></tr></thead><tbody></tbody></table></div>
+    <h3>Redaction of the log</h3>
+    <p class="muted">The log and the call trace are written to the data folder as they happen. Choose whether they are written redacted. The bundle is redacted separately, when it is made.</p>
+    <div class="actions inline">
+      <label>Log redaction
+        <select id="dg-log-level"><option value="none">none</option><option value="standard">standard</option><option value="strict">strict</option></select></label>
+      <button class="secondary" id="dg-log-save">Save</button>
+    </div>
+    <h3>Decode a token</h3>
+    <p class="muted">A redacted bundle uses tokens such as <code>ip-3</code> or <code>uuid-0007</code>. The map from token to value stays on this site. Use this when the people who read the bundle ask what a token stands for.</p>
+    <div class="actions inline">
+      <label>Token<input id="dg-token" placeholder="uuid-0007"></label>
+      <button class="secondary" id="dg-decode">Decode</button>
+      <span id="dg-decoded" class="muted"></span>
+    </div>
+    <h3>Files</h3>
+    <div class="table-wrap"><table id="dg-logs"><thead><tr><th>Log file</th><th>Size</th></tr></thead><tbody></tbody></table></div>
+    <p id="dg-folder" class="muted"></p>
+  </section>
+
   <div id="wiz" class="wiz" aria-label="Steps">
     <button id="wiz-back" class="secondary" type="button">Back</button>
     <div class="wiz-mid"><span id="wiz-step" class="muted"></span><span id="wiz-hint" class="wiz-hint"></span></div>

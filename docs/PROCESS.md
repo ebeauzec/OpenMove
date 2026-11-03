@@ -13,20 +13,20 @@ Everything below follows from that rule. Until the cutover, the source volume is
 ## 1. Overview
 
 ```mermaid
+%%{init: {"theme": "base", "fontFamily": "Arial, Helvetica, sans-serif", "themeVariables": {"fontSize": "15px"}, "flowchart": {"htmlLabels": false, "padding": 32, "nodeSpacing": 40, "rankSpacing": 50}}}%%
 flowchart LR
     A[Connect] --> B[Platform<br/>release, profile]
     B --> C[Inventory<br/>classes A-E]
     C --> D[Audit<br/>environment]
     C --> E[Pre-flight<br/>checks + gate]
     E --> F[Before report]
-    E --> G{{Gate approved?<br/>no failures, attested,<br/>two signatures, fresh}}
+    E --> G{{Gate approved?<br/>no failures,<br/>attested,<br/>two signatures,<br/>fresh}}
     G -- no --> E
     G -- yes --> H[Migration<br/>per volume, section 4]
     H --> I[After report]
-    style H stroke-dasharray: 5 5
 ```
 
-The dashed box is planned. Everything left of it exists and only reads.
+Everything up to the gate only reads. Migration is the only part that changes the cloud, and it starts only after the gate is approved.
 
 ## 2. Reading the environment (implemented)
 
@@ -93,6 +93,7 @@ No migration host is needed. By default nothing is installed on a production hos
 For each volume, in this order and no other (`openmove/lifecycle.py`, 14 tests):
 
 ```mermaid
+%%{init: {"theme": "base", "fontFamily": "Arial, Helvetica, sans-serif", "themeVariables": {"fontSize": "15px"}, "flowchart": {"htmlLabels": false, "padding": 32, "nodeSpacing": 40, "rankSpacing": 50}}}%%
 stateDiagram-v2
     [*] --> precheck
     precheck --> validate
@@ -246,7 +247,7 @@ The gates G2 and G3 are signed while the volume is in `validate`. A halt stops t
 
 ## 6. What is not built yet
 
-* The staged method for class C: the data mover, the staging copy, the history rebuild, the sync and its rollbacks. The retype path for class A and B is built (section 5a) and tested against a mock cloud.
-* The checks that need an array, a Cinder host, a compute host or the Cinder database. They show as "not checked" and need an attestation, never a pass.
+* The array adapters for SolidFire and FlashArray. The staged method for class C (the data mover, the staging copy, the history rebuild, the sync and its rollbacks) is built and runs on LVM back-ends through the `lvm` adapter; the retype path for class A and B is built (section 5a).
+* The checks that need a real array, a compute host or the Cinder database. They show as "not checked" and need an attestation, never a pass.
 * Lab validation (playbook Phase 0). No release profile is marked validated; every real cloud is read only until a passed lab validation is recorded.
 * Nothing in this release has been run against a real cloud. The demonstration and the engine tests use a built-in mock cloud.

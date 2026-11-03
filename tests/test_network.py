@@ -25,15 +25,18 @@ class NetworkTests(unittest.TestCase):
 
     def test_only_the_documented_modules_open_connections(self):
         found = self.files_that_connect()
-        self.assertEqual(set(found), {"connectors/httpclient.py", "lab/__init__.py"}, "a module opens a connection that docs/NETWORK.md does not name: %s" % found)
+        self.assertEqual(set(found), {"connectors/httpclient.py", "connectors/ssh.py", "lab/__init__.py", "lab/hosts.py", "selfcheck.py"}, "a module opens a connection that docs/NETWORK.md does not name: %s" % found)
         doc = (ROOT / "docs" / "NETWORK.md").read_text(encoding="utf-8")
         for rel in found:
             self.assertIn(rel.replace("/__init__.py", "/").replace("__init__.py", ""), doc.replace("lab/__init__.py", "lab/"), rel)
 
-    def test_no_ssh_or_database_client_exists_yet(self):
+    def test_ssh_is_the_system_client_only_and_no_database_client_exists(self):
         text = " ".join(p.read_text(encoding="utf-8") for p in PACKAGE.rglob("*.py"))
         for word in ("paramiko", "sqlite3.connect(\"mysql", "pymysql", "psycopg"):
             self.assertNotIn(word, text)
+        ssh = (PACKAGE / "connectors" / "ssh.py").read_text(encoding="utf-8")
+        self.assertIn("BatchMode=yes", ssh)             # never a password prompt
+        self.assertIn("StrictHostKeyChecking", ssh)     # a host key must be pinned first
 
 
 if __name__ == "__main__":

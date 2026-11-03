@@ -1,14 +1,15 @@
 # Architecture
 
-This is the architecture of OpenMove as it is built today (version 0.6.1). `DESIGN.md` is the earlier proposal and still describes what is planned (SSH, array adapters, the staged method, a container). This document describes what exists. Where the two differ, this one is true of the code.
+This is the architecture of OpenMove as it is built today (version 0.9.0). `DESIGN.md` is the earlier proposal and still describes what is planned (array adapters for SolidFire and FlashArray, a container image that exists as a Dockerfile but has not been built). This document describes what exists. Where the two differ, this one is true of the code.
 
 ## 1. Status in one paragraph
 
-OpenMove reads an OpenStack cloud, classifies its Cinder volumes, runs a pre-flight with a gate, builds reports, and moves class A and class B volumes with Cinder's own retype. It talks to the OpenStack APIs only. The move engine has run against a real OpenStack lab on a development machine (a detached volume, an attached volume and a boot volume, and the way back). It has never run against a customer cloud, and no OpenStack release except the lab's own is marked validated. Class C (long-lived snapshots) needs a data mover host and is not built; it is held back with a cause and steps to resolve it.
+OpenMove reads an OpenStack cloud, classifies its Cinder volumes, runs a pre-flight with a gate, builds reports, and moves class A and class B volumes with Cinder's own retype. It talks to the OpenStack APIs and, for class C, to a migration host and a Cinder host over SSH (`MOVER.md`). The move engine has run against a real OpenStack lab on a development machine (a detached volume, an attached volume and a boot volume, and the way back). It has never run against a customer cloud, and no OpenStack release except the lab's own is marked validated. Class C (long-lived snapshots) is moved by the staged method (`engine/staged.py`) through a data mover on the migration host and a helper on the Cinder host. It has run against the real lab with the LVM adapter, detached and attached; it has not run against SolidFire, FlashArray, Queens or a customer cloud. Without registered hosts that pass their checks, class C volumes are held back with a cause and steps to resolve it. Every failure leaves a log and a support bundle, which can be redacted for a dark site (`DIAGNOSTICS.md`).
 
 ## 2. Context
 
 ```mermaid
+%%{init: {"theme": "base", "fontFamily": "Arial, Helvetica, sans-serif", "themeVariables": {"fontSize": "15px"}, "flowchart": {"htmlLabels": false, "padding": 32, "nodeSpacing": 40, "rankSpacing": 50}}}%%
 flowchart LR
     op["Operator<br/>(browser)"] -- "loopback + token" --> om
     p2["Second person<br/>(signs G2, G3, G4)"] -- "same interface" --> om
@@ -42,6 +43,7 @@ OpenMove contacts the OpenStack service endpoints from the catalogue and nothing
 ## 4. Layers and modules
 
 ```mermaid
+%%{init: {"theme": "base", "fontFamily": "Arial, Helvetica, sans-serif", "themeVariables": {"fontSize": "15px"}, "flowchart": {"htmlLabels": false, "padding": 32, "nodeSpacing": 40, "rankSpacing": 50}}}%%
 flowchart TB
     gui["Interface<br/>resources/web (index.html, app.js, styles.css)"]
     srv["Local server and routes<br/>server.py, __main__.py"]
@@ -68,11 +70,13 @@ flowchart TB
 |---|---|---|
 | Interface | `openmove/resources/web/` | The pages. Calls the local routes with the per-run token. No cloud access of its own. |
 | Server | `server.py`, `__main__.py` | A `ThreadingHTTPServer` on loopback. Holds `AppState` (what has been read: platform, inventory, checks, selection, the engine). Routes are plain functions `api_*(state, body, query)`. |
-| Engine | `engine/` | `runner.py` decides what comes next for each volume; `plan.py` holds the checks and builds the dry run; `actions.py` is the only code that sends a change; `evidence.py` writes the per-volume evidence. |
+| Engine | `engine/` | `runner.py` decides what comes next for each volume; `plan.py` holds the checks and builds the dry run; `actions.py` is the only code that sends a change; `evidence.py` writes the per-volume evidence; `staged.py` runs the staged method for class C. |
 | Rules | `lifecycle.py`, `wizard.py`, `safety.py`, `selection.py`, `risk.py`, `classification.py`, `handling.py`, `backends.py`, `phase0.py` | The order of a migration, the gated wizard, the permit and the halt, what is selected and with which settings, workload risk, volume classes, the cause and steps for every volume that is not moved, the back-end families and the support matrix (`resources/backends.json`), and the Phase 0 lab tests with their recorded results (`resources/phase0_tests.json`). |
 | Checks and reports | `checks/`, `audit.py`, `reports/` | The check catalogue and the gate, the environment audit, the report documents (`build.py`: pre-migration, audit, not migrated, update and after), the comparison of every volume with its before-state (`after.py`), the Word writer (`docx.py`) and the Excel and CSV writer (`sheet.py`, standard library only). |
 | Reading | `discovery.py`, `inventory.py`, `releases.py`, `profiles.py`, `exports.py` | Detect the release and back-ends, read volumes, snapshots and instances, import the playbook's query results when the database is not reachable. |
-| Connectors | `connectors/` | Every network call goes through here. Keystone v3, the catalogue, paging, one re-authentication on a 401. The password lives in memory only. |
+| Connectors | `connectors/` | Every network call goes through here. Keystone v3, the catalogue, paging, one re-authentication on a 401 (`openstack.py`); SSH to the migration host and the Cinder host with the system OpenSSH client, keys only, pinned host keys (`ssh.py`). The password lives in memory only. |
+| Hosts and arrays | `hosts.py`, `server_hosts.py`, `arrays/`, `resources/mover/` | The host registry and its readiness checks; the data mover and the Cinder helper that run on the hosts; the array adapters (`lvm` only). See `MOVER.md`. |
+| Diagnostics | `diag.py`, `redact.py` | The log, the trace of every host call, support bundles, redaction for dark sites. See `DIAGNOSTICS.md`. |
 | Journal | `journal.py` | SQLite in WAL mode with `synchronous=FULL`. Two tables: `events` and `steps`. |
 | Packaging | `Dockerfile`, `tools/build/` | The container image (standard library only, listens inside the container, data in the volume `/data`) and the Windows program. See `INSTALL.md`. |
 | Demo and lab | `demo/`, `lab/` | A mock cloud with made-up data, and the link to a real OpenStack on the same machine (section 10). |
@@ -89,6 +93,7 @@ flowchart TB
 Class A and B volumes follow the retype order:
 
 ```mermaid
+%%{init: {"theme": "base", "fontFamily": "Arial, Helvetica, sans-serif", "themeVariables": {"fontSize": "15px"}, "flowchart": {"htmlLabels": false, "padding": 32, "nodeSpacing": 40, "rankSpacing": 50}}}%%
 stateDiagram-v2
     [*] --> precheck
     precheck --> validate: gate approved
@@ -103,11 +108,12 @@ stateDiagram-v2
     done --> [*]
 ```
 
-A staged order (`precheck, validate, copy, sync, recheck, cutover, ...`) is defined in `lifecycle.py` for class C and is used by the demonstration. The engine does not run it.
+Class C follows the staged order (`precheck, validate, copy, sync, recheck, cutover, postcheck, soak, done`) defined in `lifecycle.py`. `engine/staged.py` runs it: the copy and the sync go to the data mover, the cutover is a fixed list of steps (lock, rollback clone, reconcile, freeze, record, verify record, sync fields, switch, wait), and rollbacks R1, R2 and R3 undo it. The per-volume state is kept in the journal, so a restart carries on from the step it stopped at.
 
 The calls of one real move, in order:
 
 ```mermaid
+%%{init: {"theme": "base", "fontFamily": "Arial, Helvetica, sans-serif", "themeVariables": {"fontSize": "15px"}, "flowchart": {"htmlLabels": false, "padding": 32, "nodeSpacing": 40, "rankSpacing": 50}}}%%
 sequenceDiagram
     participant R as Engine (tick)
     participant P as Permit
@@ -157,6 +163,7 @@ Cinder copies the data and Nova switches the guest in one operation that OpenMov
 ## 7. Safety architecture
 
 ```mermaid
+%%{init: {"theme": "base", "fontFamily": "Arial, Helvetica, sans-serif", "themeVariables": {"fontSize": "15px"}, "flowchart": {"htmlLabels": false, "padding": 32, "nodeSpacing": 40, "rankSpacing": 50}}}%%
 flowchart LR
     call["A change"] --> perm{"Permit.check()"}
     perm -->|"release validated?"| a["profiles"]
@@ -219,6 +226,7 @@ The files hold cloud answers (ids, states, sizes). They never hold a password or
 The nine steps are not just tabs. `wizard.steps()` computes, from the state the server holds, which step is done and which is open, and `/api/status` returns it. The page draws it and cannot open a step the server did not open.
 
 ```mermaid
+%%{init: {"theme": "base", "fontFamily": "Arial, Helvetica, sans-serif", "themeVariables": {"fontSize": "15px"}, "flowchart": {"htmlLabels": false, "padding": 32, "nodeSpacing": 40, "rankSpacing": 50}}}%%
 flowchart LR
     c["Connect"] --> p["Platform"] --> i["Inventory"] --> a["Audit"] --> f["Pre-flight<br/>gate approved"]
     f --> s["Select<br/>selection confirmed<br/>(run id + volume ids)"]
@@ -261,17 +269,15 @@ The lab shortcuts exist in lab mode only and say so in the journal. A failed che
 | Self-containment (`test_self_contained`) | No third-party import. |
 | The real lab (`OpenMove-Lab.bat`) | The engine's calls and polling against a real Cinder and Nova. Manual. |
 
-Run the automated tests with `python -m unittest discover -s tests -t .`. There are 307 of them. A mock proves the logic and the safety rules; it cannot prove how a Queens cloud behaves. The lab proves behaviour against a recent release, and it already found four things the mock did not (`LAB.md`).
+Run the automated tests with `python -m unittest discover -s tests -t .`. There are over 400 of them. A mock proves the logic and the safety rules; it cannot prove how a Queens cloud behaves. The lab proves behaviour against a recent release, and it already found four things the mock did not (`LAB.md`).
 
 ## 13. What is not built
 
 | Gap | Effect |
 |---|---|
-| Class C engine (staged copy, history rebuild, record swap) | Class C volumes are held back with the cause `no_data_mover`. |
-| Data mover host, SSH, database access, array adapters | The checks that need them say "not checked". |
+| Array adapters for SolidFire and FlashArray (only `lvm` is built, `arrays/lvm.py`) | Class C moves run on LVM back-ends (the lab and the fake fabric); on a real array pair the adapter is the first thing to write, against the arrays. |
+| Direct database access | The checks that need the Cinder database say "not checked" and take the playbook's query results instead; the Cinder helper uses Cinder's own object layer, not SQL. |
 | Container image and own Linux image | Run from source, or the packaged program built on the target operating system. |
-| Lab tests T1 to T21 as guided procedures | People run them from the playbook. |
-| After report and before/after comparison | The not-migrated report and the evidence folder exist. |
 | Authentication and roles for the interface | Anyone with the token has full use. |
 
 ## 14. Where to start reading the code

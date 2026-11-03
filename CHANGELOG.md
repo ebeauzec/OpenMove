@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.9.0 (2026-11-03)
+
+### Added
+- The class C staged method with the data mover, the Cinder helper and SSH; automatic setup of a migration host from an address and an administrator login, including its iSCSI and multipath paths; the deployment guide and self-check; a larger lab catalogue
+- Class C: the staged method (`engine/staged.py`): precheck, validate, copy, sync, two rechecks 300 seconds apart, cutover, postcheck, soak. G2, G3 and G4 are signed by a second person. A detached volume is switched with Cinder's migration completion; an attached volume with a Nova volume swap. Rollbacks R1 (abort), R2 (undo the cutover) and R3 (reverse). The state of each volume is kept in the journal, so a restart carries on.
+- The data mover (`resources/mover/mover.py`, Python 3.6 or later, standard library only) and the Cinder helper (`resources/mover/cinder_helper.py`), placed and checked on the hosts by the tool itself
+- SSH with the system OpenSSH client: keys only, OpenMove's own key, host keys pinned by a person, every call traced (`connectors/ssh.py`)
+- The Hosts tab: register a migration host and a Cinder host, show the public key, pin host keys, run the host checks H1 to H9, C1 and C2
+- An `lvm` array adapter (`arrays/lvm.py`) and a fake fabric (`demo/fake_fabric.py`) so the whole method runs without arrays
+- Diagnostics for dark sites (`diag.py`, `docs/DIAGNOSTICS.md`): a full log and a trace of every host call, a support bundle with a checksum manifest that is written by itself on a halt or an unexpected error, and redaction at three levels with a local-only token map (`redact.py`; `--bundle` and `--decode` on the command line)
+- Lab: the two lab hosts (the DevStack distro and a separate data-mover distro) are made, started, registered and checked by `openmove/lab/hosts.py` without a terminal; `tools/lab/lab_staged.py` drives a real class C move
+- README rewritten with the operations, the steps and links to every document; diagrams no longer clip their text
+- Set up a host from OpenMove: the Hosts tab takes the address and the administrator login of a plain Linux machine; OpenMove logs in once with the password (`ssh.RootLogin`, through `SSH_ASKPASS`, never stored or logged), after a person pinned the host key, runs `prepare_host.sh`, reads the Cinder interpreter, sets up the storage paths with the new `configure_storage.sh` (iSCSI initiator, CHAP, multipath drop-in for Pure FlashArray and SolidFire, logins, rescan; Fibre Channel port names), registers the host under the service account, proves the key-only login and runs the host checks; routes `POST /api/hosts/probe` and `POST /api/hosts/setup`; journal event `host_setup`; SAFETY rows 51 to 53; `tests/test_bootstrap.py`; the lab command `python tools/lab/lab.py fresh-host` makes a bare host to try it on. Proven in the lab on a bare host, also through the interface; the iSCSI logins and multipath maps are not proven (WSL shares one kernel)
+- Deployment for class A, B and C (`docs/DEPLOYMENT.md`): a host setup script (`resources/deploy/prepare_host.sh`: account, packages, key, narrow sudo rights, sshd; safe to run again; `--check` changes nothing), shown on the Hosts tab and by `--host-setup`; a self-check of an installation (`--self-check`, `selfcheck.py`) that also runs in the packaged program and the container image; the container image now holds the SSH client; the packaged program names every class C module
+- Lab: `OpenMove-Lab.bat` now also restarts units that failed at boot, waits for the compute service and starts the guests that should run, then prepares both lab hosts; a second, larger catalogue of every class (`OpenMove-Lab.bat more`: 12 more detached, attached, boot and paused class A volumes, 6 detached and 3 attached class C volumes with 1 to 8 snapshots, more class D and E cases); `tools/lab/lab_staged.py reverse`
+- Documents: `docs/MOVER.md`, `docs/DIAGNOSTICS.md`; safety rows 46 to 50
+
+### Fixed
+- Found in the lab: an attached volume was cut over while its guest and compute service were down (Nova still said ACTIVE); the guest's power state and the compute service are now checked before the swap (N4)
+- R2 checks that the source is back in its status from before the freeze before it says the volume is as it was
+- Found in the lab: the Nova volume swap was sent with `volume_id` instead of `volumeId` and real Nova refused it (the rollback R2 ran by itself); the mock now validates the body
+- Found in the lab: the Cinder helper refused a source volume that OpenMove had itself frozen; the engine refused to start again on a volume left frozen in the middle of a rollback
+- A secret written into free text (`password=...`, a bearer token) is redacted
+- The data mover works on Windows as well (process check, file replacement)
+
 ## 0.8.0 (2026-11-03)
 
 ### Added

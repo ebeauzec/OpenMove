@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Eugene Beauzec and Obi1 - FZCO. All Rights Reserved.
 # Proprietary software; see LICENSE.
-"""Fill the OpenMove lab cloud with test objects, or remove them.   python tools/lab/seed.py [seed|clean|list]
+"""Fill the OpenMove lab cloud with test objects, or remove them.   python tools/lab/seed.py [seed|more|clean|list]
 
 This is lab tooling, not part of the application: it creates things in the LAB cloud (a real OpenStack on this machine, see
 docs/LAB.md) with its own small client. It refuses to run against an address that is not local, so it cannot be pointed at a customer
@@ -19,6 +19,20 @@ Volumes, grouped by what the engine should do with them:
   lab-e-multiattach  a multi-attach volume                                           class E: held back
   lab-e-encrypted    an encrypted volume                                             class E: held back
   lab-t-on-target-*  volumes already on the target back-end (pure-sim)               not admitted: already on the target
+
+`more` adds a second, larger set on top of the first (it grows the two volume groups first, see grow_volume_groups):
+  lab-a2-detached-*  12 plain volumes, 1 to 4 GiB, all types                             class A
+  lab-a2-image-*     3 bootable volumes with data                                         class A
+  lab-a2-attached-*  4 volumes on two running servers (two volumes per server)           class A: one instance, two volumes
+  lab-a2-boot-*      2 boot volumes of running servers                                    class A
+  lab-a2-paused-1    attached to a paused server                                          class A (a paused guest is allowed)
+  lab-c-snap-*       6 detached volumes with 1 to 4 snapshots, one of 2 GiB               class C
+  lab-c-wide-1       one volume with 8 snapshots                                          class C (many snapshots)
+  lab-c-att-*        3 attached volumes with 1 snapshot each on one running server        class C attached (forced snapshots)
+  lab-d-stopped-*    3 more on a stopped server; lab-d-suspended-1 on a suspended one    class D
+  lab-e-*            a second multi-attach and encrypted volume, one in status error, one with migration_status migrating   class E
+  lab-t-on-target-*  two more on the target                                               not admitted
+Class B has no volume of its own: with the APIs only, any volume with snapshots is class C; import a churn export to see class B (docs/LAB.md).
 """
 import json
 import sys
@@ -205,6 +219,117 @@ def seed(c):
     show(c)
 
 
+def grow_volume_groups(src_gib=220, tgt_gib=260):
+    """The two volume groups sit on sparse backing files on loop devices (60 GiB each at first). The larger catalogue needs more room, and a class C move needs
+    room on the target for the volume and every snapshot. Growing is online and does not touch the data; the files stay sparse."""
+    from openmove.lab import hosts as lab_hosts
+    script = chr(10).join(["set -e",
+                        "for spec in sf-sim:%d pure-sim:%d; do" % (src_gib, tgt_gib),
+                        "  be=${spec%%:*}; gib=${spec##*:}; f=/opt/stack/data/stack-volumes-$be-backing-file",
+                        "  cur=$(( $(stat -c %s $f) / 1073741824 ))",
+                        "  if [ $cur -lt $gib ]; then truncate -s ${gib}G $f; dev=$(losetup -j $f | cut -d: -f1); losetup -c $dev; pvresize $dev >/dev/null; echo grown $be to ${gib}G; fi",
+                        "done",
+                        "vgs --noheadings -o vg_name,vg_size,vg_free | sed 's/^/volume group: /'", ""])
+    rc, out, err = lab_hosts.run(lab.load_config().get("wsl_distro") or lab.DISTRO, script, timeout=300)
+    print((out or err).strip())
+    if rc != 0:
+        raise SystemExit("could not grow the volume groups: %s" % (err or out).strip())
+
+
+def wait_for_capacity(c, need_gib=150, timeout=240):
+    """Cinder learns the size of a volume group from the back-end's periodic report (every 60 seconds). Volumes made before that are refused with 'no valid
+    backend'; found the first time the larger set was made, right after the groups were grown."""
+    end = time.time() + timeout
+    while time.time() < end:
+        pools = c.call("GET", "volumev3", "/scheduler-stats/get_pools?detail=true")["pools"]
+        free = {p["name"].split("@")[-1].split("#")[0]: float(p["capabilities"].get("free_capacity_gb") or 0) for p in pools}
+        if free.get(SRC, 0) >= need_gib and free.get(TGT, 0) >= need_gib:
+            print("Cinder sees the new capacity: %s" % ", ".join("%s %.0f GiB free" % kv for kv in sorted(free.items())))
+            return
+        time.sleep(10)
+    raise SystemExit("Cinder still reports the old capacity after %d seconds; try again in a minute" % timeout)
+
+
+def seed_more(c):
+    """A second, larger set (see the top of this file). Additive: it refuses when it has already been made."""
+    vols, srvs = existing(c)
+    if not vols:
+        raise SystemExit("make the first set first:  seed.py seed")
+    if any(v["name"].startswith("lab-c-snap-") for v in vols):
+        raise SystemExit("the larger set exists already; run  seed.py clean  to remove everything")
+    grow_volume_groups()
+    wait_for_capacity(c)
+    ensure_quota(c)
+    types = ensure_types(c)
+    images = c.call("GET", "image", "/v2/images?status=active")["images"]
+    image = next((i["id"] for i in images if "cirros" in i["name"].lower()), images[0]["id"] if images else None)
+    flavor = next(f["id"] for f in c.call("GET", "compute", "/flavors")["flavors"] if f["name"] == "m1.tiny")
+    nets = c.call("GET", "network", "/v2.0/networks")["networks"]
+    net = next((n["id"] for n in nets if n["name"] == "private"), nets[0]["id"])
+    cycle = ("sf-sim", "sf-gold", "sf-bulk")
+
+    print("creating the volumes ...")
+    sizes = (1, 1, 2, 2, 3, 1, 2, 1, 3, 2, 1, 4)
+    ids = [new_volume(c, "lab-a2-detached-%d" % (i + 1), s, cycle[i % 3]) for i, s in enumerate(sizes)]
+    ids += [new_volume(c, "lab-a2-image-%d" % (i + 1), 1, cycle[i], image) for i in range(3)]
+    att = [new_volume(c, "lab-a2-attached-%d" % (i + 1), 1 + i % 2, cycle[i % 3]) for i in range(4)]
+    boots = [new_volume(c, "lab-a2-boot-%d" % (i + 1), 1, cycle[i], image) for i in range(2)]
+    paused_vol = new_volume(c, "lab-a2-paused-1", 1, "sf-sim")
+    csnap = [new_volume(c, "lab-c-snap-%d" % (i + 1), 2 if i == 5 else 1, cycle[i % 3]) for i in range(6)]
+    wide = new_volume(c, "lab-c-wide-1", 1, "sf-sim")
+    catt = [new_volume(c, "lab-c-att-%d" % (i + 1), 1, cycle[i]) for i in range(3)]
+    stopped = [new_volume(c, "lab-d-stopped-%d" % (i + 3), 1, "sf-sim") for i in range(3)]
+    susp = new_volume(c, "lab-d-suspended-1", 1, "sf-sim")
+    e_vols = [new_volume(c, "lab-e-multiattach-2", 1, "sf-multiattach")]
+    if "sf-encrypted" in types:
+        e_vols.append(new_volume(c, "lab-e-encrypted-2", 1, "sf-encrypted"))
+    e_err = new_volume(c, "lab-e-error-1", 1, "sf-sim")
+    e_mig = new_volume(c, "lab-e-migrating-1", 1, "sf-sim")
+    on_tgt = [new_volume(c, "lab-t-on-target-%d" % (i + 3), 1, TGT) for i in range(2)]
+    c.wait_volumes(ids + att + boots + [paused_vol] + csnap + [wide] + catt + stopped + [susp] + e_vols + [e_err, e_mig] + on_tgt)
+
+    print("snapshotting ...")
+    snaps = []
+    for i, vid in enumerate(csnap):
+        for k in range((1, 2, 3, 4, 2, 1)[i]):
+            snaps.append(c.call("POST", "volumev3", "/snapshots", {"snapshot": {"volume_id": vid, "name": "lab-c-snap-%d-%d" % (i + 1, k + 1), "force": True}})["snapshot"]["id"])
+    for k in range(8):
+        snaps.append(c.call("POST", "volumev3", "/snapshots", {"snapshot": {"volume_id": wide, "name": "lab-c-wide-1-%d" % (k + 1), "force": True}})["snapshot"]["id"])
+    for sid in snaps:
+        c.wait("snapshot " + sid, lambda s=sid: c.call("GET", "volumev3", "/snapshots/" + s)["snapshot"]["status"], ("available",))
+
+    print("booting servers ...")
+    more = [new_server(c, "lab-srv-more-%d" % (i + 1), net, flavor, image) for i in range(3)]
+    boot_srv = [new_server(c, "lab-srv-boot-more-%d" % (i + 1), net, flavor, boot_volume=b) for i, b in enumerate(boots)]
+    off = new_server(c, "lab-srv-off-3", net, flavor, image)
+    pau = new_server(c, "lab-srv-paused-1", net, flavor, image)
+    sus = new_server(c, "lab-srv-susp-1", net, flavor, image)
+    wait_servers(c, more + boot_srv + [off, pau, sus])
+    print("attaching ...")
+    for sid, vid in zip((more[0], more[0], more[1], more[1]), att):
+        attach(c, sid, vid)
+    for vid in catt:
+        attach(c, more[2], vid)
+        snaps.append(c.call("POST", "volumev3", "/snapshots", {"snapshot": {"volume_id": vid, "name": "lab-c-att-snap", "force": True}})["snapshot"]["id"])
+    for sid in snaps[-len(catt):]:
+        c.wait("snapshot " + sid, lambda s=sid: c.call("GET", "volumev3", "/snapshots/" + s)["snapshot"]["status"], ("available",))
+    for vid in stopped:
+        attach(c, off, vid)
+    attach(c, pau, paused_vol)
+    attach(c, sus, susp)
+    c.call("POST", "compute", "/servers/%s/action" % off, {"os-stop": None})
+    c.call("POST", "compute", "/servers/%s/action" % pau, {"pause": None})
+    c.call("POST", "compute", "/servers/%s/action" % sus, {"suspend": None})
+    wait_servers(c, [off], "SHUTOFF")
+    wait_servers(c, [pau], "PAUSED")
+    wait_servers(c, [sus], "SUSPENDED")
+    print("setting the edge cases ...")
+    c.call("POST", "volumev3", "/volumes/%s/action" % e_err, {"os-reset_status": {"status": "error"}})
+    c.call("POST", "volumev3", "/volumes/%s/action" % e_mig, {"os-reset_status": {"migration_status": "migrating"}})   # seen as a move in flight: class E
+    print("done")
+    show(c)
+
+
 def clean(c):
     vols, srvs = existing(c)
     for s in srvs:
@@ -236,10 +361,10 @@ def show(c):
 
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else "list"
-    if cmd not in ("seed", "clean", "list"):
+    if cmd not in ("seed", "more", "clean", "list"):
         raise SystemExit(__doc__)
     c = Cloud(lab.load_config())
-    {"seed": seed, "clean": clean, "list": show}[cmd](c)
+    {"seed": seed, "more": seed_more, "clean": clean, "list": show}[cmd](c)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ OpenMove is one Python program that uses the standard library only. It starts a 
 |---|---|---|
 | Source (Windows, macOS, Linux) | Python 3.9 or later | Tested (Python 3.12 on Windows) |
 | A packaged program (`OpenMove.exe` or `OpenMove`) | Nothing; Python is inside it | Built by a script; not yet run on a clean machine; not code-signed |
-| A container or its own Linux image | | **Not built** |
+| A container or its own Linux image | | **Not built** (the `Dockerfile` is written, with the SSH client for class C; it has not been built because Docker was off) |
 
 ## 2. Requirements
 
@@ -132,7 +132,15 @@ The container prints the link with the token; open it on the machine that runs D
 
    The last lines read `Ran 307 tests` and `OK`.
 
-3. Connect to your cloud on the Connect tab and press *Detect version and back-ends* on the Platform tab. You should see the OpenStack release, the back-ends and the Cinder services. A new release shows **Read only**. That is correct.
+3. Run the self-check. It reads only this machine and says whether everything for class A, B and C is present (the data mover, the Cinder helper, the SSH client, the data folder). A packaged program and a container image are checked the same way (`OpenMove.exe --self-check`, `docker run --rm openmove --self-check`):
+
+   ```bash
+   python -m openmove --self-check
+   ```
+
+   Hosts for class C are prepared separately: see [DEPLOYMENT](DEPLOYMENT.md).
+
+4. Connect to your cloud on the Connect tab and press *Detect version and back-ends* on the Platform tab. You should see the OpenStack release, the back-ends and the Cinder services. A new release shows **Read only**. That is correct.
 
 ## 6. Where OpenMove keeps its files
 

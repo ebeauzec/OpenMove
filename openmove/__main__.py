@@ -33,6 +33,72 @@ def open_browser(url, say):
     threading.Timer(0.4, go).start()
 
 
+def deployment(a):
+    """--self-check and --host-setup: no server, no browser."""
+    from . import paths
+    from . import selfcheck
+    if a.lab:
+        from . import lab as lab_mod
+        home = lab_mod.home_dir()
+    else:
+        if a.home:
+            os.environ["OPENMOVE_HOME"] = a.home
+        home = paths.app_home()
+    if a.host_setup:
+        from . import server_hosts
+        out = Path(a.out or ".") / "prepare_host.sh"
+        out.write_text(server_hosts.setup_script(), encoding="utf-8", newline="\n")
+        print("Wrote %s. Copy it to the host and run:" % out)
+        print()
+        print("  " + server_hosts.setup_command(home, a.host_setup))
+        return 0
+    rows = selfcheck.run(home)
+    width = max(len(r["name"]) for r in rows)
+    for r in rows:
+        print("%-5s %-*s  %s" % (r["status"], width, r["name"], r["detail"]))
+    bad = [r for r in rows if r["status"] == "FAIL"]
+    print()
+    print("%s: %d check(s), %d failed, %d warning(s)" % ("NOT READY" if bad else "Ready", len(rows), len(bad), sum(1 for r in rows if r["status"] == "WARN")))
+    return 1 if bad else 0
+
+
+def support(a):
+    """--bundle and --decode: no server, no browser. They work on the data folder of a run, also when the program is stopped."""
+    from . import diag as diag_mod
+    from . import paths
+    if a.lab:
+        from . import lab as lab_mod
+        home = lab_mod.home_dir()
+    else:
+        if a.home:
+            os.environ["OPENMOVE_HOME"] = a.home
+        home = paths.app_home()
+    if a.decode:
+        value = diag_mod.decode(home, a.decode)
+        if value is None:
+            print("This data folder has no token %r." % a.decode, file=sys.stderr)
+            return 1
+        print(value)
+        return 0
+    from . import hosts as hosts_mod
+    from .connectors import ssh
+    from .journal import Journal
+    d = diag_mod.Diag(home)
+    d.attach()
+    j = Journal(Path(home) / "journal.db")
+    try:
+        hs = [] if a.no_remote else [ssh.Host(h, home) for h in hosts_mod.load(home)]
+        res = d.bundle(j, extras={"hosts": {"registry": hosts_mod.view(home)}}, level=a.redact, remote=not a.no_remote, reason="requested on the command line", hosts=hs,
+                       out_dir=a.out)
+    finally:
+        j.close()
+    print("Support bundle written: %s" % res["path"])
+    print("Redaction: %s. Files: %d. Size: %d bytes." % (res["redaction"], res["files"], res["bytes"]))
+    if res["redaction"] != "none":
+        print("The map from token to the real value stays in %s; it is not in the bundle." % (Path(home) / "diag" / "redaction-map.json"))
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="openmove", description="OpenMove %s" % __version__)
     ap.add_argument("--demo", action="store_true",
@@ -48,7 +114,24 @@ def main(argv=None):
     ap.add_argument("--allow-host", action="append", default=[],
                     help="extra Host header value to accept, for example the name used behind a container port mapping")
     ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--bundle", action="store_true", help="write a support bundle (everything needed to find a fault) and exit; add --redact to hide customer data")
+    ap.add_argument("--redact", choices=("none", "standard", "strict"), default=None, help="with --bundle: how much of the data to replace with tokens (default: the setting, usually standard)")
+    ap.add_argument("--no-remote", action="store_true", help="with --bundle: do not collect from the registered hosts")
+    ap.add_argument("--out", help="with --bundle: the folder to write the bundle to (default: bundles in the data folder)")
+    ap.add_argument("--host-setup", metavar="ROLE", choices=("mover", "cinder", "both"),
+                    help="print the command that prepares a host for a role (mover, cinder or both) with OpenMove's key filled in, and write prepare_host.sh next to it; no server is started")
+    ap.add_argument("--self-check", action="store_true", help="check that this installation holds everything class A, B and C need (program files, data mover, Cinder helper, SSH client, data folder) and exit")
+    ap.add_argument("--askpass", action="store_true", help=argparse.SUPPRESS)       # called by ssh during a host setup: prints the password OpenMove put in its environment
+    ap.add_argument("--decode", metavar="TOKEN", help="say which value a redaction token stands for (uses this site's token map) and exit")
     a = ap.parse_args(argv)
+    if a.askpass:
+        from .connectors import ssh
+        sys.stdout.write(os.environ.get(ssh.PASSWORD_ENV, "") + "\n")
+        return 0
+    if a.bundle or a.decode:
+        return support(a)
+    if a.self_check or a.host_setup:
+        return deployment(a)
     if a.list_scenarios:
         from .demo import scenarios
         for s in scenarios.listing():
@@ -89,6 +172,13 @@ def main(argv=None):
             state.journal.close()
             print(str(e), file=sys.stderr)
             return 2
+        try:                                        # the migration host and the Cinder host of the lab, set up without a terminal
+            from .lab import hosts as lab_hosts
+            made = lab_hosts.prepare(state)
+            print("Lab hosts: %s" % ("registered at %s; %s" % (made["address"], made["why"]) if made["ready"] is None else "ready; class C can be moved" if made["ready"] else "registered, not ready: %s" % made["why"]), flush=True)
+        except Exception as e:                      # class C stays held back; the reason is in the log and the bundle
+            state.diag.exception("preparing the lab hosts", e)
+            print("Lab hosts: could not be prepared, class C stays held back (%s). Details are in the log." % e, flush=True)
     port = server.server_address[1]
     shown = "127.0.0.1" if a.host in ("0.0.0.0", "::") else a.host
     url = "http://%s:%d/?token=%s" % (shown, port, state.token)

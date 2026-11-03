@@ -30,6 +30,8 @@ One page for everything that can be chosen in OpenMove: how it is started, what 
 | `--home <folder>` | the user data folder | Where the journal and evidence are kept |
 | `--allow-host <name>` | none | An extra name clients may use in the address (behind a container port mapping or a reverse proxy). Repeatable |
 | `--no-browser` | off | Print the link, do not open the browser |
+| `--self-check` | off | Check that this installation holds everything class A, B and C need and exit (`DEPLOYMENT.md`) |
+| `--host-setup ROLE` | off | Write `prepare_host.sh` (to `--out`, default the current folder) and print the command that runs it, with OpenMove's key filled in; ROLE is `mover`, `cinder` or `both` |
 
 ### Environment variables
 
@@ -85,7 +87,7 @@ The scenario can also be switched on the page; doing so forgets everything read 
 |---|---|---|
 | Source back-end | any back-end found in step 2 | Where the volumes are now |
 | Target back-end | any back-end found in step 2 | Where they go. Volumes already there are not admitted |
-| What OpenMove can reach | **The OpenStack APIs only** (default), or **APIs, hosts and arrays** | With the APIs only, class A and B are moved by Cinder and class C is held back with the cause "No data mover". With hosts and arrays class C may be admitted (the staged method, not built) |
+| What OpenMove can reach | **The OpenStack APIs only** (default), or **APIs, hosts and arrays** | With the APIs only, class A and B are moved by Cinder and class C is held back with the cause "No data mover". With hosts registered and their checks passed (the Hosts tab) class C is admitted and moved by the staged method (built; proven on LVM only) |
 | Attest | per check | A named person states a warning or not-checked item was checked, with the evidence |
 | Sign as operator, Sign as reviewer | two different names | Both signatures are needed |
 | Record lab validation (gate G0) | two different people, at least 40 characters of evidence | Lifts the read-only state of a release that has no recorded validation |
@@ -105,7 +107,7 @@ They start at their defaults. A value outside its limits is refused, never chang
 | Setting | Default (real) | Default (demo) | Limits | Effect |
 |---|---|---|---|---|
 | Volumes at once (`concurrency`) | 8 | 16 | 1 to 32 | How many volumes are moved at the same time. Lower is gentler on production |
-| Copy rate cap, MB/s per host (`rate_cap_mb_s`) | 200 | 600 | 10 to 2000 | For the staged method (not built); kept for it |
+| Copy rate cap, MB/s per host (`rate_cap_mb_s`) | 200 | 600 | 10 to 2000 | For the staged method: the data mover slows a copy to this rate (`rate_mbps` on a host entry sets it for one host) |
 | Rechecks before cutover (`rechecks`) | 2 | 2 | 2 to 5 | Passed rechecks in a row before a cutover (staged method). Two is the minimum of the process |
 | Minutes between rechecks (`recheck_gap_min`) | 5 | 5 | 5 to 120 | Staged method. Five is the minimum |
 | Soak period, days (`soak_days`) | 7 | 7 | 1 to 90 | How long the source is kept untouched after the move. A reverse needs it. One day is the minimum |

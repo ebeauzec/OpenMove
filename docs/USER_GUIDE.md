@@ -34,7 +34,9 @@ OpenMove runs on Windows, macOS and Linux. It contacts the OpenStack cloud you g
 
 **To move class A and B volumes (this version):** the same administrator account is enough, with the APIs only. A change is allowed only when the release has a recorded lab validation (gate G0), the pre-flight gate is approved, and a second person has signed G2 and G3 for each volume. Nothing is installed on any host.
 
-**To move class C volumes (not built):** the administrator account is not enough. That method also needs facts and actions that the OpenStack API does not offer:
+**To set up a migration host or a Cinder host:** give OpenMove the address and the administrator login of a plain Linux machine on the customer network (Hosts tab, **Set up a new host from here**). OpenMove logs in once with the password, installs its own key, prepares the host, sets up the iSCSI or Fibre Channel paths you describe, registers the host and checks it (`DEPLOYMENT.md`, section 4.1). The password is not kept.
+
+**To move class C volumes (Hosts tab, `MOVER.md`):** the administrator account is not enough. That method also needs facts and actions that the OpenStack API does not offer:
 
 | Needed | For |
 |---|---|
@@ -150,7 +152,7 @@ The header shows the connection state, the version and the **HALT** button. A th
 |---|---|---|
 | A | No snapshots. | Cinder's retype (OpenMove moves it). |
 | B | Snapshots that rotate away within the window. | Wait for them to rotate, then Cinder's retype. Needs the snapshot history from the database. |
-| C | Long-lived snapshots, or snapshots whose rotation is not known (no database access). | Staged migration. **Not built**: held back with the cause "No data mover" and steps to resolve it. |
+| C | Long-lived snapshots, or snapshots whose rotation is not known (no database access). | Staged migration through a migration host and a Cinder host (built; proven on LVM only). Without them: held back with the cause "No data mover" and steps to resolve it. |
 | D | Attached to an instance that is not `ACTIVE` or `PAUSED`. | After the instance runs, or after an administrator locks and detaches it. |
 | E | Cinder's own image-cache volume, encrypted, multiattach, in a group, replicated, in an unusable state, mid-migration, or with a bad array volume id. | Not handled by this method. Listed for a separate plan. |
 

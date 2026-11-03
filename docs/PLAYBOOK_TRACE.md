@@ -23,7 +23,7 @@ The playbook is the authority. `MIGRATION_METHOD.md` is the working summary. Thi
 | Phase 0: the lab tests T1 to T22 as guided, recorded procedures | **built** as a guide and a record (a person runs each test); gate G0 can be recorded from the results |
 | Phase 3 (retype of class A and B) and rollback R3 as actions that change the cloud | **built, lab-proven** (`openmove/engine`): detached, attached and boot volumes, the way back, and the failures listed in `LAB.md`. Never run on a customer cloud. |
 | Phase 4 (class B) as the engine's wait for snapshots to rotate away | **built** against the mock cloud; the lab has no rotating snapshots yet |
-| Phase 5 (class C) and the rollbacks R1, R2 as actions that change the cloud | **not built**. The demo simulates them. Class C needs a data mover and the arrays. |
+| Phase 5 (class C) and the rollbacks R1, R2 as actions that change the cloud | **Built** (`engine/staged.py`), run against the real lab on LVM back-ends. **Not built**: the SolidFire and FlashArray adapters; nothing has run on those arrays or on Queens. |
 | Per-volume gate sign-offs G2, G3, G4 by a second person | built (see "Gaps that matter") |
 | Anything run against a customer cloud or a real array | **never done** |
 
@@ -98,18 +98,18 @@ OpenMove adds, around these steps: validate (G2 and G3 by a second person), hold
 | 5.1.3 | Before state, Appendix E 1 to 6 | Report | **Built** (partly) |
 | 5.1.4 | Sizes in bytes and GiB | S1 | **Check only** |
 | 5.2 | Map Cinder snapshots to source-array snapshots | V7 | **Check only** |
-| 5.3 | Clone each snapshot, log in on the migration host | Rules only (S2) | **Not built** |
-| 5.4 | Create the staging volume | Rules only (S1) | **Not built** |
-| 5.5 | Copy the chain, take named snapshots, compare | The copy rules are built (images compared, ids match). The copy is not. | **Not built** |
-| 5.6 | Create the destination record (Appendix B), rename | C1, C2 | **Not built** |
-| 5.7 | Reconcile the chain, repeat until the diff is empty | Rechecks must reconcile; X3 | **Built** (rule), the loop **not built** |
-| 5.8 | Freeze: lock, rollback clone, record fields, field sync | C3, C4 | **Not built** |
-| 5.9a | Attached: Nova swap, watch the block job | Simulated | **Not built** |
-| 5.9b | Detached: final clone, completion call | Simulated | **Not built** |
+| 5.3 | Clone each snapshot, log in on the migration host | The data mover on the migration host (`lv.*` verbs), S2 | **Built**, lab-proven on LVM (not on SolidFire or FlashArray) |
+| 5.4 | Create the staging volume | The data mover creates a tagged volume sized for the volume and every snapshot, S1 | **Built**, lab-proven on LVM (not on SolidFire or FlashArray) |
+| 5.5 | Copy the chain, take named snapshots, compare | A copy job per image; the target image is hashed and compared before the volume leaves the copy phase | **Built**, lab-proven on LVM (not on SolidFire or FlashArray) |
+| 5.6 | Create the destination record (Appendix B), rename | The Cinder helper (`record-create`, `record-delete`) with Cinder's own object layer; C1, C2 | **Built**, lab-proven on LVM (not on SolidFire or FlashArray) |
+| 5.7 | Reconcile the chain, repeat until the diff is empty | Sync copies only the chunks that differ; two rechecks 300 seconds apart; X3 | **Built**, lab-proven on LVM (not on SolidFire or FlashArray) |
+| 5.8 | Freeze: lock, rollback clone, record fields, field sync | The cutover steps `lock, rollback_clone, reconcile, freeze, record, verify_record, sync_fields`; C3, C4 | **Built**, lab-proven on LVM (not on SolidFire or FlashArray) |
+| 5.9a | Attached: Nova swap, watch the block job | `PUT os-volume_attachments` with `volumeId`; the engine follows `migration_status` and the post-check; a guest that is not running or a compute service that is down stops the volume before the swap | **Built**, lab-proven on LVM (not on SolidFire or FlashArray). Guest IO and the pivot time are not measured |
+| 5.9b | Detached: final clone, completion call | Final copy, compare, `os-migrate_volume_completion` | **Built**, lab-proven on LVM (not on SolidFire or FlashArray). Run end to end on the real lab with a volume with one snapshot; the data compared identical |
 | 5.9c | Class D, detach and re-attach | Class D is held | **Not built** |
 | 5.10 | Post-cutover validation, G4 | X4 to X7 and the post-check rule | **Check only** |
-| 5.11 | Unlock, file the after state | Simulated | **Not built** |
-| 5.12 | Cleanup after the soak, per batch | Soak at least 1 day (default 7) is enforced before "done". The cleanup itself, the backend removal (5.12.4) and the quota check (5.12.5) are not built. | **Built** (soak rule), cleanup **not built** |
+| 5.11 | Unlock, file the after state | The `wait` step and the post-check; the evidence file | **Built**, lab-proven on LVM (not on SolidFire or FlashArray) |
+| 5.12 | Cleanup after the soak, per batch | Soak at least 1 day (default 7) is enforced before "done". The cleanup of the staging volumes, the clones and the source snapshots runs after the soak, by name and origin (fake fabric; the soak of days was not waited out in the lab). The backend removal (5.12.4) and the quota check (5.12.5) are not built. | **Built** (soak rule and cleanup), backend removal **not built** |
 
 ## Rollbacks and recovery
 
@@ -117,9 +117,10 @@ OpenMove adds, around these steps: validate (G2 and G3 by a second person), hold
 |---|---|---|
 | R3 (the way back after G4) for class A and B | A retype back to the original type, with the instance locked first, a name and a reason, inside the soak | **Built, lab-proven** |
 | R3 on a failed post-check or a silently undone retype | The engine rolls back by itself and records why | **Built, lab-proven** |
-| R1, R2 | Class C only. A rolled-back state exists in the lifecycle and in the reports. No rollback action. | **Not built** |
-| 18.1 stuck block job | Halt, X4. No recovery action. | **Not built** |
-| 18.2 completion fails | Halt. No recovery action. | **Not built** |
+| R1, R2 | Class C only. R1 aborts before the cutover; R2 unfreezes, deletes the destination record, removes the staging volume and the clones, and unlocks. | **Built**; R2 run against real Cinder in the lab, R1 in the fake fabric |
+| R3 for class C | The reverse of a finished class C move | **Built**, fake fabric only |
+| 18.1 stuck block job | The swap is waited for up to 6 hours (`SWITCH_TIMEOUT`); then the engine halts, writes a support bundle and waits for a person. No automatic recovery after the swap was sent. | **Halt only** |
+| 18.2 completion fails | Once the completion was sent the engine does not roll back by itself (the source may already be gone from Cinder's view); it halts for a person with a support bundle. Before it was sent, R2 runs. | **Halt only** after the completion; R2 before |
 | 18.3 compute host fails | Halt | **Not built** |
 | Section 14 failure modes | Each one has a cause code, a description and proposed steps in the not-migrated report | **Built** (reporting) |
 
@@ -174,7 +175,7 @@ The lab (`LAB.md`) is a DevStack on a development machine with two LVM back-ends
 
 ## Gaps that matter
 
-1. **Class C.** The engine for classes A and B exists and has run in the lab. Class C (the staged method with a data mover, hosts and arrays) is not built; every "Not built" row above is class C or Phase 0.
+1. **Class C.** The engine for classes A, B and C exists and has run in the lab. Class C has not run on SolidFire or FlashArray (the adapters are not written and there are no arrays) or on Queens; the "Not built" rows above are that, the compute-host steps and Phase 0 on the customer's cloud.
 2. **Per-volume gates G2, G3, G4.** Now built (see the gates table). What stays open: G3 sits at the entry of the cutover phase until the engine separates the freeze from the swap.
 3. **Internal-tenant volumes (step 1.7).** The image-cache volume is found and held back; other volumes of Cinder's internal project are not looked for.
 4. **`provider_id` repair (step 1.9).** Found, not repaired.

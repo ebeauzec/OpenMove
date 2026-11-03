@@ -17,6 +17,8 @@ class SelfContainedTests(unittest.TestCase):
         std = set(sys.stdlib_module_names)
         bad = []
         for py in (ROOT / "openmove").rglob("*.py"):
+            if py.name == "cinder_helper.py":
+                continue    # runs inside the Cinder host's own Python, on that host, and uses Cinder's own modules; see docs/MOVER.md
             for node in ast.walk(ast.parse(py.read_text(encoding="utf-8"))):
                 names = []
                 if isinstance(node, ast.Import):

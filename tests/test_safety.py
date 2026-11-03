@@ -216,7 +216,7 @@ class SourceScanTests(unittest.TestCase):
 
     def test_only_the_client_names_write_methods(self):
         root = Path(__file__).resolve().parents[1] / "openmove"
-        allowed = {"connectors/httpclient.py", "connectors/openstack.py", "safety.py"}
+        allowed = {"connectors/httpclient.py", "connectors/openstack.py", "safety.py", "engine/actions.py"}   # actions.py: the only code that sends a change, always through a permit
         bad = []
         for py in root.rglob("*.py"):
             rel = py.relative_to(root).as_posix()

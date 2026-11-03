@@ -13,6 +13,7 @@ OpenMove reads an OpenStack cloud, reports on it, and moves Cinder volumes from 
 The wizard is **gated**. A step opens only when every step before it is done. A locked step is greyed out with "(locked)", clicking it says what is missing, and the Next button stays off until the current step is done. The server decides which step is open, not the page, so reloading the page or opening a link such as `/#preflight` cannot skip a step.
 
 ```mermaid
+%%{init: {"theme": "base", "fontFamily": "Arial, Helvetica, sans-serif", "themeVariables": {"fontSize": "15px"}, "flowchart": {"htmlLabels": false, "padding": 32, "nodeSpacing": 40, "rankSpacing": 50}}}%%
 flowchart LR
     S1["1 Connect<br/>log in to the cloud"] --> S2["2 Platform<br/>release and back-ends"]
     S2 --> S3["3 Inventory<br/>volumes and classes"]
@@ -59,6 +60,7 @@ Two different people are needed for a real migration. OpenMove checks the names;
 | **Application owner** | Checks that the application works after a move, before G4 | n/a (outside the tool) |
 
 ```mermaid
+%%{init: {"theme": "base", "fontFamily": "Arial, Helvetica, sans-serif", "themeVariables": {"fontSize": "15px"}, "flowchart": {"htmlLabels": false, "padding": 32, "nodeSpacing": 40, "rankSpacing": 50}}}%%
 sequenceDiagram
     autonumber
     participant O as Operator
@@ -119,6 +121,7 @@ sequenceDiagram
 **What OpenMove does.** Reads volumes, snapshots and instance states with read calls only. Each volume gets a **class**:
 
 ```mermaid
+%%{init: {"theme": "base", "fontFamily": "Arial, Helvetica, sans-serif", "themeVariables": {"fontSize": "15px"}, "flowchart": {"htmlLabels": false, "padding": 32, "nodeSpacing": 40, "rankSpacing": 50}}}%%
 flowchart TD
     V["A volume"] --> Q1{"Not available or in-use, migrating,<br/>image-cache, encrypted, multi-attach,<br/>in a group, replicated, bad provider id?"}
     Q1 -->|yes| E["Class E<br/>left alone, with a cause"]
@@ -128,7 +131,7 @@ flowchart TD
     Q3 -->|no| A["Class A<br/>moved by Cinder's retype"]
     Q3 -->|yes| Q4{"Do the snapshots rotate away<br/>within the window?"}
     Q4 -->|yes| B["Class B<br/>wait for rotation, then retype"]
-    Q4 -->|no or unknown| C["Class C<br/>needs the staged method<br/>(not built): held back"]
+    Q4 -->|no or unknown| C["Class C<br/>moved by the staged method<br/>through a migration host"]
 ```
 
 `CLASSES.md` has the exact rules and the cause shown for each held-back volume.
@@ -209,13 +212,14 @@ In the demonstration, one button attests and signs for made-up people. In lab mo
 
 ## 10. Step 7: Move
 
-This is the only step that changes the cloud. It moves class A and B volumes with **Cinder's own retype** and needs only the OpenStack APIs. (Class C volumes are held back with a cause; the staged method for them is not built.)
+This is the only step that changes the cloud. It moves class A and B volumes with **Cinder's own retype** and needs only the OpenStack APIs. (Class C volumes are moved by the staged method when a migration host and a Cinder host are registered and pass their checks, `MOVER.md`; otherwise they are held back with a cause.)
 
 ![Step 7, Move: waiting for the second person](images/13-move-waiting-second-person.png)
 
 ### What happens to each volume
 
 ```mermaid
+%%{init: {"theme": "base", "fontFamily": "Arial, Helvetica, sans-serif", "themeVariables": {"fontSize": "15px"}, "flowchart": {"htmlLabels": false, "padding": 32, "nodeSpacing": 40, "rankSpacing": 50}}}%%
 stateDiagram-v2
     [*] --> precheck
     precheck --> validate: checks pass
@@ -234,6 +238,7 @@ stateDiagram-v2
 The calls for an attached volume, in order:
 
 ```mermaid
+%%{init: {"theme": "base", "fontFamily": "Arial, Helvetica, sans-serif", "themeVariables": {"fontSize": "15px"}, "flowchart": {"htmlLabels": false, "padding": 32, "nodeSpacing": 40, "rankSpacing": 50}}}%%
 sequenceDiagram
     participant E as OpenMove engine
     participant N as Nova

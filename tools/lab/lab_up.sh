@@ -21,5 +21,15 @@ vgchange -ay >/dev/null 2>&1
 for unit in $(systemctl list-unit-files --no-legend 'devstack*' | awk '{print $1}'); do
   case "$unit" in *c-vol*) systemctl restart "$unit" 2>/dev/null || true ;; *) systemctl start "$unit" 2>/dev/null || true ;; esac
 done
+# a unit can fail when it starts before the database, the queue or libvirt are ready (seen after a power loss: nova-compute failed 17 seconds after the boot and
+# stayed failed); give the base services time, then restart whatever failed, up to four times
+for round in 1 2 3 4; do
+  sleep 8
+  failed=$(systemctl list-units --state=failed --no-legend 'devstack*' | awk '{print $2}')
+  [ -z "$failed" ] && break
+  echo "restarting failed units (round $round): $(echo $failed | tr '
+' ' ')"
+  for unit in $failed; do systemctl reset-failed "$unit" 2>/dev/null; systemctl restart "$unit" 2>/dev/null || true; done
+done
 systemctl is-active mysql rabbitmq-server apache2 libvirtd iscsid 2>/dev/null | paste -sd' ' | sed 's/^/services: /'
 vgs --noheadings -o vg_name,vg_size,vg_free 2>/dev/null | sed 's/^/volume group: /'

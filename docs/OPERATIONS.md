@@ -28,10 +28,21 @@ Do these first. None needs OpenMove except the first.
 | 4 | **Project quotas** for the target type are large enough. | A retype can fail on a quota. |
 | 5 | A **backup of the Cinder database** is taken and a restore proven (check P10). With the APIs only this is an attestation by a named person. | The first thing needed if something goes wrong that OpenMove cannot see. |
 | 6 | A **maintenance window** is agreed and the owners of attached volumes are told. | The instance is locked for the duration of its move. |
-| 7 | **Snapshots**: volumes with snapshots are class C with API-only access. Do not expect the engine to move them. | The staged method is not built. |
+| 7 | **Snapshots**: volumes with snapshots are class C. They are moved by the staged method through a **migration host** and a **Cinder host**: register both on the Hosts tab, add OpenMove's public key to each, pin the host keys, and run the host checks until they pass (`MOVER.md`). Without them, class C volumes are held back. | The staged method needs the data mover and the Cinder helper. |
 | 8 | **Workloads that may break**: look at the Select tab's workload risk panel. Legacy Windows, clusters and databases are flagged. | A high-risk volume is not moved unless two people clear it with evidence. |
 | 9 | Decide the **settings**: hold before the cutover (leave on), soak days (7 or more), concurrency (start low), stop after N failures. | They can only be made stricter than the process minimums. |
 | 10 | **Back up the OpenMove data folder** if a previous run left records you need. | `INSTALL.md` section 6. |
+
+### Class C: what to prepare in addition
+
+| # | Check | Why |
+|---|---|---|
+| C-1 | A **migration host** (Linux, Python 3.6 or later, root or passwordless sudo) that sees the storage of **both** back-ends, and a **Cinder host** (the machine that runs `cinder-volume` for them). One machine may be both. | The data mover copies from array to array there; the Cinder helper creates and removes records there. |
+| C-2 | OpenMove's **public key** (shown on the Hosts tab) is in `authorized_keys` of the SSH user on each host. No password is ever used. | Keys only (`MOVER.md`, section 2). |
+| C-3 | A person **compares the host key fingerprint** with the host's own and pins it (Check host key). | A changed key later refuses the connection. |
+| C-4 | The **host checks** (H1 to H9, C1, C2) all pass for the chosen pair of back-ends; the data mover is placed by the check. | A failed check keeps class C volumes out of the run. |
+| C-5 | Free space on the target: **size x (1 + number of snapshots)** per volume. | The staging volume holds the volume and every snapshot image. |
+| C-6 | **Support bundle settings** are decided (Diagnostics tab): the level of redaction the site needs, and a person knows how to carry a bundle out (`DIAGNOSTICS.md`). | If anything goes wrong, the data to fix it is already on the machine. |
 
 ## 3. Start of the day
 
