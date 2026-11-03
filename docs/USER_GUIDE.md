@@ -131,8 +131,8 @@ The simulated migration uses made-up evidence and a virtual clock, but the real 
 | **4. Audit** | Press *Run the audit*. | A full audit of the environment, with findings ranked by severity. |
 | **5. Pre-flight** | Choose the source and target back-end and press *Run all pre-flight checks*. Attest open items and sign. | Runs every check, shows the gate and the copy plan. |
 | **6. Select** | Choose which volumes migrate, by volume or by group, and look at the settings. Clear or mark workloads that may break. | Shows what is selected and why anything is not. Refuses what is not allowed. |
-| **7. Move** | Run the dry run, then the real run; sign G2, G3 and G4 as a second person; reverse a volume. | Moves class A and B volumes with Cinder's retype. Nothing is sent before the dry run is looked at, the release has a recorded lab validation (gate G0), the gate is approved and a second person has signed G2 and G3. |
-| **8. Reports** | Enter the customer and your name, choose what to include, press a button. | Builds a Word report and your browser saves it. Includes *Volumes not migrated*. |
+| **7. Move** | Run the dry run, then the real run (optionally inside a run window); sign G2, G3 and G4 as a second person; reverse a volume, or preview and reverse the whole run; work through the **Phase 0 lab tests** and record gate G0 from them. | Moves class A and B volumes with Cinder's retype. Nothing is sent before the dry run is looked at, the release has a recorded lab validation (gate G0), the gate is approved and a second person has signed G2 and G3. |
+| **8. Reports** | Enter the customer and your name, choose what to include, press a button. | Builds a Word report (pre-migration, audit, volumes not migrated, **update report and after report** that compare every moved volume with its before-state) or the **volume list as Excel or CSV**, and your browser saves it. |
 | **9. Live** | Watch. | Shows progress, the order, the gate, the halt, the events and the volumes not migrated. |
 | **Journal** | Read. | Lists what OpenMove recorded. |
 

@@ -15,6 +15,7 @@ import hashlib
 import secrets
 from datetime import datetime, timezone
 
+from .. import backends
 from .. import risk as risk_mod
 from . import catalogue
 from ..classification import FINAL_MIGRATION_STATES, OK_INSTANCE_STATES, PROVIDER_RE
@@ -116,8 +117,21 @@ def platform_checks(platform, source_backend=None, target_backend=None):
                         "A service of a back-end is down or disabled; the back-end still has one that is up.")
 
     # P4 .. P8, P10, P12, P14, P15 need access OpenMove does not have yet
-    for cid in ("P3", "P4", "P5", "P6", "P7", "P10", "P11", "P12", "P14", "P15"):
+    for cid in ("P4", "P5", "P6", "P7", "P10", "P11", "P12", "P14", "P15"):
         out[cid] = waiting(cid)
+
+    # P3: is each back-end a known family, and has the pair been verified (the support matrix, R8)? The driver variant and the array API
+    # version still need the Cinder host and the array, so a known pair stays a warning that a person attests.
+    if not source_backend or not target_backend:
+        out["P3"] = waiting("P3", "Choose the source and the target back-end first.")
+    elif not platform.get("backends"):
+        out["P3"] = waiting("P3", "The back-end pools could not be read (administrator access needed).")
+    else:
+        a = backends.assess(platform, source_backend, target_backend)
+        out["P3"] = rec("P3", a["status"], "Target driver variant and array API version supported", a["evidence"],
+                        "A back-end OpenMove does not know is unsupported and nothing is attempted on it." if a["status"] == "fail" else
+                        "The pair is known. The driver variant and the array API version are not read without the Cinder host and the array; "
+                        "a named person attests them. The support matrix is docs/SUPPORT_MATRIX.md.")
 
     # P8: propose how the existing Cinder hosts could run the copy (R12), but do not call the check passed
     out["P8"] = waiting("P8", copy_plan_text(platform, source_backend, target_backend) +

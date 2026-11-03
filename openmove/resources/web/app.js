@@ -276,8 +276,8 @@
       ['Compute', (p.compute.version_id || '-') + ' (' + (p.compute.min || '?') + ' to ' + (p.compute.max || '?') + ')  ' + (p.compute.endpoint || '')],
       ['TLS verification', p.tls_verification ? 'on' : 'OFF']]));
     v.appendChild(el('h3', { text: 'Storage back-ends (' + p.backends.length + ')' }));
-    if (p.backends.length) v.appendChild(table(['Pool', 'Back-end', 'Vendor', 'Driver version', 'Protocol', 'Total GiB', 'Free GiB'],
-      p.backends.map(function (b) { return [b.pool, b.backend, b.vendor, b.driver_version, b.protocol, b.total_gb, b.free_gb]; })));
+    if (p.backends.length) v.appendChild(table(['Pool', 'Back-end', 'Family', 'Vendor', 'Driver version', 'Protocol', 'Total GiB', 'Free GiB'],
+      p.backends.map(function (b) { return [b.pool, b.backend, b.family || 'unsupported (unknown)', b.vendor, b.driver_version, b.protocol, b.total_gb, b.free_gb]; })));
     else v.appendChild(el('p', { class: 'muted', text: 'None reported (needs an administrator account).' }));
     v.appendChild(el('h3', { text: 'Block storage services (' + p.cinder_services.length + ')' }));
     if (p.cinder_services.length) v.appendChild(table(['Binary', 'Host', 'Zone', 'Status', 'State'],
@@ -967,7 +967,25 @@
   });
   $('mv-start').addEventListener('click', function () {
     var by = window.prompt('Start the real run. Volumes are changed in the cloud.' + String.fromCharCode(10, 10) + 'Your name:'); if (!by || by.trim().length < 3) return;
-    guard($('mv-start'), function () { return api('POST', 'engine/start', { by: by.trim(), type_map: typeMap() }).then(function (m) { drawMove(m); banner('ok', 'The run has started. Nothing is sent for a volume until G2 and G3 are signed by a second person.'); }); });
+    guard($('mv-start'), function () { return api('POST', 'engine/start', { by: by.trim(), type_map: typeMap(), start_at: $('mv-from').value.trim(), stop_at: $('mv-until').value.trim() }).then(function (m) { drawMove(m); banner('ok', 'The run has started. Nothing is sent for a volume until G2 and G3 are signed by a second person.'); }); });
+  });
+  $('mv-rev-preview').addEventListener('click', function () {
+    guard($('mv-rev-preview'), function () {
+      return api('POST', 'engine/reverse', { preview: true }).then(function (d) {
+        var v = $('mv-dry-view'); clear(v);
+        v.appendChild(el('h3', { text: 'What putting the whole run back would do (nothing was changed)' }));
+        v.appendChild(el('p', { class: 'muted', text: d.note }));
+        if (!d.volumes.length) v.appendChild(el('p', { text: 'No volume has been cut over, so there is nothing to put back.' }));
+        d.volumes.forEach(function (r) {
+          v.appendChild(el('p', {}, [el('strong', { text: r.id + ': ' }), document.createTextNode(r.can ? r.calls.map(function (c) { return c.what + ' (undo: ' + c.undo + ')'; }).join('; ') : r.why)]));
+        });
+      });
+    });
+  });
+  $('mv-rev-all').addEventListener('click', function () {
+    var by = window.prompt('Put every cut-over volume of this run back with a retype to its first type. Read the preview first.' + String.fromCharCode(10, 10) + 'Your name:'); if (!by) return;
+    var why = window.prompt('Reason (at least 8 characters):'); if (!why) return;
+    guard($('mv-rev-all'), function () { return api('POST', 'engine/reverse', { all: true, by: by.trim(), reason: why.trim() }).then(drawMove); });
   });
   $('mv-stop').addEventListener('click', function () { guard($('mv-stop'), function () { return api('POST', 'engine/stop', {}).then(drawMove); }); });
   $('mv-refresh').addEventListener('click', loadMove);
@@ -982,6 +1000,43 @@
     guard($('mv-validate'), function () {
       return api('POST', 'validation', { by: by.trim(), second: second.trim(), evidence: ev.trim(), passed: true, environment: 'test' })
         .then(function (r) { banner('ok', 'Recorded the lab validation of ' + r.release + '. Run the pre-flight again.'); return refreshStatus(); });
+    });
+  });
+  // ---- Phase 0 lab tests ----
+  function drawPhase0(d) {
+    var v = $('p0-view'), s = d.summary;
+    $('p0-count').textContent = '(' + s.passed + ' of ' + s.required + ' required passed' + (s.failed ? ', ' + s.failed + ' failed' : '') + ')';
+    v.innerHTML = '';
+    d.tests.forEach(function (t) {
+      var res = t.result === 'not run' ? (t.required ? 'not run' : 'not required') : t.result;
+      var box = el('details', { class: 'p0-test' }, [
+        el('summary', {}, [el('strong', { text: t.id + '  ' }), document.createTextNode(t.title + ' - '), el('span', { class: 'p0-' + t.result.replace(' ', '-'), text: res })]),
+        el('p', {}, [el('strong', { text: 'Proves: ' }), document.createTextNode(t.proves)]),
+        el('p', {}, [el('strong', { text: 'Passes when: ' }), document.createTextNode(t.pass)]),
+        el('p', {}, [el('strong', { text: 'How: ' }), document.createTextNode(t.how)])]);
+      if (t.by) box.appendChild(el('p', { class: 'muted', text: 'Recorded by ' + t.by + ' on ' + (t.at || '').slice(0, 10) + ': ' + (t.evidence || '') }));
+      if (t.required) {
+        var b = el('button', { class: 'secondary', text: 'Record the result of ' + t.id });
+        b.addEventListener('click', function () { recordPhase0(t, b); });
+        box.appendChild(b);
+      }
+      v.appendChild(box);
+    });
+  }
+  function loadPhase0() { return api('GET', 'phase0').then(drawPhase0).catch(function () { $('p0-count').textContent = '(read the platform first)'; }); }
+  function recordPhase0(t, btn) {
+    var by = window.prompt('Test ' + t.id + ': ' + t.title + String.fromCharCode(10, 10) + 'Your name:'); if (!by) return;
+    var result = (window.prompt('Result: type pass or fail') || '').trim().toLowerCase(); if (!result) return;
+    var ev = window.prompt('What you did and what you saw (at least 40 characters):'); if (!ev) return;
+    guard(btn, function () { return api('POST', 'phase0/record', { test: t.id, result: result, by: by.trim(), evidence: ev.trim() }).then(drawPhase0); });
+  }
+  $('p0-box').addEventListener('toggle', function () { if ($('p0-box').open) loadPhase0(); });
+  $('p0-g0').addEventListener('click', function () {
+    var by = window.prompt('Gate G0 from the Phase 0 results. Your name:'); if (!by) return;
+    var second = window.prompt('The second person (a different person):'); if (!second) return;
+    guard($('p0-g0'), function () {
+      return api('POST', 'validation', { by: by.trim(), second: second.trim(), from_tests: true, environment: 'test' })
+        .then(function (r) { banner('ok', 'Recorded the lab validation of ' + r.release + ' from the Phase 0 results. Run the pre-flight again.'); return refreshStatus(); });
     });
   });
   $('live-table').addEventListener('click', function (e) {
@@ -1015,6 +1070,10 @@
   $('rep-before').addEventListener('click', function () { downloadReport('before', $('rep-before')); });
   $('rep-audit-only').addEventListener('click', function () { downloadReport('audit', $('rep-audit-only')); });
   $('rep-unmigrated').addEventListener('click', function () { downloadReport('unmigrated', $('rep-unmigrated')); });
+  $('rep-update').addEventListener('click', function () { downloadReport('update', $('rep-update')); });
+  $('rep-after').addEventListener('click', function () { downloadReport('after', $('rep-after')); });
+  $('rep-xlsx').addEventListener('click', function () { downloadReport('volumes_xlsx', $('rep-xlsx')); });
+  $('rep-csv').addEventListener('click', function () { downloadReport('volumes_csv', $('rep-csv')); });
 
   // ---- sortable tables: click a column header; click again to reverse ----
   // Works on every table with a header row, including tables drawn later. The chosen sort is kept when a table is redrawn

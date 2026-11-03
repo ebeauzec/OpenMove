@@ -133,3 +133,7 @@ tr.clickrow { cursor: pointer; } tr.clickrow:hover { background: var(--surface);
 .inline-form { border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; margin: 8px 0; background: var(--info-bg); }
 .signs { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 10px 0; }
 @media (max-width: 640px) { main { padding: 10px; } .sub { display: none; } }
+details.box { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; background: var(--surface); }
+details.p0-test { border: 1px solid var(--border); border-radius: 6px; margin: 6px 0; padding: 6px 10px; }
+details.p0-test p { margin: 6px 0; }
+.p0-pass { color: var(--ok, #1a7f37); font-weight: 600; } .p0-fail { color: var(--bad, #b42318); font-weight: 600; } .p0-not-run { color: var(--muted, #6b7280); }

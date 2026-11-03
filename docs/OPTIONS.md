@@ -35,7 +35,7 @@ One page for everything that can be chosen in OpenMove: how it is started, what 
 
 | Variable | Meaning |
 |---|---|
-| `OPENMOVE_HOME` | Same as `--home` |
+| `OPENMOVE_HOME` | Same as `--home` (the container image sets it to `/data`) |
 | `OPENMOVE_LAB_DIR` | Where the lab's `lab.json` and `lab-secret.json` are (default `C:\OpenMoveLab`) |
 | `OPENMOVE_BUILD_DIR`, `OPENMOVE_DIST_DIR` | For building the packaged program on a synced folder (`INSTALL.md`) |
 
@@ -123,6 +123,7 @@ A volume that hosts something that may break (a legacy Windows server, no guest 
 | Target volume type | The volume type to move to. Empty means the only type that matches the target back-end, if there is exactly one |
 | 1. Dry run (changes nothing) | Reads the cloud again and lists the exact calls and their undo for each volume. Required before a real run |
 | 2. Start the run | Needs your name. Needs a permit now: release validated, gate approved and fresh, no halt |
+| Run window opens, closes (UTC) | Optional. Outside the window no new volume is taken and no retype is sent; what is already moving carries on and is watched. Empty means no limit. A window that ends before it starts is refused |
 | Stop taking new volumes | The run finishes the volumes in flight and takes no new ones. It does not abort a retype that was sent |
 | Refresh | Reads the state again (the page also refreshes by itself) |
 | Record lab validation (G0) | As in step 5 |
@@ -130,6 +131,10 @@ A volume that hosts something that may break (a legacy Windows server, no guest 
 | Release all for the retype | Lets the volumes held after G2 and G3 go |
 | Sign G4 | A second person, per volume, after the post-check passed and the owner has checked the application |
 | Reverse (per volume) | Puts a volume back with a retype back to its original type, locking its instance first. Needs a name and a reason |
+| Preview: put the whole run back | Reads the cloud and lists, for every cut-over volume, the calls a reverse would make and their undo. Changes nothing |
+| Put the whole run back | Reverses every cut-over volume of the run, each journaled and checked on its own. Needs a name and a reason |
+| Phase 0: the lab tests | The playbook's tests T1 to T22 and OpenMove's M1 to M4 as guided procedures. Per test: Record the result (pass or fail, your name, what you did and saw, at least 40 characters). The newest result counts |
+| Record gate G0 from these results | Two different people. Refused unless every test of the retype path has passed for this release. Tests of the staged method are listed but not required |
 | HALT (always visible) | Stops all changes at once. Needs a name and a reason. Resume needs a name and a reason |
 
 ## 8. Step 8: Reports
@@ -139,7 +144,7 @@ A volume that hosts something that may break (a legacy Windows server, no guest 
 | Customer or system name | Printed on the title page and in the footer. A demonstration report says it is synthetic |
 | Prepared by | Your name |
 | Include the environment audit | In the pre-migration report |
-| Reports | Pre-migration (needs the pre-flight), Environment audit (needs the audit), Volumes not migrated (needs the pre-flight) |
+| Reports | Pre-migration (needs the pre-flight), Environment audit (needs the audit), Volumes not migrated (needs the pre-flight), Update report and After report (need a run), Volume list as Excel or CSV (needs the inventory) |
 
 ## 9. Gates and signatures at a glance
 
@@ -159,6 +164,7 @@ A volume that hosts something that may break (a legacy Windows server, no guest 
 | Retype time limit 6 hours | A retype running longer halts the engine for a person to look |
 | Class B wait limit 72 hours | A class B volume that is still holding snapshots after this is given up |
 | Undone-retype grace 30 seconds | A volume back to normal and not on the target this long after the retype call counts as a retype that Cinder silently undid, and is rolled back |
+| Back-end families | `openmove/resources/backends.json`: SolidFire, Pure FlashArray, ONTAP, Ceph and LVM are recognised from what the Cinder driver reports. A back-end that matches none is unsupported (check P3 fails). A known pair nobody verified is a warning. See `SUPPORT_MATRIX.md` |
 | Nova microversion 2.9 | Needed to see whether an instance is locked; an instance whose lock state cannot be read is never touched |
 | Soak minimum 1 day, rechecks minimum 2 times 5 minutes | The floors of the process |
 | Interface on the local machine | The page listens on `127.0.0.1` only unless `--host` says otherwise, and every call needs the token printed at start |

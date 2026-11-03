@@ -99,6 +99,20 @@ The result is in `dist/`: `OpenMove.exe` (or `OpenMove`) and the launchers. Copy
 | Synced folders | If the repository is on a cloud drive (Google Drive, OneDrive), the build can fail with "permission denied". Set `OPENMOVE_BUILD_DIR` and `OPENMOVE_DIST_DIR` to a local folder first. |
 | Signing | The program is not code-signed. Some antivirus products warn about it. Sign it with your own certificate if the customer requires that. |
 | Checking | Start it with `--demo` on a clean machine before you rely on it. This has not been done yet. |
+| Other systems | The whole test suite has been run on Windows and on Linux (Ubuntu). macOS has not been run. |
+
+### As a container
+
+The repository has a `Dockerfile`. The image holds the program only (the Python standard library; nothing is installed from a package index) and runs as a normal user. It has no data mover and no migration host tools: the retype method needs only the OpenStack APIs.
+
+```bash
+docker build -t openmove .
+docker run --rm -p 127.0.0.1:8765:8765 -v openmove-data:/data openmove
+```
+
+The container prints the link with the token; open it on the machine that runs Docker. The journal and the evidence are in the volume `/data`: keep it, it is the record of the migration. Publish the port on `127.0.0.1` as above; the page listens on all addresses inside the container, and anyone who reaches the port and has the token has full rights (section 7). Behind a reverse proxy add the name clients use: `docker run ... openmove --allow-host openmove.example.com`.
+
+**Status.** The image has been written but **not built or run yet** (the Docker engine on the development machine was not running). Build it and run `--demo` first: `docker run --rm -p 127.0.0.1:8765:8765 openmove --demo`.
 
 ## 5. Check the installation
 
@@ -116,7 +130,7 @@ The result is in `dist/`: `OpenMove.exe` (or `OpenMove`) and the launchers. Copy
    python -m unittest discover -s tests -t .
    ```
 
-   The last lines read `Ran 275 tests` and `OK`.
+   The last lines read `Ran 307 tests` and `OK`.
 
 3. Connect to your cloud on the Connect tab and press *Detect version and back-ends* on the Platform tab. You should see the OpenStack release, the back-ends and the Cinder services. A new release shows **Read only**. That is correct.
 

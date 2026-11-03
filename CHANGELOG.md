@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0 (2026-11-03)
+
+### Added
+- Reports: the update report and the after report compare every volume the run touched with the state recorded before its cutover, each difference marked expected or unexpected; the volume list as Excel and CSV (standard library only)
+- Back-end families and the support matrix as data (`resources/backends.json`, `docs/SUPPORT_MATRIX.md`); check P3 fails for a back-end it does not know and warns for a pair nobody verified
+- Phase 0 lab tests T1 to T22 and four OpenMove tests as guided procedures, a recorded result per test, and gate G0 recordable from the results only when every test of the retype path has passed
+- A run window (UTC start and stop); a preview of a reverse; putting the whole run back
+- `Dockerfile` and `.dockerignore` (written, not built), `docs/NETWORK.md` with a test that every connection-opening module is named, `docs/COVERAGE.md` (the tool against the requirements and the proposal)
+- Lab failure injection recorded: an instance locked by a tenant, HALT during an attached move, the Cinder API and the Cinder volume service stopped during a move
+- The full test suite passes on Linux (Ubuntu) as well as Windows
+
 ## 0.7.0 (2026-11-03)
 
 ### Added

@@ -444,3 +444,85 @@ class PlanTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WindowAndReverseAllTests(EngineCase):
+    """Run window (R3: when) and the whole-run reverse with a preview (R6: see it before it runs)."""
+
+    def moved(self, vids):
+        for vid in vids:
+            self.run_until(vid, "validate")
+            self.sign(vid, "G2", "G3")
+        for vid in vids:
+            self.run_until(vid, "postcheck")
+
+    def test_nothing_is_taken_or_sent_before_the_window_opens(self):
+        opens = self.now + timedelta(hours=2)
+        self.engine.start(ids=[V1], thread=False, window=(opens, None))
+        for _ in range(4):
+            self.engine.tick()
+        self.assertIsNone(self.phase(V1))                              # not even taken from the queue
+        self.assertEqual(self.cloud.posts, [])
+        self.assertFalse(self.engine.view()["window"]["open"])
+        self.now = opens + timedelta(minutes=1)
+        self.run_until(V1, "validate")
+        self.sign(V1, "G2", "G3")
+        self.run_until(V1, "postcheck")
+
+    def test_a_volume_ready_when_the_window_closes_waits_for_the_next_one(self):
+        closes = self.now + timedelta(hours=1)
+        self.engine.start(ids=[V1], thread=False, window=(None, closes))
+        self.run_until(V1, "validate")
+        self.sign(V1, "G2", "G3")
+        self.now = closes + timedelta(minutes=5)
+        for _ in range(3):
+            self.engine.tick()
+        self.assertEqual(self.phase(V1), "validate")
+        self.assertEqual(self.cloud.posts, [])
+        self.assertIn("run window", self.engine.notes[V1])
+
+    def test_a_window_that_ends_before_it_starts_is_refused(self):
+        with self.assertRaises(EngineError):
+            self.engine.start(ids=[V1], thread=False, window=(self.now + timedelta(hours=2), self.now + timedelta(hours=1)))
+
+    def test_the_preview_of_a_reverse_changes_nothing_and_lists_the_calls(self):
+        self.start([V1, V2])
+        self.moved([V1, V2])
+        posts = len(self.cloud.posts)
+        pv = self.engine.reverse_preview()
+        self.assertEqual(len(self.cloud.posts), posts)
+        by_id = {r["id"]: r for r in pv["volumes"]}
+        self.assertTrue(all(r["can"] and r["to_type"] == "fast" for r in by_id.values()))
+        self.assertEqual([c["step"] for c in by_id[V1]["calls"]], ["retype"])
+        self.assertEqual([c["step"] for c in by_id[V2]["calls"]], ["lock", "retype", "unlock"])      # the attached one is locked around it
+        self.assertEqual(self.phase(V1), "postcheck")                                                # still where it was
+
+    def test_a_volume_that_was_never_cut_over_cannot_be_reversed_or_previewed_as_reversible(self):
+        self.start([V1])
+        self.run_until(V1, "validate")
+        self.assertEqual(self.engine.reversible(), [])
+        self.assertFalse(self.engine.reverse_preview([V1])["volumes"][0]["can"])
+        with self.assertRaises(EngineError):
+            self.engine.reverse_all("the application owner asked for all of it back", "Olive Operator")
+
+    def test_reversing_the_whole_run_puts_every_cut_over_volume_back(self):
+        self.start([V1, V2])
+        self.moved([V1, V2])
+        ids = self.engine.reverse_all("the change window was cancelled by the owner", "Olive Operator")
+        self.assertEqual(set(ids), {V1, V2})
+        self.run_until(V1, "done", 20)
+        self.run_until(V2, "done", 20)
+        for vid in (V1, V2):
+            v = self.vol(vid)
+            self.assertEqual((v["volume_type"], v["os-vol-host-attr:host"]), ("fast", "ctl@sf-1#pool"))
+        self.assertFalse(self.cloud.servers[0]["locked"])
+
+
+class WindowTextTests(unittest.TestCase):
+    def test_the_window_times_are_read_as_utc_and_a_bad_one_is_refused(self):
+        from openmove import server
+        self.assertEqual(server._when("2026-11-07T22:00:00Z", "start_at"), datetime(2026, 11, 7, 22, 0, tzinfo=timezone.utc))
+        self.assertEqual(server._when("2026-11-07T22:00", "start_at"), datetime(2026, 11, 7, 22, 0, tzinfo=timezone.utc))
+        self.assertIsNone(server._when("", "start_at"))
+        with self.assertRaises(ValueError):
+            server._when("tomorrow evening", "stop_at")

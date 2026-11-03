@@ -169,16 +169,26 @@
     <div id="mv-note" class="banner warn">A real run needs three things: a recorded lab validation of the OpenStack release (gate G0), an approved pre-flight gate, and no halt. Class C volumes are not moved here.</div>
     <div class="actions inline">
       <label>Target volume type<input id="mv-type" placeholder="empty: chosen if only one type fits"></label>
+      <label>Run window opens (UTC)<input id="mv-from" placeholder="optional: 2026-11-07T22:00"></label>
+      <label>Run window closes (UTC)<input id="mv-until" placeholder="optional: 2026-11-08T04:00"></label>
       <button class="secondary" id="mv-dry">1. Dry run (changes nothing)</button>
       <button class="primary" id="mv-start">2. Start the run</button>
       <button class="secondary" id="mv-stop">Stop taking new volumes</button>
       <button class="secondary" id="mv-refresh">Refresh</button>
       <button class="secondary" id="mv-validate">Record lab validation (G0)</button>
     </div>
+    <details id="p0-box" class="box">
+      <summary><strong>Phase 0: the lab tests</strong> <span id="p0-count" class="muted"></span></summary>
+      <p class="muted">The playbook's lab tests (T1 to T22) and four that OpenMove adds (M1 to M4). OpenMove cannot run them: they need real hosts and people. Do each test, then record its result with what you did and saw. Gate G0 can be recorded from these results once every test of the retype path has passed for this release. Tests of the staged method (class C) are listed but not required while it is not built.</p>
+      <div id="p0-view"></div>
+      <div class="actions inline"><button class="secondary" id="p0-g0">Record gate G0 from these results</button></div>
+    </details>
     <div class="actions inline">
       <button class="secondary" id="mv-g23">Sign G2 and G3 (second person)</button>
       <button class="secondary" id="mv-g4">Sign G4 (second person)</button>
       <button class="secondary" id="mv-release">Release all for the retype</button>
+      <button class="secondary" id="mv-rev-preview">Preview: put the whole run back</button>
+      <button class="secondary" id="mv-rev-all">Put the whole run back</button>
       <span id="mv-status" class="muted"></span>
     </div>
     <div id="mv-dry-view"></div>
@@ -199,6 +209,14 @@
       <button class="primary" id="rep-before">Pre-migration report (Word)</button>
       <button class="secondary" id="rep-audit-only">Environment audit (Word)</button>
       <button class="secondary" id="rep-unmigrated">Volumes not migrated (Word)</button>
+    </div>
+    <h3>During and after the run</h3>
+    <p class="muted">The update report and the after report compare every volume the run touched with the state recorded before its cutover, and mark each difference as expected (back-end and volume type) or unexpected. The volume list is the same data as a spreadsheet.</p>
+    <div class="actions">
+      <button class="secondary" id="rep-update">Update report (Word)</button>
+      <button class="secondary" id="rep-after">After report (Word)</button>
+      <button class="secondary" id="rep-xlsx">Volume list (Excel)</button>
+      <button class="secondary" id="rep-csv">Volume list (CSV)</button>
     </div>
     <p id="rep-status" class="muted">The pre-migration report and the not-migrated report need the pre-flight to have run; the audit report needs the audit.</p>
   </section>

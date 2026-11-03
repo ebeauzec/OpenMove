@@ -2,7 +2,7 @@
 
 OpenMove is a GUI-driven tool that automates the audit, reporting and migration of OpenStack Cinder volumes. It connects directly to an OpenStack cloud and does its work by calling OpenStack's own services and clients, so every action is one the cloud already supports and records.
 
-> **Status:** version 0.7.0, in development. It reads a cloud, classifies its volumes, runs a pre-flight with a gate, builds Word reports and moves class A and class B volumes with Cinder's retype using only the OpenStack APIs. The move engine has run against a real OpenStack lab on a development machine (detached, attached and boot volumes, and the way back); it has **never run against a customer cloud**, and no customer release is validated, so the tool is read only until people record a lab validation. Class C (long-lived snapshots) needs a data mover and is **not built**. 275 automated tests pass. See `docs/ARCHITECTURE.md` for how it is built and `docs/OPERATIONS.md` for how to run it.
+> **Status:** version 0.7.0, in development. It reads a cloud, classifies its volumes, runs a pre-flight with a gate, builds Word reports and moves class A and class B volumes with Cinder's retype using only the OpenStack APIs. The move engine has run against a real OpenStack lab on a development machine (detached, attached and boot volumes, and the way back); it has **never run against a customer cloud**, and no customer release is validated, so the tool is read only until people record a lab validation. Class C (long-lived snapshots) needs a data mover and is **not built**. 307 automated tests pass. See `docs/ARCHITECTURE.md` for how it is built and `docs/OPERATIONS.md` for how to run it.
 
 ## Table of Contents
 
@@ -106,7 +106,7 @@ Everything in the project is documented, and the documentation changes in the sa
 | `README.md` | Purpose, usage and layout. |
 | `CONTEXT.md` | Architecture and project state. |
 | `CHANGELOG.md` | What changed in each version. |
-| `docs/` | The documentation set: `WALKTHROUGH.md` (the process, step by step, with screenshots and diagrams; start here), `OPTIONS.md` (every option and setting), `ARCHITECTURE.md` (how it is built), `INSTALL.md` (installation), `OPERATIONS.md` (step-by-step operation), `USER_GUIDE.md`, `PROCESS.md`, `API_CALLS.md`, `SAFETY.md`, `LAB.md`, and the specification and trace documents. Index: `docs/README.md`. |
+| `docs/` | The documentation set: `WALKTHROUGH.md` (the process, step by step, with screenshots and diagrams; start here), `OPTIONS.md` (every option and setting), `COVERAGE.md` (what the tool does and does not do against the requirements), `SUPPORT_MATRIX.md`, `NETWORK.md`, `ARCHITECTURE.md` (how it is built), `INSTALL.md` (installation), `OPERATIONS.md` (step-by-step operation), `USER_GUIDE.md`, `PROCESS.md`, `API_CALLS.md`, `SAFETY.md`, `LAB.md`, and the specification and trace documents. Index: `docs/README.md`. |
 
 ## 6. Development
 

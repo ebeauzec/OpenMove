@@ -1,0 +1,15 @@
+{
+  "_comment": "Back-end families, how to recognise them from what the Cinder driver reports, and which pairs have been verified. A family that is not listed here is unsupported. Add a family or a verification here (and its test); the engine is not changed.",
+  "families": {
+    "solidfire": {"title": "NetApp SolidFire", "vendors": ["solidfire inc", "solidfire"], "protocols": []},
+    "pure": {"title": "Pure Storage FlashArray", "vendors": ["pure storage"], "protocols": []},
+    "ontap": {"title": "NetApp ONTAP", "vendors": ["netapp"], "protocols": []},
+    "ceph": {"title": "Ceph RBD", "vendors": ["open source"], "protocols": ["ceph"]},
+    "lvm": {"title": "LVM (Cinder reference driver)", "vendors": ["open source"], "protocols": ["iscsi", "iser", "nvmet", "lvm"]}
+  },
+  "method": "Cinder retype with migration_policy on-demand, sent through the OpenStack APIs. Whether the drivers move the data themselves or Cinder copies it through a cinder-volume host is their decision and OpenMove cannot see it; the post-check reads the result.",
+  "staged_method": "The staged method (copy, sync, recheck, cutover with the snapshot history rebuilt) is not built. Class C volumes are held back.",
+  "verified": [
+    {"from": "lvm", "to": "lvm", "where": "the OpenMove lab (DevStack 2025.1, two LVM back-ends)", "covers": "classes A: detached, attached and boot volumes, the way back, a retype that Cinder silently undoes, failures of the API, the volume service and the halt button"}
+  ]
+}

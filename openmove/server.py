@@ -11,10 +11,12 @@ import hmac
 import json
 import secrets
 import threading
+from datetime import datetime, timezone
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from . import __version__, discovery, exports, handling, inventory, lifecycle, paths, profiles, safety, selection, wizard
+from . import __version__, discovery, exports, handling, inventory, lifecycle, paths, phase0, profiles, safety, selection, wizard
 from . import risk as risk_mod
 from . import audit as audit_mod
 from .checks import gate as gate_mod
@@ -22,7 +24,10 @@ from .checks import run as checks_run
 from .connectors.httpclient import ConnectorError
 from .connectors.openstack import OpenStackSession
 from .journal import Journal
+from .engine.evidence import Evidence
+from .reports import after as after_mod
 from .reports import build as report_build
+from .reports import sheet as sheet_mod
 from .reports import docx as report_docx
 
 MAX_REQUEST = 20 * 1024 * 1024
@@ -534,6 +539,19 @@ def api_engine_dry_run(state, body, query):
     return _engine(state).dry_run(body.get("ids") or None, body.get("type_map") or None)
 
 
+def _when(text, name):
+    """A UTC time for the run window: 2026-11-07T22:00:00Z (the Z is optional), or empty for no limit."""
+    text = str(text or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(text, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    raise ValueError("%s must be a UTC time like 2026-11-07T22:00:00Z" % name)
+
+
 def api_engine_start(state, body, query):
     """Start moving the selected class A and B volumes by Cinder's retype. Needs a permit now: validated release, approved gate, no halt."""
     by = (body.get("by") or "").strip()
@@ -543,8 +561,10 @@ def api_engine_start(state, body, query):
     why = wizard.start_refusal(state, e, body.get("ids"))
     if why:
         raise ApiError(why, 409)
-    _refusals(lambda: e.start(body.get("ids") or None, body.get("type_map") or None))
-    state.journal.record("engine_start", "batch", {"by": by, "queued": len(e.queue), "resumed": len(e.active)})
+    window = (_when(body.get("start_at"), "start_at"), _when(body.get("stop_at"), "stop_at"))
+    _refusals(lambda: e.start(body.get("ids") or None, body.get("type_map") or None, window=window))
+    state.journal.record("engine_start", "batch", {"by": by, "queued": len(e.queue), "resumed": len(e.active),
+                                                   "start_at": body.get("start_at") or None, "stop_at": body.get("stop_at") or None})
     return e.view()
 
 
@@ -555,9 +575,15 @@ def api_engine_stop(state, body, query):
 
 
 def api_engine_reverse(state, body, query):
-    """Put a moved volume back with a retype to its first type (R3)."""
+    """Put a moved volume back with a retype to its first type (R3). With `preview` only show what it would do; with `all` put the whole run back."""
     e = _engine(state)
-    e.reverse(str(body.get("id") or ""), body.get("reason"), body.get("by"))
+    if body.get("preview"):                                   # R6: see what a reverse would do before it runs; nothing is changed
+        return e.reverse_preview([str(body["id"])] if body.get("id") else None)
+    if body.get("all"):                                       # R6: the whole run
+        ids = e.reverse_all(body.get("reason"), body.get("by"))
+        state.journal.record("engine_reverse_all", "batch", {"by": str(body.get("by") or "").strip(), "reason": str(body.get("reason") or "").strip(), "volumes": len(ids)})
+    else:
+        e.reverse(str(body.get("id") or ""), body.get("reason"), body.get("by"))
     return e.view()
 
 
@@ -571,6 +597,9 @@ def api_validation(state, body, query):
     note = (body.get("evidence") or "").strip()
     if len(by) < 3 or len(second) < 3 or by.lower() == second.lower():
         raise ValueError("the validation needs two different people")
+    if body.get("from_tests"):
+        note = phase0.evidence_text(state.journal, rel)           # refuses unless every test of the retype path has passed for this release
+        body = dict(body, passed=True)
     if len(note) < 40:
         raise ValueError("describe what was tested and what came out (at least 40 characters): which lab tests, on which cloud, with which result")
     passed = bool(body.get("passed"))
@@ -578,6 +607,26 @@ def api_validation(state, body, query):
                                                            "auth_url": state.session.auth_url if state.session else None})
     api_discover(state, {}, {})
     return {"ok": True, "release": rel, "result": "passed" if passed else "failed"}
+
+
+def _release_of(state):
+    rel = (_need(state, "platform").get("release") or {}).get("release")
+    if not rel:
+        raise ApiError("the release is not identified", 409)
+    return rel
+
+
+def api_phase0_get(state, body, query):
+    """The Phase 0 lab tests as guided procedures, with the recorded result of each for this release (gate G0 can be recorded from them)."""
+    return phase0.status(state.journal, _release_of(state))
+
+
+def api_phase0_record(state, body, query):
+    """Record the result of one Phase 0 test, with a name and what was done and seen. The newest result of a test counts."""
+    rel = _release_of(state)
+    phase0.record(state.journal, rel, str(body.get("test") or ""), str(body.get("result") or ""), body.get("by") or "", body.get("evidence") or "",
+                  body.get("environment") or "test")
+    return phase0.status(state.journal, rel)
 
 
 def api_volume_gate(state, body, query):
@@ -1011,8 +1060,24 @@ def api_report(state, body, query):
         doc = report_build.unmigrated_document(_unmigrated(state), customer, by, state.demo, __version__, g["message"] if g else "",
                                                checks.get("source_backend"), checks.get("target_backend"))
         name = "OpenMove_volumes_not_migrated"
+    elif kind in ("after", "update"):
+        checks = _need(state, "checks")
+        g = _gate(state)
+        ev = None if state.demo else Evidence(Path(state.home) / "evidence")
+        rows = after_mod.collect(state, _need(state, "inventory"), g, names, ev)
+        doc = report_build.after_document(rows, customer, by, state.demo, __version__, checks.get("source_backend"), checks.get("target_backend"),
+                                          g["message"] if g else "", final=(kind == "after"))
+        name = "OpenMove_after_report" if kind == "after" else "OpenMove_update_report"
+    elif kind in ("volumes_xlsx", "volumes_csv"):
+        header, vrows = after_mod.volume_list(state, _need(state, "inventory"), names)
+        stamp = report_docx.datetime.now(report_docx.timezone.utc).strftime("%Y%m%d_%H%M")
+        notes = ["OpenMove %s volume list, generated %s" % (__version__, stamp)] + (["DEMONSTRATION DATA: made up, describes no real system"] if state.demo else [])
+        data = sheet_mod.xlsx_bytes(header, vrows, "Volumes", notes) if kind == "volumes_xlsx" else sheet_mod.csv_bytes(header, vrows)
+        state.journal.record("report", kind, {"bytes": len(data), "rows": len(vrows), "demo": state.demo})
+        ext, ctype = (("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") if kind == "volumes_xlsx" else ("csv", "text/csv; charset=utf-8"))
+        return Download(data, "OpenMove_volumes_%s.%s" % (stamp, ext), ctype)
     else:
-        raise ValueError("kind must be 'before', 'audit' or 'unmigrated'")
+        raise ValueError("kind must be 'before', 'audit', 'unmigrated', 'after', 'update', 'volumes_xlsx' or 'volumes_csv'")
     data = report_docx.build_docx(doc)
     stamp = report_docx.datetime.now(report_docx.timezone.utc).strftime("%Y%m%d_%H%M")
     state.journal.record("report", kind, {"bytes": len(data), "customer": customer, "prepared_by": by, "demo": state.demo})
@@ -1056,6 +1121,8 @@ ROUTES = {
     ("POST", "engine/stop"): api_engine_stop,
     ("POST", "engine/reverse"): api_engine_reverse,
     ("POST", "validation"): api_validation,
+    ("GET", "phase0"): api_phase0_get,
+    ("POST", "phase0/record"): api_phase0_record,
     ("POST", "demo/approve"): api_demo_approve,
     ("POST", "lab/approve"): api_lab_approve,
     ("POST", "demo/simulate"): api_demo_simulate,

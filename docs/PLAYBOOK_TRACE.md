@@ -20,7 +20,7 @@ The playbook is the authority. `MIGRATION_METHOD.md` is the working summary. Thi
 |---|---|
 | Method, classes A to E, check catalogue, gates, rollback rules, failure modes (documents) | written |
 | Discovery, inventory, classification, pre-flight checks, reports, the rules that order a migration, the safety layer, the gated GUI wizard | **built** (mock cloud and demo; the read paths and the gates also run against the lab) |
-| Phase 0: the 21 lab tests T1 to T21 as guided, recorded procedures | **not built** (only the record that gate G0 passed is kept) |
+| Phase 0: the lab tests T1 to T22 as guided, recorded procedures | **built** as a guide and a record (a person runs each test); gate G0 can be recorded from the results |
 | Phase 3 (retype of class A and B) and rollback R3 as actions that change the cloud | **built, lab-proven** (`openmove/engine`): detached, attached and boot volumes, the way back, and the failures listed in `LAB.md`. Never run on a customer cloud. |
 | Phase 4 (class B) as the engine's wait for snapshots to rotate away | **built** against the mock cloud; the lab has no rotating snapshots yet |
 | Phase 5 (class C) and the rollbacks R1, R2 as actions that change the cloud | **not built**. The demo simulates them. Class C needs a data mover and the arrays. |
@@ -31,7 +31,7 @@ The playbook is the authority. `MIGRATION_METHOD.md` is the working summary. Thi
 
 | Playbook | OpenMove | Status |
 |---|---|---|
-| Tests T1 to T22 (T22 is new in v1.3: the instance lock is read and respected) | No guided procedures. A validation result for a release can be recorded by two different people with their evidence (`profiles.py`, `POST /api/validation`), and check P16 blocks every changing step until it is. The engine itself covers the T22 rule: it reads the lock with microversion 2.9, locks only an unlocked instance and unlocks only what it locked. The retype path was also exercised by hand in the lab (see "What the lab showed"). | **Not built** (record only) |
+| Tests T1 to T22 (T22 is new in v1.3: the instance lock is read and respected) | **Guided procedures** on the Move step (`phase0.py`, `resources/phase0_tests.json`): each test with what it proves, what passing looks like and how to do it, plus four OpenMove adds (M1 to M4). A person runs a test and records the result with a name and evidence. Tests of the staged method are listed, not required. A validation can be recorded by two different people (`POST /api/validation`) and check P16 blocks every changing step until it is; with `from_tests` it is refused unless every test of the retype path has passed. OpenMove cannot run the tests itself: they need real hosts and people. T22, T8, M1, M2, M3 and M4 were run in the lab (see "What the lab showed") | **Built** as guide and record; the tests are still run by people |
 | Gate G0, second person signs | The pre-flight gate takes two sign-offs. G0 itself is the P16 check. | **Check only** |
 
 ## Phase 1: discovery and triage
@@ -178,7 +178,7 @@ The lab (`LAB.md`) is a DevStack on a development machine with two LVM back-ends
 2. **Per-volume gates G2, G3, G4.** Now built (see the gates table). What stays open: G3 sits at the entry of the cutover phase until the engine separates the freeze from the swap.
 3. **Internal-tenant volumes (step 1.7).** The image-cache volume is found and held back; other volumes of Cinder's internal project are not looked for.
 4. **`provider_id` repair (step 1.9).** Found, not repaired.
-5. **Phase 0.** No guided lab procedures for T1 to T22. The lab does not replace Phase 0 on the customer's Queens and arrays.
+5. **Phase 0.** The tests are guided and their results recorded, but nobody has run them on the customer's Queens and arrays. The lab does not replace that.
 6. **Checks on hosts and arrays** show "not checked" until the access exists. They need attestations in the meantime.
 
 ## What OpenMove adds beyond the playbook

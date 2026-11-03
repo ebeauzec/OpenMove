@@ -3,6 +3,9 @@
 | Document | Contents |
 |---|---|
 | `WALKTHROUGH.md` | **Start here.** The process from the first click to the last, with screenshots and diagrams: the nine gated steps, what each does, who does what, what unlocks the next, what happens to each volume, and what to do when something goes wrong. |
+| `COVERAGE.md` | The tool checked against the requirements R1 to R18 and the proposal: what is met, what is partly built, what is not built and what would close it. |
+| `SUPPORT_MATRIX.md` | Back-end families, how each is recognised, which pairs are verified, generated from `openmove/resources/backends.json`. |
+| `NETWORK.md` | Every network destination of the program, and what it never does. A test keeps it complete. |
 | `OPTIONS.md` | Every option and setting in one place: launchers, command line, modes, each screen's fields, the settings with defaults and limits, the gates, and the fixed values. |
 | `ARCHITECTURE.md` | How OpenMove is built today: context, layers, runtime, the order of a move with diagrams, the safety architecture, data, modes, tests and what is not built. Start here to understand the code. |
 | `INSTALL.md` | Requirements, installing from source or as a packaged program, checking the installation, data folders, upgrading and removing. |

@@ -124,8 +124,10 @@ Protection: every `/api/` call needs the per-run token (printed at start-up and 
 | `POST /api/engine/dry-run` | The dry run: fresh reads (B8, B9, N3, B5) of the selected class A and B volumes, the checks, and the exact changes a run would make with their undo. Sends nothing that changes anything; needs no permit. | target type (optional), ids (optional) | no |
 | `POST /api/engine/start` | Start the real run of the selected class A and B volumes. Needs a permit now (validated release, approved gate, no halt) and a name. Nothing is sent for a volume until G2 and G3 are signed by a second person. | name, target type, ids | yes (C1, C2, C3) |
 | `POST /api/engine/stop` | Stop taking new volumes. A retype already sent carries on in the cloud. | | no |
-| `POST /api/engine/reverse` | Put a moved volume back with a retype to its first type (R3). Needs a name and a reason. | id, name, reason | yes (C3) |
-| `POST /api/validation` | Record the lab validation of the release (gate G0): two different people declare which lab tests were run, where, and the result. Lifts the read-only state of the release. | name, second person, evidence, passed, environment | no |
+| `POST /api/engine/reverse` | Put a moved volume back with a retype to its first type (R3). Needs a name and a reason. With `preview` it only reads and lists, for each volume that was cut over, the calls the reverse would make and their undo (R6). With `all` it puts every cut-over volume of the run back, each journaled and checked on its own. | id or all or preview, name, reason | yes (C3) |
+| `POST /api/validation` | Record the lab validation of the release (gate G0): two different people declare which lab tests were run, where, and the result. Lifts the read-only state of the release. With `from_tests` the evidence is built from the Phase 0 results and the call is refused unless every test of the retype path has passed for this release. | name, second person, evidence or from_tests, passed, environment | no |
+| `GET /api/phase0` | The Phase 0 lab tests (T1 to T22 and M1 to M4) as guided procedures, with the newest recorded result of each for the detected release, and the count still open. | | no |
+| `POST /api/phase0/record` | Record one test's result (pass or fail) with a name and at least 40 characters of what was done and seen. The newest result of a test counts. | test, result, name, evidence, environment | no |
 | `POST /api/lab/approve` | Lab mode only: record the lab validation of the lab release (only for a release whose profile is marked as a lab), attest the open items and sign as two lab users, labelled as the lab's. A failed check still blocks; it cannot be waived. | | no |
 | `POST /api/demo/validate` | Demo mode only: record a labelled, synthetic lab validation. | | no |
 | `POST /api/demo/approve` | Demo mode only: attest the open items and sign as two made-up people, labelled synthetic. A failed check still blocks; it cannot be waived. | | no |
@@ -153,6 +155,7 @@ The journal is a local SQLite file (`journal.db`). It is append-only in normal u
 | `signoff` | The gate is signed. | Run id, role, name. |
 | `report` | A report is built. | Kind, size, customer, prepared by. |
 | `validation` | A lab validation of a release is recorded. | Release, result, evidence. |
+| `phase0_test` | The result of one Phase 0 lab test is recorded. | Test id, result, name, evidence, environment. |
 | `halt` / `resume` | The halt switch is used. | Name and reason. |
 | `refusal` | The order, the gate or the halt refused a step. | The step attempted and the exact reasons. In the simulation they are marked simulated. |
 | `phase` | A volume enters a phase of the migration order. | Phase, time, evidence (the volume class from the precheck, verification results, snapshot image comparison for class C, fingerprints, lag). An abort or rollback also carries its reason and cause code. |
@@ -164,7 +167,8 @@ The journal is a local SQLite file (`journal.db`). It is append-only in normal u
 | `risk_mark` | A person marks a volume as a risk, or withdraws the mark. | Volume, name, note. |
 | `engine_dry_run` | A dry run is made. | Counts of volumes ready, waiting and blocked. |
 | `engine_run` | A real run starts. | Volumes queued and resumed, the type map. |
-| `engine_start` | A person starts a run. A real run needs a dry run read for the same volumes first (or an earlier run to resume). | Name, queued and resumed counts. |
+| `engine_start` | A person starts a run. A real run needs a dry run read for the same volumes first (or an earlier run to resume). The run may carry a window (UTC start and stop): outside it no new volume is taken and no retype is sent. | Name, queued and resumed counts, the window. |
+| `engine_reverse_all` | A person puts the whole run back. | Name, reason, number of volumes. |
 | `lab` | Lab mode connects to the lab cloud. | Address, roles, a note that it is not a customer cloud. Never the password. |
 | `demo` | Demo mode starts, or a simulated run starts. | Scenario, or the simulation note. |
 

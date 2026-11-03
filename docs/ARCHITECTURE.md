@@ -69,11 +69,12 @@ flowchart TB
 | Interface | `openmove/resources/web/` | The pages. Calls the local routes with the per-run token. No cloud access of its own. |
 | Server | `server.py`, `__main__.py` | A `ThreadingHTTPServer` on loopback. Holds `AppState` (what has been read: platform, inventory, checks, selection, the engine). Routes are plain functions `api_*(state, body, query)`. |
 | Engine | `engine/` | `runner.py` decides what comes next for each volume; `plan.py` holds the checks and builds the dry run; `actions.py` is the only code that sends a change; `evidence.py` writes the per-volume evidence. |
-| Rules | `lifecycle.py`, `safety.py`, `selection.py`, `risk.py`, `classification.py`, `handling.py` | The order of a migration, the permit and the halt, what is selected and with which settings, workload risk, volume classes, and the cause and steps for every volume that is not moved. |
-| Checks and reports | `checks/`, `audit.py`, `reports/` | The check catalogue and the gate, the environment audit, and the Word writer. |
+| Rules | `lifecycle.py`, `wizard.py`, `safety.py`, `selection.py`, `risk.py`, `classification.py`, `handling.py`, `backends.py`, `phase0.py` | The order of a migration, the gated wizard, the permit and the halt, what is selected and with which settings, workload risk, volume classes, the cause and steps for every volume that is not moved, the back-end families and the support matrix (`resources/backends.json`), and the Phase 0 lab tests with their recorded results (`resources/phase0_tests.json`). |
+| Checks and reports | `checks/`, `audit.py`, `reports/` | The check catalogue and the gate, the environment audit, the report documents (`build.py`: pre-migration, audit, not migrated, update and after), the comparison of every volume with its before-state (`after.py`), the Word writer (`docx.py`) and the Excel and CSV writer (`sheet.py`, standard library only). |
 | Reading | `discovery.py`, `inventory.py`, `releases.py`, `profiles.py`, `exports.py` | Detect the release and back-ends, read volumes, snapshots and instances, import the playbook's query results when the database is not reachable. |
 | Connectors | `connectors/` | Every network call goes through here. Keystone v3, the catalogue, paging, one re-authentication on a 401. The password lives in memory only. |
 | Journal | `journal.py` | SQLite in WAL mode with `synchronous=FULL`. Two tables: `events` and `steps`. |
+| Packaging | `Dockerfile`, `tools/build/` | The container image (standard library only, listens inside the container, data in the volume `/data`) and the Windows program. See `INSTALL.md`. |
 | Demo and lab | `demo/`, `lab/` | A mock cloud with made-up data, and the link to a real OpenStack on the same machine (section 10). |
 
 ## 5. Runtime
@@ -260,7 +261,7 @@ The lab shortcuts exist in lab mode only and say so in the journal. A failed che
 | Self-containment (`test_self_contained`) | No third-party import. |
 | The real lab (`OpenMove-Lab.bat`) | The engine's calls and polling against a real Cinder and Nova. Manual. |
 
-Run the automated tests with `python -m unittest discover -s tests -t .`. There are 275 of them. A mock proves the logic and the safety rules; it cannot prove how a Queens cloud behaves. The lab proves behaviour against a recent release, and it already found four things the mock did not (`LAB.md`).
+Run the automated tests with `python -m unittest discover -s tests -t .`. There are 307 of them. A mock proves the logic and the safety rules; it cannot prove how a Queens cloud behaves. The lab proves behaviour against a recent release, and it already found four things the mock did not (`LAB.md`).
 
 ## 13. What is not built
 

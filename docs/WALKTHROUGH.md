@@ -254,8 +254,8 @@ A detached volume has no instance, so there is no lock. Cinder itself marks it `
 ### What you do
 
 1. **Dry run (changes nothing).** Reads the cloud again and lists the exact calls each volume would get, with the undo for each. A volume that would be refused shows the failed check. A real run is **refused** until a dry run was read for the same volumes.
-2. If the release has no recorded lab validation, **Record lab validation (G0)** (two people).
-3. Choose the target volume type (empty means the only type that fits), then **Start the run** with your name. Nothing is sent for a volume yet.
+2. If the release has no recorded lab validation, **Record lab validation (G0)** (two people). The **Phase 0: the lab tests** panel lists the playbook's tests (T1 to T22) and four that OpenMove adds (M1 to M4): what each proves, what passing looks like and how to do it. OpenMove cannot run them (they need real hosts and people); a person does each one and records the result with a name and what was seen. **Record gate G0 from these results** works only when every test of the retype path has passed for this release.
+3. Choose the target volume type (empty means the only type that fits). Optionally set the **run window** (UTC times): outside it no new volume is taken and no retype is sent, and what is already moving carries on and is watched. Then **Start the run** with your name. Nothing is sent for a volume yet.
 4. A second person presses **Sign G2 and G3** after checking the volume and the target.
 5. **Release all for the retype** (volumes are held for release unless the setting says otherwise).
 6. The engine moves the volumes, at most as many at a time as the setting allows. Read **What is happening** for each volume.
@@ -266,7 +266,7 @@ A detached volume has no instance, so there is no lock. Cinder itself marks it `
 
 ![Step 7, Move: soak](images/15-move-soak.png)
 
-8. **Reverse** puts a volume back with a retype back, at any time before it is done (see `OPERATIONS.md`).
+8. **Reverse** puts a volume back with a retype back, at any time before it is done (see `OPERATIONS.md`). **Preview: put the whole run back** reads the cloud and lists, for every cut-over volume, the calls a reverse would make and their undo, changing nothing; **Put the whole run back** then does it for all of them (name and reason needed).
 
 ### Safety on this step
 
@@ -284,13 +284,16 @@ A detached volume has no instance, so there is no lock. Cinder itself marks it `
 
 **Purpose.** Documents for the customer and for the file, built from the same data the tool holds, so a report cannot disagree with the tool.
 
-**What you do.** Enter the customer or system name and who prepared it, then download one of the Word reports:
+**What you do.** Enter the customer or system name and who prepared it, then download one of the reports (Word, or Excel and CSV for the volume list):
 
 | Report | Needs | Contains |
 |---|---|---|
 | Pre-migration report | pre-flight run | Every check, the volumes to move and those held back, the gate and its sign-offs, optionally the audit |
 | Environment audit | audit | The audit alone |
 | Volumes not migrated | pre-flight run | Every volume that is not moved, the cause, the state it is left in and the steps to resolve it |
+| Update report | a run | During the run: every volume the run touched, compared with the state recorded before its cutover |
+| After report | a run | When the run is over: the same comparison, with every difference marked **expected** (back-end and volume type) or **unexpected** (anything else), the post-check of each volume and a sign-off block. A volume that was put back must match its baseline in every field |
+| Volume list (Excel, CSV) | inventory | Every volume with its class, size, type, back-end, state, whether it was admitted and selected, its phase, outcome and cause: the same data as a spreadsheet |
 
 ## 12. Step 9: Live
 

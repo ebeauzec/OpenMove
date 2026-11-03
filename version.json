@@ -1,8 +1,8 @@
 {
-  "version": "0.7.0",
+  "version": "0.8.0",
   "major": 0,
-  "minor": 7,
+  "minor": 8,
   "patch": 0,
   "date": "2026-11-03",
-  "notes": "Gated wizard, silent-undo detection, walkthrough and options documentation"
+  "notes": "Gap closure: after report, Excel and CSV, support matrix, Phase 0 tests, run window, whole-run reverse, container file"
 }

@@ -129,7 +129,7 @@ def main(argv):
         S.api_selection_confirm(state, {"by": "Olive Operator"}, {})
         shot(base, token, "08-select-confirmed", "select", 900, only)
         shot(base, token, "09-move-demo", "move", 700, only)
-        shot(base, token, "10-reports", "reports", 700, only)
+        shot(base, token, "10-reports", "reports", 900, only)
         state.options = {"hold_before_cutover": False, "stop_after_failures": 0}
         state.auto_sign = "Demo reviewer (synthetic)"
         sim = Simulation(state, lambda: S._gate(state), tick=0)

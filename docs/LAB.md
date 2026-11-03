@@ -70,7 +70,16 @@ First runs of the real engine against the lab (a detached volume, a volume attac
 | **Found: a class C volume could be started** | Asking the engine for a volume that is not class A or B now fails with a clear message instead of starting nothing. |
 | Class B needs the database | With the APIs only, a volume with snapshots is class C (rotation unknown). The class B path (wait for rotation) is covered by the mock tests only. |
 
-Not yet exercised in the lab: stopping a service during a move (Cinder API, Cinder volume), the halt button during a real move of an attached volume, and a lock that Nova refuses. A retype of a volume with a snapshot has now been exercised (see above). The Horizon auto-login works against the real dashboard.
+**Failure injection in the lab (2026-11-03).** Each was run against the real cloud and read from the cloud itself, not only from the engine:
+
+| Failure | Result |
+|---|---|
+| An instance locked by a tenant before the move | The dry run says it is left locked; the move completed and the engine sent no lock and no unlock for it |
+| HALT pressed during a real move of an attached volume | Halted at once; the engine sent nothing more; Cinder finished its copy on its own; after resume the engine read the result, ran the post-check and carried on; the instance was never left locked |
+| The Cinder API stopped for about 25 seconds during a move | The engine said it could not continue, sent nothing, did not guess, did not halt (it only reads); when the API returned it saw the move had finished and ran the post-check |
+| The Cinder volume service stopped for 75 seconds during a move | The engine kept waiting and watching (a retype may legitimately take hours); when the service returned the copy finished and the post-check passed |
+
+Not exercised: a power cut on the Cinder or compute host, and a lock that Nova refuses. The Horizon auto-login works against the real dashboard.
 
 ## A first run, in order
 

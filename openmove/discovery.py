@@ -8,7 +8,7 @@ The result contains no credentials.
 """
 from datetime import datetime, timezone
 
-from . import profiles, releases
+from . import backends, profiles, releases
 from .connectors.httpclient import ConnectorError
 from .connectors.openstack import BLOCK_STORAGE_TYPES, COMPUTE_TYPES, service_root
 
@@ -104,7 +104,8 @@ def discover(session, journal=None, profile_table=None):
                     "max_over_subscription_ratio": cap.get("max_over_subscription_ratio"),
                     "reserved_percentage": cap.get("reserved_percentage"),
                     "replication_enabled": cap.get("replication_enabled"),
-                    "multiattach": cap.get("multiattach"), "thin": cap.get("thin_provisioning_support")})
+                    "multiattach": cap.get("multiattach"), "thin": cap.get("thin_provisioning_support"),
+                    "family": backends.family_of(cap.get("vendor_name"), cap.get("storage_protocol"))})
         except ConnectorError as exc:
             warnings.append("back-end pools not available: %s" % exc)
 

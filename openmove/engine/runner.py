@@ -42,6 +42,7 @@ class Engine:
         self.ev = Evidence(Path(state.home) / "evidence")
         self.notes, self.type_map = {}, {}
         self.queue, self.active, self.failed, self.finished = [], [], set(), set()
+        self.window = (None, None)                    # (start_at, stop_at): when new volumes may be taken and a retype may be sent (R3); None = no limit
         self.status, self.ticks, self._specs = "idle", 0, {}
         self._thread, self._stop, self._mutex = None, threading.Event(), threading.RLock()
 
@@ -126,9 +127,14 @@ class Engine:
         d = getattr(self, "dry_ok", None)
         return bool(d) and d["run_id"] == (self.state.checks or {}).get("run_id") and set(ids) <= d["ids"]
 
-    def start(self, ids=None, type_map=None, thread=True):
-        """Begin a real run. Needs a permit right now (release validated, gate approved, no halt)."""
+    def start(self, ids=None, type_map=None, thread=True, window=(None, None)):
+        """Begin a real run. Needs a permit right now (release validated, gate approved, no halt). `window` is (start_at, stop_at) as datetimes or None:
+        outside it no new volume is taken and no retype is sent; what is already in flight carries on and is watched."""
         with self._mutex:
+            lo, hi = window
+            if lo and hi and hi <= lo:
+                raise EngineError("the window ends before it starts")
+            self.window = (lo, hi)
             if self.status == "running":
                 raise EngineError("a run is already going")
             self._permit()                                    # refuses here, before anything is queued
@@ -169,12 +175,17 @@ class Engine:
                 return
             self._stop.wait(5)
 
+    def in_window(self):
+        lo, hi = self.window
+        now = self.clock()
+        return (lo is None or now >= lo) and (hi is None or now < hi)
+
     def tick(self):
         """One pass: top up the active set, advance every active volume by one step, drop the ones that ended."""
         with self._mutex:
             self.ticks += 1
             o = selection.options_of(self.state)
-            while self.queue and len(self.active) < o["concurrency"] and not safety.halted(self.state.journal):
+            while self.queue and len(self.active) < o["concurrency"] and not safety.halted(self.state.journal) and self.in_window():
                 self.active.append(self.queue.pop(0))
             for vid in list(self.active):
                 if self._stop.is_set():
@@ -270,6 +281,8 @@ class Engine:
         risky = ((self.state.checks or {}).get("risk") or {}).get(vid, {}).get("level") == "high"
         if (selection.options_of(self.state)["hold_before_cutover"] or risky) and vid not in self.state.released:
             return self.note(vid, "ready: G2 and G3 are signed; waiting for you to release it for the retype")
+        if not self.in_window():
+            return self.note(vid, "ready: waiting for the run window (%s)" % self.window_text())
         sp = self.spec(vid, acts)
         vol, snaps, servers = self.read_all(acts, vid)              # fresh reads, right now: the volume may have changed since the validation
         checks = plan.validate(vol, snaps, servers, sp)
@@ -403,7 +416,51 @@ class Engine:
         except L.LifecycleError:
             self.note(vid, "the post-check passed: waiting for a second person to sign G4")
 
+    def window_text(self):
+        lo, hi = self.window
+        f = lambda d: d.strftime("%Y-%m-%d %H:%M UTC") if d else "no limit"
+        return "from %s until %s" % (f(lo), f(hi))
+
     # ---- reverse (R3) -------------------------------------------------------------------------------------------
+    def reversible(self):
+        """Volumes that were cut over and may be put back: after the retype was sent and before the soak ended."""
+        return [v for v, e in L.states(self.state.journal).items()
+                if L.method_of(L.history(self.state.journal, v)) == L.RETYPE and e["phase"] in ("cutover", "postcheck", "soak")]
+
+    def reverse_preview(self, ids=None):
+        """What putting these volumes back would do, read fresh now and changing nothing: the calls and their undo, per volume (R6: see it before it runs)."""
+        acts = self.acts()
+        rows = []
+        for vid in (ids or self.reversible()):
+            ph = self.phase(vid)
+            if ph not in ("cutover", "postcheck", "soak"):
+                rows.append({"id": vid, "phase": ph, "can": False, "why": "only a volume that was cut over can be reversed", "calls": []})
+                continue
+            try:
+                h0 = L.history(self.state.journal, vid)
+                pre = next(e for e in h0 if e["phase"] == "precheck")
+                vol = acts.volume(vid)
+                servers = {s: acts.server(s) for s in plan.attached_servers(vol)}
+                calls = plan.planned_calls(vol, {"target_type": pre["source_type"]}, servers)
+                for c in calls:
+                    if c["step"] == "retype":
+                        c["undo"] = "retype forward again to %s" % vol.get("volume_type")
+                rows.append({"id": vid, "phase": ph, "can": True, "from_type": vol.get("volume_type"), "to_type": pre["source_type"],
+                             "source_backend": pre.get("source_backend"), "calls": calls})
+            except Exception as exc:
+                rows.append({"id": vid, "phase": ph, "can": False, "why": "could not read it: %s" % exc, "calls": []})
+        return {"volumes": rows, "note": "Nothing was changed. A reverse is a retype back to the first type; the instance is locked around it as on the way there. "
+                                         "The way back needs the soak: once the source is released it cannot be done."}
+
+    def reverse_all(self, reason, by):
+        """Put every reversible volume back (the whole run). Each volume is journaled and checked on its own."""
+        ids = self.reversible()
+        if not ids:
+            raise EngineError("no volume has been cut over, so there is nothing to put back")
+        for vid in ids:
+            self.reverse(vid, reason, by)
+        return ids
+
     def reverse(self, vid, reason, by):
         """A person asks to put a volume back. Only after the retype was sent; before it, the volume is simply given up."""
         reason, by = str(reason or "").strip(), str(by or "").strip()
@@ -484,5 +541,8 @@ class Engine:
             rows.append({"id": vid, "class": (self.inv(vid) or {}).get("class"), "phase": self.phase(vid) or "queued", "note": self.notes.get(vid, ""),
                          "gates": {g: bool(L.gate_signed(j, vid, g, gate)) for g in L.VOLUME_GATES}, "failed": vid in self.failed,
                          "reversible": self.phase(vid) in ("cutover", "postcheck", "soak")})
-        return {"status": self.status, "ticks": self.ticks, "queued": len(self.queue), "active": len(self.active), "finished": len(self.finished),
+        lo, hi = self.window
+        return {"window": {"start_at": lo.strftime("%Y-%m-%dT%H:%M:%SZ") if lo else None, "stop_at": hi.strftime("%Y-%m-%dT%H:%M:%SZ") if hi else None,
+                           "open": self.in_window()}, "reversible": len(self.reversible()),
+                "status": self.status, "ticks": self.ticks, "queued": len(self.queue), "active": len(self.active), "finished": len(self.finished),
                 "failed": len(self.failed), "volumes": rows, "more": max(0, len(ids) - 300), "halted": safety.halted(j)}

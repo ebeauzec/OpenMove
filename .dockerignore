@@ -1,0 +1,17 @@
+# Keep the image small and free of local data
+.git
+.githooks
+.venv
+__pycache__
+*.pyc
+data
+reports
+exports
+logs
+dist
+build
+docs
+tests
+tools
+*.bat
+.openmove_guard_*
