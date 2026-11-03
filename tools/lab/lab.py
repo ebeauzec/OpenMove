@@ -2,7 +2,7 @@
 # Proprietary software; see LICENSE.
 """Control of the OpenMove lab: a disposable WSL distro that runs a real single-node OpenStack (DevStack).
 
-    python tools/lab/lab.py status | up | down | seed | more | fresh-host | clean | list | shell-help
+    python tools/lab/lab.py status | up | down | seed | more | fresh-host | vm-up | vm-down | clean | list | shell-help
 
 Windows with WSL 2 is assumed (the lab is a lab for this machine, not part of the shipped program). Setting the lab up the first time
 (downloading the Ubuntu image, importing the distro, running DevStack, about 40 minutes) is described in tools/lab/README.md; the commands
@@ -125,6 +125,72 @@ def down():
     return 0
 
 
+VM_HOST = "openmove-vmhost"          # the distro that builds and runs the virtual machine (QEMU with KVM)
+VM_DIR = "/var/lib/openmove-vm"
+VM_PORT = 2204
+VM_IQN = "iqn.2026-11.test.openmove:vm-1"
+VM_CHAP_USER = "omuser"
+
+
+def vm_script(name):
+    return (Path(__file__).with_name("vm") / name).read_bytes().decode("utf-8").replace("\r\n", "\n")
+
+
+def vm_chap_secret(cfg):
+    """A 16-character CHAP secret for the lab's test target, derived from the lab password so that no second secret is kept anywhere."""
+    import hashlib
+    return hashlib.sha256((cfg["password"] + ":chap").encode("utf-8")).hexdigest()[:16]
+
+
+def vm_up():
+    """A real virtual machine (its own kernel) as a bare host, and an iSCSI target with two portals for it to log in to (docs/LAB.md)."""
+    from openmove.lab import hosts as H
+    cfg = lab.load_config()
+    if H.ensure_distro(VM_HOST, "vmhost"):
+        print("made the distro %s" % VM_HOST)
+    H.keep_running(VM_HOST)
+    rc, out, err = H.run(VM_HOST, "command -v qemu-system-x86_64 >/dev/null && command -v debootstrap >/dev/null || { export DEBIAN_FRONTEND=noninteractive; apt-get update -qq >/dev/null 2>&1; "
+                         "apt-get install -y -qq qemu-system-x86 qemu-utils debootstrap e2fsprogs >/dev/null 2>&1; }; ls -l /dev/kvm", timeout=1500)
+    if "/dev/kvm" not in out:
+        print("this machine gives WSL no /dev/kvm (CPU virtualisation is off, or nested virtualisation is not available): %s" % (out + err).strip())
+        return 1
+    rc, out, err = H.run(VM_HOST, "test -f %s/disk.img && echo yes || echo no" % VM_DIR, timeout=60)
+    if out.strip() != "yes":
+        print("building the virtual machine disk (a few minutes: Ubuntu 24.04 from the package archive) ...")
+        rc, out, err = H.run(VM_HOST, vm_script("build_vm.sh"), [VM_DIR, cfg["password"], "8G"], timeout=3000)
+        if rc != 0:
+            print("the build failed: %s" % (out + err)[-1500:])
+            return 1
+    rc, out, err = H.run(VM_HOST, vm_script("run_vm.sh"), ["start", VM_DIR, str(VM_PORT)], timeout=120)
+    print(out.strip() or err.strip())
+    ip = H.address(VM_HOST)
+    lab_target = vm_script("make_target.sh")
+    H.run(lab.DISTRO, lab_target, ["remove"], timeout=60)
+    rc, out, err = H.run(lab.DISTRO, lab_target, ["create", ip, VM_IQN, VM_CHAP_USER, vm_chap_secret(cfg)], timeout=120)
+    if rc != 0:
+        print("could not make the iSCSI target: %s" % (out + err)[-800:])
+        return 1
+    print(out.strip().splitlines()[-1])
+    print("")
+    print("The virtual machine is a bare host: address %s, SSH port %d, login root, password: the lab password. Wait about 30 seconds for it to boot." % (ip, VM_PORT))
+    print("In OpenMove (Hosts tab, Set up a new host from here): role migration host, protocol iSCSI,")
+    print("  portals          %s:3261 and %s:3262" % (ip, ip))
+    print("  initiator name   %s" % VM_IQN)
+    print("  CHAP user        %s" % VM_CHAP_USER)
+    print("  CHAP secret      %s   (lab only)" % vm_chap_secret(cfg))
+    print("Then the result should show 2 sessions and 1 multipath device with 2 paths.")
+    return 0
+
+
+def vm_down():
+    from openmove.lab import hosts as H
+    rc, out, err = H.run(VM_HOST, vm_script("run_vm.sh"), ["stop", VM_DIR], timeout=120)
+    print(out.strip() or err.strip())
+    rc, out, err = H.run(lab.DISTRO, vm_script("make_target.sh"), ["remove"], timeout=60)
+    print(out.strip().splitlines()[-1] if out.strip() else "no target")
+    return 0
+
+
 def main(argv):
     try:
         return run(argv)
@@ -137,6 +203,10 @@ def run(argv):
     cmd = argv[1] if len(argv) > 1 else "status"
     if cmd == "status":
         return status()
+    if cmd == "vm-up":
+        return vm_up()
+    if cmd == "vm-down":
+        return vm_down()
     if cmd == "fresh-host":
         from openmove.lab import hosts as lab_hosts
         r = lab_hosts.ensure_fresh_host()

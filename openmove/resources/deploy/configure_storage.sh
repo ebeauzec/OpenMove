@@ -238,6 +238,15 @@ if [ "$PROTO" = "iscsi" ] && command -v iscsiadm >/dev/null 2>&1; then
 fi
 [ "$CHECK" -eq 0 ] && command -v multipath >/dev/null 2>&1 && { udevadm settle >/dev/null 2>&1 || true; multipath -r >/dev/null 2>&1 || true; }
 
+# The multipath maps appear a few seconds after the logins (udev, then multipathd). When a session has a disk, wait for the map before reporting.
+if [ "$CHECK" -eq 0 ] && [ "$SESSIONS" -gt 0 ] && command -v multipath >/dev/null 2>&1; then
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    iscsiadm -m session -P 3 2>/dev/null | grep -q "Attached scsi disk sd" || break
+    multipath -ll 2>/dev/null | grep -q ' dm-[0-9]' && break
+    sleep 2; multipath -r >/dev/null 2>&1 || true
+  done
+fi
+
 # ---- 6. the report -----------------------------------------------------------------------------------------------------------------
 WWPNS=""
 if [ "$PROTO" = "fc" ]; then

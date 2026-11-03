@@ -86,6 +86,7 @@ The architecture as built is in `docs/ARCHITECTURE.md`: one Python process (stan
 | `openmove/diag.py`, `openmove/redact.py` | Logs, trace, support bundles; redaction at three levels with a local token map. |
 | `openmove/lab/hosts.py` | Makes, starts, registers and checks the two lab hosts (WSL 2 distros). |
 | `tests/test_staged.py`, `test_mover.py`, `test_diag.py`, `test_redact.py`, `test_lab_hosts.py` | The staged method against the fake fabric, the data mover and the Cinder helper, the hosts registry, diagnostics and bundles, redaction, the lab host setup (calls stubbed). |
+| `tools/lab/vm/` (`build_vm.sh`, `run_vm.sh`, `make_target.sh`), `lab.py vm-up` | The lab's real virtual machine (own kernel, QEMU with KVM) as a bare host and an iSCSI target with two portals, to prove the storage paths of a host setup. |
 | `openmove/bootstrap.py`, `openmove/resources/deploy/configure_storage.sh`, `tests/test_bootstrap.py` | Set up a new host from OpenMove: one login with the administrator password (`ssh.RootLogin`), `prepare_host.sh`, the storage paths (iSCSI initiator, multipath, logins), registration, the key-only proof. Route `POST /api/hosts/setup`; the password is never kept. |
 | `openmove/selfcheck.py`, `openmove/resources/deploy/prepare_host.sh`, `docs/DEPLOYMENT.md`, `tests/test_deploy.py` | The installation self-check; the host setup script (account, packages, key, narrow sudo rights, sshd); the production deployment guide; their tests. |
 | `tools/lab/lab_staged.py` | Drives a real class C move against the lab. |

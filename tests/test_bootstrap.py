@@ -406,6 +406,21 @@ class StorageScriptTests(unittest.TestCase):
             self.assertEqual(r.returncode, 2, args)
             self.assertIn(text, r.stdout, args)
 
+    def test_the_lab_vm_scripts_parse_and_keep_unix_line_endings(self):
+        bash = shutil.which("bash")
+        for name in ("build_vm.sh", "run_vm.sh", "make_target.sh"):
+            p = ROOT / "tools" / "lab" / "vm" / name
+            data = p.read_bytes()
+            self.assertNotIn(b"\r\n", data, name)
+            self.assertIn(b"Copyright (c) 2026 Eugene Beauzec and Obi1 - FZCO", data[:400], name)
+            if bash:
+                r = subprocess.run([bash, "-n", str(p)], capture_output=True, timeout=60)
+                self.assertEqual(r.returncode, 0, name + ": " + r.stderr.decode("utf-8", "replace"))
+
+    def test_the_script_waits_for_the_multipath_map_before_it_reports(self):
+        text = SCRIPT.read_text(encoding="utf-8")
+        self.assertLess(text.index("Attached scsi disk"), text.index("# ---- 6. the report"))
+
     def test_the_script_reads_the_chap_secret_from_standard_input_only(self):
         text = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("--chap-secret-stdin", text)

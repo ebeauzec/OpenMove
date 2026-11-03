@@ -35,7 +35,7 @@ Status words: **met** = built, tested, and (for the retype path) run against the
 |---|---|---|
 | Connector: OpenStack API | **met** | `connectors/` |
 | Connector: Cinder database | **not built** | Needs read access to the database. The playbook's query results can be imported instead |
-| Setting up a migration host from OpenMove (a password login once, the host preparation, the iSCSI and multipath paths, the registration) | **partly**, lab-proven for the host preparation | A bare Ubuntu host with only `sshd` and the root password became a registered migration host that passes H1 to H7. The iSCSI logins and the multipath maps are **not proven**: the lab's WSL hosts share one kernel with the Cinder host (`DEPLOYMENT.md`, section 4.1) |
+| Setting up a migration host from OpenMove (a password login once, the host preparation, the iSCSI and multipath paths, the registration) | **partly**, lab-proven | A bare Ubuntu host with only `sshd` and the root password became a registered migration host that passes H1 to H7, also on a real virtual machine with its own kernel, where the setup made two iSCSI logins with CHAP and one multipath device with two paths that survived a lost path and a reboot (`DEPLOYMENT.md`, section 4.1). Not proven: a FlashArray or SolidFire target, Fibre Channel |
 | Connector: SSH runner | **met**, lab-proven | The system OpenSSH client, keys only, host keys pinned by a person (`MOVER.md`) |
 | Connector: array adapters | **partly** | `lvm` is built and proven in the lab; SolidFire and FlashArray are **not built** and need the arrays |
 | Discovery and release profiles | **met** | |

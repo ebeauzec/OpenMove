@@ -28,6 +28,7 @@ A lab result is evidence that the engine behaves. It is **not** the lab validati
 | `OpenMove-Lab.bat up` | Starts the lab: keeps the distro running, loads the kernel modules, re-attaches the loop devices behind the two volume groups, starts the services. |
 | `OpenMove-Lab.bat more` | Adds the second, larger set of volumes of every class on top of the first (see "The larger catalogue"). It grows the two volume groups first. |
 | `python tools/lab/lab.py fresh-host` | Makes (or readies) a third, bare WSL distro `openmove-fresh` with only `sshd` and the root password login, as a customer would hand over a new Linux host. Prints its address, port (2203) and login. Use it to try **Set up a new host from here** on the Hosts tab (see "A bare host for the host setup"). |
+| `python tools/lab/lab.py vm-up` / `vm-down` | Starts or stops a real virtual machine (its own kernel, QEMU with KVM) as a bare host, and an iSCSI target with two portals for it. Builds the machine the first time (a few minutes). See "A real virtual machine for the storage paths". |
 | `OpenMove-Lab.bat seed` | Creates the test objects (all named `lab-*`; see "The seeded catalogue" below). |
 | `OpenMove-Lab.bat clean` / `list` | Removes or lists them. |
 | `OpenMove-Lab.bat status` | Says whether Keystone answers. |
@@ -56,9 +57,23 @@ The catalogue itself is data, not infrastructure: `OpenMove-Lab.bat seed` makes 
 
 In OpenMove (lab mode or not), Hosts tab, **Set up a new host from here**: name `fresh-1`, the address the command printed, port 2203, login `root`, the lab password, role migration host. Press **Read the host key**, compare it with `wsl -d openmove-fresh -u root -- ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`, type the fingerprint and a name, and press **Set up the host**. The steps S1, S2 and S5 pass, the host is registered with the service account `openmove`, and H1 to H7 pass: the data mover is placed and the host sees both volume groups (the distros share one kernel).
 
-What this lab cannot show: the iSCSI logins and the multipath maps. Pick the protocol iSCSI and step S4 fails with the reasons (`iscsid` cannot bind its socket because the Cinder host's `iscsid` owns it in the shared network namespace; `multipathd` is skipped inside a container). That is the honest result of the lab; a real machine or virtual machine and the arrays are needed to prove those parts (`COVERAGE.md`).
+What this host cannot show: the iSCSI logins and the multipath maps. Pick the protocol iSCSI and step S4 fails with the reasons (`iscsid` cannot bind its socket because the Cinder host's `iscsid` owns it in the shared network namespace; `multipathd` is skipped inside a container). For those parts use the virtual machine below.
 
 To start over, `wsl --unregister openmove-fresh`, then the command again.
+
+## A real virtual machine for the storage paths
+
+The WSL distros share one kernel, so they cannot log in to iSCSI or run multipath on their own. `python tools/lab/lab.py vm-up` starts a real virtual machine instead:
+
+* A distro `openmove-vmhost` builds and runs it with QEMU and KVM (`/dev/kvm` must exist in WSL: CPU virtualisation on, nested virtualisation allowed). The first run builds an Ubuntu 24.04 disk with its own kernel (`tools/lab/vm/build_vm.sh`, about 5 minutes, from the package archive); later runs reuse it. `tools/lab/vm/run_vm.sh` starts it in the background; its console is `/var/lib/openmove-vm/console.log` in that distro.
+* The machine is bare, like a customer's new host: `sshd` with root password login on port 2204 of the lab's address, a kernel, `python3`, nothing of OpenMove's.
+* `tools/lab/vm/make_target.sh` makes an iSCSI target with **two portals** (ports 3261 and 3262) in the lab distro, with the Linux target (`targetcli`): its own name (`iqn.2026-11.test.openmove:array1`), a 256 MB backing file, CHAP, and only the initiator name `iqn.2026-11.test.openmove:vm-1` allowed. It is separate from the targets that Cinder makes. It stands in for an array: one LUN seen over two paths.
+
+The command prints what to type into **Set up a new host from here**: the address, port 2204, login `root`, the lab password, role migration host, protocol iSCSI, the two portals, the initiator name, the CHAP user and the CHAP secret (derived from the lab password, lab only), and the Pure multipath box. Compare the host key with `ssh-keygen -lf /var/lib/openmove-vm/rootfs/etc/ssh/ssh_host_ed25519_key.pub` in the `openmove-vmhost` distro (the disk was made from that folder, so it is an independent source).
+
+The expected result is S1, S2, S4 and S5 passed, "Initiator name to register on each array", and H1 to H7 passed. Inside the machine (as root) `multipath -ll` shows one device `LIO-ORG,omtest` with two paths, and `iscsiadm -m session` two sessions. To start over: `vm-down`, delete `/var/lib/openmove-vm/disk.img` in the distro, `vm-up` (the disk is made again from the kept folder, in seconds).
+
+What this proves and what it does not is in `DEPLOYMENT.md`, section 4.1, "Status".
 
 ## The seeded catalogue
 

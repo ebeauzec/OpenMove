@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.1 (2026-11-03)
+
+### Added
+- The host setup's iSCSI, CHAP and multipath paths are proven on a real virtual machine with its own kernel (two portals, one multipath device with two paths, a lost path, a reboot); the setup script now waits for the multipath map before it reports; lab commands vm-up and vm-down with tools/lab/vm scripts
+
 ## 0.9.0 (2026-11-03)
 
 ### Added

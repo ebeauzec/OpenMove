@@ -1,8 +1,8 @@
 {
-  "version": "0.9.0",
+  "version": "0.9.1",
   "major": 0,
   "minor": 9,
-  "patch": 0,
+  "patch": 1,
   "date": "2026-11-03",
-  "notes": "Class C: staged method, data mover, SSH, host setup from the interface, deployment guide, larger lab"
+  "notes": "Storage paths proven on a real virtual machine; lab VM scripts"
 }
