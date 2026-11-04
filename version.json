@@ -1,8 +1,8 @@
 {
-  "version": "0.12.2",
+  "version": "0.12.3",
   "major": 0,
   "minor": 12,
-  "patch": 2,
+  "patch": 3,
   "date": "2026-11-04",
-  "notes": "A board at the top of every page: status, progress and open actions"
+  "notes": "Volumes in their safety period no longer block the queue; the next volume starts the moment a place is free"
 }

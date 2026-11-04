@@ -17,7 +17,7 @@ from openmove.demo.mock_cloud import PASSWORD, MockCloud
 from openmove.engine import runner
 from openmove.server import create_server
 
-from tests.test_engine import GATE, SECOND, V1, EngineCase
+from tests.test_engine import GATE, SECOND, V1, V2, EngineCase
 
 
 class EngineLoopTests(EngineCase):
@@ -82,6 +82,32 @@ class EngineLoopTests(EngineCase):
         self.assertEqual(len(self.engine.gaps), 1)
         self.assertGreaterEqual(self.engine.gaps[0], 900)
         self.assertEqual(self.state.journal.latest("engine_gap")["data"]["seconds"], self.engine.gaps[0])
+
+    def test_a_volume_in_its_safety_period_does_not_hold_back_the_next_ones(self):
+        self.state.options["concurrency"] = 1
+        self.start([V1, V2])
+        self.engine.tick()
+        self.assertEqual(self.engine.active, [V1])                  # one place, taken by the first
+        self.run_until(V1, "validate")
+        self.sign(V1, "G2", "G3")
+        self.run_until(V1, "postcheck")
+        self.sign(V1, "G4")
+        self.engine.tick()
+        self.assertEqual(self.phase(V1), "soak")
+        self.engine.tick()
+        self.assertIn(V2, self.engine.active)                        # waiting out the safety period takes no place
+
+    def test_a_place_that_is_freed_goes_to_the_next_volume_in_the_same_pass(self):
+        self.state.options["concurrency"] = 1
+        self.start([V1, V2])
+        self.engine.tick()
+        self.assertEqual(self.engine.active, [V1])
+        seen, real_phase = [], self.engine.phase
+        self.engine.advance = seen.append                            # a step that does nothing but is recorded
+        self.engine.phase = lambda v: "aborted" if v == V1 else real_phase(v)    # the first volume ends in this pass
+        self.engine.tick()
+        self.assertEqual(seen, [V1, V2])                             # the second started in the same pass, not five seconds later
+        self.assertEqual(self.engine.active, [V2])
 
     def test_a_dead_thread_is_started_again(self):
         self.start([V1])                                            # thread=False: the run is meant to go on, and nothing is running it
@@ -398,6 +424,15 @@ class ProgressPageTests(unittest.TestCase):
         self.assertIn("Approve before switching", w["g23"]["action"])      # where, and what to press
         self.state.released = {"c"}
         self.assertNotIn("release", {x["kind"] for x in S.api_status(self.state, {}, {})["waiting"]})
+
+    def test_a_row_carries_what_a_second_person_needs_to_see_before_approving(self):
+        self.phase("a", "validate")
+        self.state.inventory = {"volumes": [{"id": "a", "name": "db-data", "size": 50, "class": "C", "volume_type": "sf-gold", "backend": "sf-1", "snapshots": 3,
+                                             "bootable": "false", "attachments": [{"server_id": "s1"}]}]}
+        self.state.servers = {"s1": {"name": "db-server"}}
+        self.state.engine = FakeViewEngine([self.row("a", "validate")])
+        r = S.api_live(self.state, {}, {})["volumes"][0]
+        self.assertEqual((r["name"], r["size"], r["volume_type"], r["snapshots"], r["attached_to"], r["source_backend"]), ("db-data", 50, "sf-gold", 3, ["db-server"], "sf-1"))
 
     def test_release_reaches_a_volume_in_flight_that_is_not_in_todays_choice(self):
         self.state.engine = FakeViewEngine([self.row("held", "recheck", True, True)])

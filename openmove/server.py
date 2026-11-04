@@ -789,7 +789,7 @@ def _board(state, rows, waiting):
     total = len(rows)
     switched = sum(counts.get(k, 0) for k in ("verify", "soak", "done"))
     failed = sum(1 for r in rows if r.get("failed"))
-    active = total - counts.get("done", 0) - counts.get("soak", 0) - counts.get("stopped", 0)
+    active = total - counts.get("done", 0) - counts.get("soak", 0) - counts.get("stopped", 0) - counts.get("queued", 0)
     pct = round(sum(lifecycle.progress(r["phase"]) for r in rows if r["phase"] != "queued") / total, 1) if total else 0
     status = (e.status if e else "idle") or "idle"
     n = len(waiting)
@@ -803,12 +803,19 @@ def _board(state, rows, waiting):
         level, name, detail = "warn", "Trying again", "The move hit a problem and tries again by itself: %s" % e.trouble
     elif n:
         level, name, detail = "warn", "Waiting for you", "%d thing%s only a person can do. Nothing else is holding the move back." % (n, "" if n == 1 else "s")
-    elif status == "finished" or (rows and active == 0):
+    elif status == "finished" or (rows and active == 0 and not counts.get("queued")):
         level, name, detail = "ok", "Finished", "Every volume of this move has reached its end."
     elif status == "stopped":
         level, name, detail = "warn", "Stopped by a person", "No new volume is taken. Volumes already sent carry on in the cloud."
     else:
-        level, name, detail = "ok", "Moving", "%d volume%s in progress. Nothing needs you right now." % (active, "" if active == 1 else "s")
+        bits = []
+        if active:
+            bits.append("%d being worked on" % active)
+        if counts.get("queued"):
+            bits.append("%d waiting for a free place" % counts["queued"])
+        if counts.get("soak"):
+            bits.append("%d in the safety period" % counts["soak"])
+        level, name, detail = "ok", "Moving", "%s. Nothing needs you right now." % (", ".join(bits) or "Working")
     return {"level": level, "state": name, "detail": detail, "total": total, "switched": switched, "active": active, "failed": failed, "percent": min(100.0, pct),
             "stages": [{"id": k, "label": label, "count": counts[k]} for k, label in STAGES if counts.get(k)], "actions": waiting}
 
@@ -844,7 +851,7 @@ def _waiting(state, rows):
         out.append({"kind": "g23", "count": w23, "tab": "live", "button": "sign-g23",
                     "title": "%d volume%s waiting for a second person to approve %s before %s switched" % (w23, " is" if w23 == 1 else "s are", "it" if w23 == 1 else "them", "it is" if w23 == 1 else "they are"),
                     "text": other,
-                    "action": "Press \"Approve before switching\" (it pulses). A second person looks at them first (checks G2 and G3)."})
+                    "action": "Press \"Approve before switching\" (it pulses). A second person looks at them first (the copy is correct and the volume is ready to switch)."})
     if held:
         out.append({"kind": "release", "count": held, "tab": "live", "button": "live-release",
                     "title": "%d volume%s approved and waiting for you to release %s" % (held, " is" if held == 1 else "s are", "it" if held == 1 else "them"),
@@ -853,7 +860,7 @@ def _waiting(state, rows):
         out.append({"kind": "g4", "count": w4, "tab": "live", "button": "sign-g4",
                     "title": "%d volume%s switched over and waiting for a second person to approve the result" % (w4, " is" if w4 == 1 else "s are"),
                     "text": other,
-                    "action": "Press \"Approve the result\" (it pulses). A second person confirms the volume works on its new storage (check G4)."})
+                    "action": "Press \"Approve the result\" (it pulses). A second person confirms the volume works on its new storage."})
     return out
 
 
@@ -881,6 +888,9 @@ def api_live(state, body, query):
         counts[ph] = counts.get(ph, 0) + 1
         v = inv.get(vid, {})
         rows.append({"id": vid, "name": v.get("name"), "size": v.get("size"), "class": v.get("class"), "phase": ph,
+                     "volume_type": v.get("volume_type"), "snapshots": v.get("snapshots") if isinstance(v.get("snapshots"), int) else len(v.get("snapshots") or []),
+                     "attached_to": [(state.servers.get(a.get("server_id")) or {}).get("name") or a.get("server_id") or "" for a in v.get("attachments", [])],
+                     "bootable": v.get("bootable"), "source_backend": v.get("backend"),
                      "progress": lifecycle.progress(ph, copy_pct.get(vid)), "at": e.get("at"), "ready": vid in ready, "g4wait": vid in g4wait,
                      "gates": ({k: (s or {}).get("by") for k, s in lifecycle.gates_of(state.journal, vid, g).items()}
                                if ph in ("sync", "recheck", "postcheck") else None),
@@ -891,7 +901,7 @@ def api_live(state, body, query):
             rows[-1]["gates"] = {k: (s or {}).get("by") for k, s in lifecycle.gates_of(state.journal, vid, g).items()}
     total = len(mine) if mine else (len(admitted) or len(st))
     done = sum(r["progress"] for r in rows)
-    active = [r for r in rows if r["phase"] not in ("soak", "done", "aborted", "rollback")]
+    active = [r for r in rows if r["phase"] not in ("soak", "done", "aborted", "rollback") and not (mine and r["phase"] == "queued")]
     rows.sort(key=lambda r: (r["phase"] in ("soak", "done", "aborted", "rollback"), -r["progress"], r["id"]))
     unresolved = state.journal.unresolved_steps()
     need_g23 = wait23 if mine else sum(1 for r in rows if r["ready"] and r["gates"] and not (r["gates"]["G2"] and r["gates"]["G3"]))
@@ -907,7 +917,7 @@ def api_live(state, body, query):
             "gate": {"status": g["status"], "message": g["message"]} if g else None,
             "halted": safety.halted(state.journal), "unresolved_steps": len(unresolved), "events": events,
             "cutover_rules": ["two passed rechecks in a row", "at least 5 minutes apart", "newest no older than 15 minutes",
-                              "source unchanged between them", "nothing left to copy", "gate approved right now", "no halt", "G2 and G3 signed by a second person"]}
+                              "source unchanged between them", "nothing left to copy", "gate approved right now", "no halt", "the copy and the readiness approved by a second person"]}
 
 
 def api_demo_scenario(state, body, query):

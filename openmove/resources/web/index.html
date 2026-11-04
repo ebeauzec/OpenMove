@@ -230,7 +230,7 @@
     </div>
     <div id="mv-dry-view"></div>
     <div id="mv-cards" class="cards"></div>
-    <div class="table-wrap"><table id="mv-table"><thead><tr><th>Volume</th><th>Group</th><th>Method</th><th>Stage</th><th>G2</th><th>G3</th><th>G4</th><th>What is happening</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="mv-table"><thead><tr><th>Volume</th><th>Group</th><th>Method</th><th>Stage</th><th>Copy checked</th><th>Ready to switch</th><th>Switch checked</th><th>What is happening</th><th></th></tr></thead><tbody></tbody></table></div>
     <p id="mv-more" class="muted"></p>
 
     <details class="more">
@@ -243,7 +243,7 @@
     </details>
     <details class="more">
       <summary>Approvals by the second person</summary>
-      <p class="muted">Each volume needs a second person, who is not the person running the move, to approve three points. G2: the copy is verified. G3: the volume is ready to switch. G4: the switch is verified. You can approve for all volumes that are at that point.</p>
+      <p class="muted">Each volume needs a second person, who is not the person running the move, to approve three points: the copy is correct, the volume is ready to switch, and the switch worked. You can approve for all volumes that are at that point.</p>
       <div class="actions inline">
         <button class="secondary" id="mv-g23">Approve before switching</button>
         <button class="secondary" id="mv-g4">Approve the result</button>
@@ -297,6 +297,26 @@
   <section id="tab-live" class="panel hidden">
     <h2>Progress</h2>
     <div id="live-now" class="livenow hidden" aria-live="polite"></div>
+    <details id="stage-help" class="stagehelp">
+      <summary>What do the stages and the approvals mean?</summary>
+      <h4>The stages of a volume</h4>
+      <dl>
+        <dt>Waiting to start</dt><dd>The volume is chosen but has no free place yet. At most the number set under "Volumes at once" are worked on together; the next one starts the moment a place is free.</dd>
+        <dt>Being copied and checked</dt><dd>OpenMove prepares the volume on the new storage, copies the data and compares it with the original, more than once. The original is not changed.</dd>
+        <dt>Being switched</dt><dd>The short moment when the volume is pointed at the new storage. It starts only after the approvals below and your release.</dd>
+        <dt>Switched, being verified</dt><dd>The volume now lives on the new storage. A second person confirms it works (the third approval).</dd>
+        <dt>In the safety period</dt><dd>The volume works on the new storage and the old copy is kept for a number of days (7 by default) so that you can go back. Nothing is needed from you. It does not take one of the places.</dd>
+        <dt>Finished</dt><dd>The safety period is over. The volume is done.</dd>
+        <dt>Stopped or put back</dt><dd>Something was wrong, or a person stopped it. The volume is back where it was, with its data intact.</dd>
+      </dl>
+      <h4>The three approvals by a second person</h4>
+      <dl>
+        <dt>1. The copy is correct (also called G2)</dt><dd>The copy on the new storage was built and compared with the original: every image, every snapshot, in the right order.</dd>
+        <dt>2. Ready to switch (also called G3)</dt><dd>The new record exists, the original is frozen, a way back is prepared, and the server using the volume is locked. After this approval, the next step is the switch.</dd>
+        <dt>3. The switch worked (also called G4)</dt><dd>After the switch, the volume was checked on the new storage and works.</dd>
+      </dl>
+      <p>The first two approvals are given together (the button "Approve before switching"), then you press "Release" to allow the switch. The third is the button "Approve the result". The person who started the move cannot approve: another person must.</p>
+    </details>
     <div id="live-note" class="banner warn static"></div>
     <div class="actions inline">
       <button class="primary hidden" id="live-start">Start the simulated move</button>
@@ -310,8 +330,8 @@
     <h3>Volumes</h3>
     <div class="actions inline"><button class="primary hidden" id="live-release">Release all volumes that are ready to switch</button><span id="live-ready" class="muted"></span></div>
     <div class="actions inline" id="live-sign">
-      <button class="secondary hidden" id="sign-g23">Approve G2 and G3 (second person)</button>
-      <button class="secondary hidden" id="sign-g4">Approve G4 (second person)</button>
+      <button class="secondary hidden" id="sign-g23">Approve before switching</button>
+      <button class="secondary hidden" id="sign-g4">Approve the result</button>
       <button class="secondary hidden" id="sign-demo">Demo: a made-up second person approves</button>
       <span id="sign-status" class="muted"></span>
     </div>

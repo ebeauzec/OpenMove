@@ -61,6 +61,7 @@
       var form = el('form', { method: 'dialog' });
       form.appendChild(el('h3', { text: o.title }));
       if (o.intro) form.appendChild(el('p', { class: 'muted pre', text: o.intro }));
+      if (o.content) form.appendChild(o.content);
       fields.forEach(function (f) {
         var inp;
         if (f.type === 'textarea') inp = el('textarea', { rows: String(f.rows || 3) });
@@ -285,11 +286,13 @@
   }
 
   // ---- the program stopped and started again: say what happened, and what OpenMove does about it ----
-  var recShown = '', landed = false;
+  var recShown = '', recClosed = '', landed = false;
+  try { recClosed = localStorage.getItem('om-recovery-closed') || ''; } catch (e) { /* no storage: it stays closed until the page is loaded again */ }
   function drawRecovery(r) {
     var box = $('recovery');
     if (!r || r.status === 'none') { box.className = 'recovery hidden'; recShown = ''; return; }
     var key = r.status + '|' + (r.message || '');
+    if (key === recClosed) { box.className = 'recovery hidden'; return; }          // closed by the person: it stays closed until something new happens
     if (key === recShown && !box.classList.contains('hidden')) return;
     recShown = key; clear(box);
     var kind = r.status === 'done' || r.status === 'info' ? 'ok' : r.status === 'failed' ? 'bad' : '';
@@ -321,7 +324,7 @@
       acts.appendChild(fresh);
     } else if (r.status === 'done' || r.status === 'info') {
       var x = el('button', { class: 'secondary', type: 'button', text: 'Close' });
-      x.addEventListener('click', function () { box.className = 'recovery hidden'; });
+      x.addEventListener('click', function () { recClosed = key; try { localStorage.setItem('om-recovery-closed', key); } catch (e) { /* ignore */ } box.className = 'recovery hidden'; });
       acts.appendChild(x);
     }
     if (acts.firstChild) box.appendChild(acts);
@@ -1064,7 +1067,7 @@
     l.volumes.forEach(function (v) {
       var pc = el('td'); pc.appendChild(bar(v.progress, (v.phase === 'aborted' || v.phase === 'rollback') ? 'bad' : (v.phase === 'recheck' ? 'warn' : ''))); pc.appendChild(el('span', { class: 'muted', text: Math.round(v.progress) + '%' }));
       tb.appendChild(el('tr', { 'data-id': v.id, class: 'clickrow' }, [el('td', { class: 'mono', text: v.id.slice(-12) }), el('td', { text: v.name || '-' }), el('td', { text: v['class'] || '-' }), el('td', { text: v.size == null ? '-' : String(v.size) }),
-        el('td', {}, [el('span', { class: 'ph ph-' + v.phase, text: v.phase, title: PHASE_HELP[v.phase] || '' })]), pc, el('td', { text: v.note || '' })]));
+        el('td', {}, [el('span', { class: 'ph ph-' + v.phase, text: STAGE_NAME[v.phase] || v.phase, title: PHASE_HELP[v.phase] || '' })]), pc, el('td', { text: plain(v.note) })]));
     });
     $('live-more').textContent = l.volumes_more ? 'and ' + l.volumes_more + ' more' : '';
     if (currentTab === 'live') { loadUnmigrated(); if (vdId) loadVolume(vdId); }
@@ -1073,7 +1076,7 @@
     $('sign-g4').classList.toggle('hidden', !l.need_g4);
     $('sign-demo').classList.toggle('hidden', !(lastStatus && lastStatus.demo));
     $('sign-demo').textContent = l.auto_sign ? 'Demo: stop the made-up second person approving' : 'Demo: a made-up second person approves';
-    $('sign-status').textContent = (l.need_g23 ? l.need_g23 + ' volume(s) wait for your approval of G2 and G3. ' : '') + (l.need_g4 ? l.need_g4 + ' volume(s) wait for your approval of G4. ' : '') +
+    $('sign-status').textContent = (l.need_g23 ? l.need_g23 + ' volume(s) wait for your approval before the switch. ' : '') + (l.need_g4 ? l.need_g4 + ' volume(s) wait for your approval of the result. ' : '') +
       (l.need_g23 || l.need_g4 ? 'The signer must not be the operator of the run.' : '');
     drawLiveNow(l);
     $('live-ready').textContent = l.ready ? l.ready + ' volume(s) are copied and checked, and wait for your release. You can change this in step 4, Choose.' : '';
@@ -1084,8 +1087,8 @@
     var rows = [], kind = 'ok', eng = (lastStatus.recovery || {}).engine || null;
     function say(k, t) { rows.push(t); if (k === 'bad' || (k === 'warn' && kind !== 'bad')) kind = k; }
     if (l.halted) say('bad', 'Everything is stopped: ' + l.halted.by + ' pressed the emergency stop (' + l.halted.reason + '). Nothing moves until someone allows changes again.');
-    if (l.need_g23) say('warn', 'Nothing is stuck. ' + l.need_g23 + ' volume' + (l.need_g23 === 1 ? ' needs' : 's need') + ' a second person to approve it (checks G2 and G3) before it can be switched. Until then it keeps being checked. Press "Approve before switching" below. The second person must not be the one who started the move.');
-    if (l.need_g4) say('warn', l.need_g4 + ' volume' + (l.need_g4 === 1 ? ' is' : 's are') + ' switched over and waiting for a second person to approve the result (check G4). Press "Approve the result" below.');
+    if (l.need_g23) say('warn', 'Nothing is stuck. ' + l.need_g23 + ' volume' + (l.need_g23 === 1 ? ' needs' : 's need') + ' a second person to approve it (the copy is correct and it is ready to switch) before it can be switched. Until then it keeps being checked. Press "Approve before switching" below. The second person must not be the one who started the move.');
+    if (l.need_g4) say('warn', l.need_g4 + ' volume' + (l.need_g4 === 1 ? ' is' : 's are') + ' switched over and waiting for a second person to approve the result. Press "Approve the result" below.');
     if (l.ready && !l.need_g23) say('warn', l.ready + ' volume' + (l.ready === 1 ? ' is' : 's are') + ' copied and checked, and waiting for your release. Use the button "Release all volumes that are ready to switch".');
     if (eng && eng.trouble) say('warn', 'The move hit a problem and is trying again by itself: ' + eng.trouble);
     if (eng && eng.gaps && eng.gaps.length) say('ok', 'The computer paused for ' + eng.gaps[eng.gaps.length - 1] + ' s (sleep or a stall). OpenMove looked at every volume again; nothing was lost.');
@@ -1370,7 +1373,13 @@
       box.appendChild(el('div', { class: 'table-wrap' }, [t]));
     }
   }
-  var GATE_PLAIN = { G2: 'the copy is verified', G3: 'the volume is ready to switch', G4: 'the switch is verified' };
+  // the codes G2, G3 and G4 in a text from the server, in plain words
+  function plain(t) {
+    return String(t == null ? '' : t)
+      .replace(/G2 and G3/g, 'the copy check and the ready-to-switch check').replace(/G2/g, 'the copy check').replace(/G3/g, 'the ready-to-switch check').replace(/G4/g, 'the switch check')
+      .replace(/is not signed by a second person/g, 'is not approved by a second person').replace(/signed by a second person/g, 'approved by a second person');
+  }
+  var GATE_PLAIN = { G2: 'The copy is correct: it was built on the new storage and compared with the original.', G3: 'The volume is ready to switch: the new record exists, the original is frozen and a way back is prepared.', G4: 'The switch worked: the volume was checked on the new storage.' };
   function releaseVolumes(body, btn) {
     ask({ title: 'Release volumes for the switch',
       intro: 'These volumes are copied and checked. Releasing them lets OpenMove switch the instances over to the new volumes. OpenMove asks every safety rule again for each volume, so a volume that is not ready is skipped.',
@@ -1378,9 +1387,34 @@
       submit: function (v) { me = v.by; body.by = v.by; return api('POST', 'release', body).then(function (l) { renderLive(l); if (vdId) loadVolume(vdId, true); }); } })
       .then(function (v) { if (v) banner('ok', 'Released. A volume is switched only if every condition holds.'); });
   }
+  // the volumes a second person is about to approve, with what they need to know to approve them
+  function approvalTable(names) {
+    var rows = ((lastLive && lastLive.volumes) || []).filter(function (r) {
+      var g = r.gates || {};
+      if (names.indexOf('G4') >= 0) return r.phase === 'postcheck' && !g.G4;
+      return (r.phase === 'validate' || r.phase === 'recheck') && !(g.G2 && g.G3);
+    });
+    if (!rows.length) return null;
+    var head = el('tr', {}, ['Volume', 'Size', 'Kind', 'Type', 'Used by', 'Snapshots', 'Stage', 'What OpenMove found'].map(function (h) { return el('th', { text: h }); }));
+    var body = rows.map(function (r) {
+      return el('tr', {}, [
+        el('td', { title: r.id }, [el('strong', { text: r.name || r.id.slice(0, 8) }), el('div', { class: 'muted mono', text: r.id.slice(0, 8) })]),
+        el('td', { text: r.size != null ? r.size + ' GiB' : '' }),
+        el('td', { text: CLS_NAME[r['class']] || r['class'] || '' }),
+        el('td', { text: (r.volume_type || '') + (r.source_backend ? ' on ' + r.source_backend : '') }),
+        el('td', { text: (r.attached_to || []).filter(Boolean).join(', ') || 'not attached' }),
+        el('td', { text: String(r.snapshots || 0) }),
+        el('td', { text: (STAGE_NAME[r.phase] || r.phase) }),
+        el('td', { text: plain(r.note) })]);
+    });
+    return el('div', { class: 'approve-vols' }, [
+      el('div', { class: 'k', text: rows.length + ' volume' + (rows.length === 1 ? '' : 's') + ' to approve' }),
+      el('div', { class: 'table-wrap' }, [el('table', {}, [el('thead', {}, [head]), el('tbody', {}, body)])])]);
+  }
+  var STAGE_NAME = { queued: 'waiting to start', precheck: 'first checks', validate: 'copy checked', sync: 'being copied', recheck: 'being rechecked', cutover: 'being switched', postcheck: 'being verified', soak: 'safety period', done: 'finished', aborted: 'stopped', rollback: 'put back' };
   function signGates(names, btn) {
-    ask({ title: 'Approve as the second person',
-      intro: 'You must not be the person running this move.\n' + names.map(function (g) { return g + ': ' + GATE_PLAIN[g]; }).join('\n') + '\n\nSay what you checked. It is saved in the history.' +
+    ask({ title: 'Approve as the second person', content: approvalTable(names),
+      intro: 'You must not be the person running this move.\n' + names.map(function (g) { return '• ' + GATE_PLAIN[g]; }).join('\n') + '\n\nSay what you checked. It is saved in the history.' +
         (lastStatus && lastStatus.demo ? '\n(Demonstration: you can use the name "Demo reviewer".)' : ''),
       fields: [nameField('Your name', 'Not the person running the move.', false), { key: 'note', label: 'What did you check?', type: 'textarea', min: 8 }], ok: 'Approve',
       submit: function (v) {
@@ -1578,10 +1612,10 @@
         act.appendChild(b);
       }
       var st = r.stage, prog = st ? ('images ' + st.verified + '/' + st.images + (st.cut ? ', step ' + st.cut : '') + (st.frozen ? ', frozen' : '') + '. ') : '';
-      var what = el('td', { text: prog + (r.note || '') });
+      var what = el('td', { text: prog + plain(r.note) });
       if (r.error) what.appendChild(el('div', { class: 'muted', text: 'Last error: ' + r.error }));
       tb.appendChild(el('tr', {}, [el('td', { text: r.id }), el('td', { text: r.class || '' }), el('td', { text: r.method === 'staged' ? 'careful copy' : 'storage retype' }), el('td', { text: r.phase }),
-        el('td', { text: r.gates.G2 ? 'signed' : '' }), el('td', { text: r.gates.G3 ? 'signed' : '' }), el('td', { text: r.gates.G4 ? 'signed' : '' }),
+        el('td', { text: r.gates.G2 ? 'approved' : '' }), el('td', { text: r.gates.G3 ? 'approved' : '' }), el('td', { text: r.gates.G4 ? 'approved' : '' }),
         what, act]));
     });
     $('mv-more').textContent = m.more ? m.more + ' more volume(s) not shown.' : '';
@@ -1609,7 +1643,7 @@
     ask({ title: 'Start moving', intro: 'This changes volumes in your cloud. For each volume, nothing is sent until a second person has approved it.',
       fields: [nameField('Your name')], ok: 'Start moving', danger: true,
       submit: function (v) { me = v.by; return api('POST', 'engine/start', { by: v.by, type_map: typeMap(), start_at: $('mv-from').value.trim(), stop_at: $('mv-until').value.trim() }).then(drawMove); } })
-      .then(function (v) { if (v) banner('ok', 'Started. For each volume, nothing is sent until a second person approves G2 and G3 (see step 6, Progress).'); });
+      .then(function (v) { if (v) banner('ok', 'Started. For each volume, nothing is switched until a second person approves it (see step 6, Progress).'); });
   });
   $('mv-rev-preview').addEventListener('click', function () {
     guard($('mv-rev-preview'), function () {

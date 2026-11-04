@@ -293,29 +293,43 @@ class Engine(StagedMixin):
             if h:
                 self.auto_bundle("halt by %s: %s" % (h.get("by"), h.get("reason")))
             o = selection.options_of(self.state)
-            while self.queue and len(self.active) < o["concurrency"] and not safety.halted(self.state.journal) and self.in_window():
-                self.active.append(self.queue.pop(0))
-            for vid in list(self.active):
+            self.fill(o)
+            todo = list(self.active)
+            while todo:
+                self.step(todo.pop(0), o)
                 if self._stop.is_set():
                     break
-                try:
-                    self.advance(vid)
-                except safety.Refused as exc:
-                    self.note(vid, "waiting: " + str(exc))
-                except OutcomeUnknown as exc:
-                    self.note(vid, str(exc))
-                except Exception as exc:                       # a read that failed, a surprise: say so, change nothing, look again next tick
-                    self.note(vid, "could not continue (%s: %s); will look again" % (type(exc).__name__, exc))
-                    self.failure("could not continue with %s" % vid, exc, volume=vid)
-                ph = self.phase(vid)
-                if ph in L.TERMINAL:
-                    self.active.remove(vid)
-                    (self.finished if ph == "done" and vid not in self.failed else self.failed).add(vid)
+                todo += self.fill(o)                           # a place that has just been freed goes to the next volume in the queue now, not at the next look
             limit = o["stop_after_failures"]
             if limit and len(self.failed) >= limit and not safety.halted(self.state.journal):
                 safety.halt(self.state.journal, "OpenMove (automatic)", "%d volumes failed in this run (the limit you set)" % len(self.failed))
             if not self.queue and not self.active:
                 self.status = "finished"
+
+    def fill(self, o):
+        """Take volumes from the queue while there is a free place. A volume in its safety period only waits for days: it does not hold a place. Returns the volumes taken."""
+        taken = []
+        while self.queue and sum(1 for v in self.active if self.phase(v) != "soak") < o["concurrency"] and not safety.halted(self.state.journal) and self.in_window():
+            vid = self.queue.pop(0)
+            self.active.append(vid)
+            taken.append(vid)
+        return taken
+
+    def step(self, vid, o):
+        """One step of one volume; a volume that has ended leaves the active set."""
+        try:
+            self.advance(vid)
+        except safety.Refused as exc:
+            self.note(vid, "waiting: " + str(exc))
+        except OutcomeUnknown as exc:
+            self.note(vid, str(exc))
+        except Exception as exc:                       # a read that failed, a surprise: say so, change nothing, look again next tick
+            self.note(vid, "could not continue (%s: %s); will look again" % (type(exc).__name__, exc))
+            self.failure("could not continue with %s" % vid, exc, volume=vid)
+        ph = self.phase(vid)
+        if ph in L.TERMINAL:
+            self.active.remove(vid)
+            (self.finished if ph == "done" and vid not in self.failed else self.failed).add(vid)
 
     # ---- one volume, one step ---------------------------------------------------------------------------------
     def advance(self, vid):

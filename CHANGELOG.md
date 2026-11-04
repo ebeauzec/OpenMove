@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.3 (2026-11-04)
+
+### Fixed
+- A move with more volumes than places looked stuck: the ten volumes that had been switched sat in their seven-day safety period and kept all the places, so the 37 waiting volumes never started. A volume in its safety period no longer takes a place, and a place that is freed goes to the next volume in the queue in the same pass (before, at the next look, five seconds later). The board and the Progress page no longer count waiting volumes as being worked on; they say how many are being worked on, how many wait for a free place and how many are in the safety period. The notice 'Back where you were' stays closed once it is closed (it came back at every refresh of the page). New on the Progress page: a panel that explains the stages and the checks G2, G3 and G4 in plain words. The approval dialog (Approve before switching, Approve the result) now lists the volumes being approved: name, size, kind, type and back-end, the instance that uses it, snapshots, stage and what OpenMove found; GET /api/live rows carry volume_type, snapshots, attached_to, bootable and source_backend. The gate codes G2, G3 and G4 no longer appear on the page: the buttons, the table headings, the dialog, the notes and the board say 'the copy is correct', 'ready to switch' and 'the switch worked' (the help panel names the codes once, for the documents).
+
 ## 0.12.2 (2026-11-04)
 
 ### Changed

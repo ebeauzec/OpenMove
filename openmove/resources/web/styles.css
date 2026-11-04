@@ -268,3 +268,14 @@ button.attention { animation: attn 1.4s ease-in-out infinite; outline: 3px solid
 .topboard .ny-do { font-size: .82rem; font-weight: 600; }
 .topboard .ny-text { font-size: .78rem; color: var(--muted); }
 .topboard .tb-detail { font-size: .78rem; }
+.stagehelp { margin: 8px 0 14px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel, transparent); }
+.stagehelp summary { cursor: pointer; font-weight: 600; }
+.stagehelp h4 { margin: 12px 0 4px; }
+.stagehelp dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; }
+.stagehelp dt { font-weight: 600; }
+.stagehelp dd { margin: 0; }
+@media (max-width: 700px) { .stagehelp dl { grid-template-columns: 1fr; } }
+.approve-vols { margin: 8px 0 12px; max-height: 40vh; overflow: auto; }
+.approve-vols table { font-size: .8rem; }
+.approve-vols .mono { font-family: ui-monospace, monospace; font-size: .72rem; }
+dialog.ask:has(.approve-vols) { width: min(1000px, 96vw); }
