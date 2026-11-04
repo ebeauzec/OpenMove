@@ -225,6 +225,48 @@ def api_hosts_setup(state, body, query):
     return dict(res, checks=checks, hosts=api_hosts_get(state, {}, {}))
 
 
+def api_hosts_array(state, body, query):
+    """Store, list, forget or check the login of an array on a migration host (docs/ARRAY_API.md). The password is used for this request only:
+    it is sent to the host's data mover, which keeps it in a root-only file. It is not stored here, not journaled, not logged and not returned."""
+    h = _host(state, body.get("host"))
+    action = str(body.get("action") or "")
+    if action not in ("set", "forget", "list", "check"):
+        raise _err("action is set, forget, list or check", 400)
+    arr = dict(body.get("array") or {})
+    name = str(arr.get("name") or body.get("name") or "")
+    try:
+        if action == "list":
+            return {"arrays": h.mover("array.list")["arrays"]}
+        if action == "forget":
+            res = h.mover("array.forget", {"name": name})
+            state.journal.record("array_login", h.name, {"array": name, "action": "forget"})
+            return res
+        if action == "check":
+            rows = [r for r in h.mover("array.list")["arrays"] if r["name"] == name]
+            if not rows:
+                raise _err("no login is stored for the array %r on %s" % (name, h.name), 404)
+            ok, detail = array_check_row(h, rows[0])
+            return {"ok": ok, "detail": detail}
+        password = arr.pop("password", None)
+        args = dict(arr, name=name)
+        if password:
+            args["password"] = str(password)
+        try:
+            res = h.mover("array.set", args)
+        finally:
+            password = ""
+            args.pop("password", None)
+        state.journal.record("array_login", h.name, {"array": name, "action": "set", "family": arr.get("family"), "mgmt": arr.get("mgmt"), "user": arr.get("user") or ""})
+        ok, detail = array_check_row(h, res)
+        return dict(res, check={"ok": ok, "detail": detail})
+    except ssh.SshError as exc:
+        raise _err(str(exc), 502) from None
+
+
+def array_check_row(h, row):
+    return hosts_mod.array_check(h, row)
+
+
 def _host(state, name):
     try:
         return hosts_mod.host(state.home, str(name or ""))

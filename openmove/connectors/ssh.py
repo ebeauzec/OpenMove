@@ -59,6 +59,16 @@ def tool(name):
     return p
 
 
+SECRET_KEYS = ("password", "secret", "chap_secret", "token")
+
+
+def scrub_args(args):
+    """The arguments of a mover verb as they may be traced: a secret is never written to the call log."""
+    if not isinstance(args, dict):
+        return args
+    return {k: ("***" if k in SECRET_KEYS else v) for k, v in args.items()}
+
+
 def trace(entry):
     if TRACE:
         try:
@@ -242,9 +252,9 @@ class Host:
         try:
             res = json.loads(out.strip().splitlines()[-1])
         except (ValueError, IndexError):
-            trace({"kind": "mover", "host": self.name, "verb": verb, "args": args, "rc": rc, "error": "no answer", "stdout": out[:TRACE_LIMIT], "stderr": err[:TRACE_LIMIT]})
+            trace({"kind": "mover", "host": self.name, "verb": verb, "args": scrub_args(args), "rc": rc, "error": "no answer", "stdout": out[:TRACE_LIMIT], "stderr": err[:TRACE_LIMIT]})
             raise SshError("the data mover on %s gave no answer (rc %s): %s" % (self.name, rc, (err or out).strip()[:2000]), rc=rc) from None
-        trace({"kind": "mover", "host": self.name, "verb": verb, "args": args, "rc": rc, "answer": res})
+        trace({"kind": "mover", "host": self.name, "verb": verb, "args": scrub_args(args), "rc": rc, "answer": res})
         if not res.get("ok"):
             raise SshError("the data mover on %s refused %s: %s" % (self.name, verb, res.get("error")), rc=rc)
         return res
@@ -267,9 +277,9 @@ class Host:
         try:
             res = json.loads(out.strip().splitlines()[-1])
         except (ValueError, IndexError):
-            trace({"kind": "cinder", "host": self.name, "verb": verb, "args": args, "rc": rc, "error": "no answer", "stdout": out[:TRACE_LIMIT], "stderr": err[-TRACE_LIMIT:]})
+            trace({"kind": "cinder", "host": self.name, "verb": verb, "args": scrub_args(args), "rc": rc, "error": "no answer", "stdout": out[:TRACE_LIMIT], "stderr": err[-TRACE_LIMIT:]})
             raise SshError("the Cinder helper on %s gave no answer (rc %s): %s" % (self.name, rc, (err or out).strip()[-2000:]), rc=rc) from None
-        trace({"kind": "cinder", "host": self.name, "verb": verb, "args": args, "rc": rc, "answer": res})
+        trace({"kind": "cinder", "host": self.name, "verb": verb, "args": scrub_args(args), "rc": rc, "answer": res})
         if not res.get("ok"):
             raise SshError("the Cinder helper on %s refused %s: %s" % (self.name, verb, res.get("error")), rc=rc)
         return res

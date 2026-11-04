@@ -116,6 +116,10 @@ OpenMove sends the file once (its SHA-256 is checked on the host) to its own fol
 | `lv.extend` | Grow a staging volume OpenMove made, to the new size of the source (a tenant extended it during the copy). Idempotent. Never makes a volume smaller | only what carries the tag `openmove` |
 | `lv.remove` | Remove one volume OpenMove made, with the snapshots OpenMove made of it. A snapshot it did not make stops the removal | only what carries the tag `openmove` |
 | `lv.remove_source_snapshots` | After sign-off: remove named snapshots of one named origin | the only removal of something OpenMove did not create |
+| `array.set`, `array.list`, `array.forget` | Store, list and remove the login of one array in a root-only file in the mover's folder. The list never shows the password | the mover's own folder |
+| `sf.call` | One call of the Element API, from a fixed list (`ARRAY_API.md`, section 3). A clone must be read only and in the migration account; a delete, purge or access change is refused for a volume that is not in that account | clones in the migration account |
+| `pure.cli` | One Purity CLI command over SSH with a key, from a fixed list (`ARRAY_API.md`, section 4). A change is refused for a volume the mover did not make; a ledger file records what it made | volumes it made on the array |
+| `iscsi.login`, `iscsi.logout`, `dev.wait` | Log in to one target (discovery first), log out of a session the mover opened (never another), and wait for a device path under `/dev/disk` or `/dev/mapper` with a size check | sessions it opened |
 | `vg.free` | Size and free space of a volume group | nothing |
 | `job.start`, `job.status`, `job.cancel` | A background **copy**, **hash** or **compare** of two devices | writes only the destination device |
 | `cleanup` | Remove finished job folders; with `all`, the whole mover folder (refused while a job runs) | the mover's own folder |

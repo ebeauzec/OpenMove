@@ -181,6 +181,8 @@ def readiness(h, home, source=None, target=None, family="lvm", bench=False):
             except AdapterError as exc:
                 out.append(rec("H8", "Sees both back-ends' storage", False, "%s (volume groups visible: %s)" % (exc, ", ".join(vgs) or "none"),
                                "The data mover host must see the logical volumes of both back-ends."))
+    if "mover" in roles:
+        out += array_checks(h)
     if "cinder" in roles:
         try:
             for be in [b for b in (source, target) if b]:
@@ -192,6 +194,35 @@ def readiness(h, home, source=None, target=None, family="lvm", bench=False):
             out.append(rec("C2", "Name templates are the defaults (P5)", ok, json.dumps(r), "The method assumes volume-%s and snapshot-%s.", level=None if ok else "warn"))
         except ssh.SshError as exc:
             out.append(rec("C1", "Cinder helper runs", False, str(exc), "Set the interpreter Cinder uses (python) and, if needed, the user (cinder_user)."))
+    return out
+
+
+def array_check(h, row):
+    """One call that changes nothing, to prove that the stored login of an array works and that the array is one the adapter knows. (ok, detail)."""
+    try:
+        if row["family"] == "solidfire":
+            r = h.mover("sf.call", {"array": row["name"], "method": "GetClusterVersionInfo"})["reply"] or {}
+            ver = r.get("clusterVersion") or "unknown version"
+            return True, "Element %s at %s" % (ver, row.get("mgmt"))
+        r = h.mover("pure.cli", {"array": row["name"], "argv": ["purearray", "list"]})
+        if r["rc"] != 0:
+            return False, "the Purity CLI answered with rc %s: %s" % (r["rc"], (r["stderr"] or r["stdout"]).strip())
+        return True, "FlashArray at %s: %s" % (row.get("mgmt"), r["stdout"].strip().splitlines()[-1] if r["stdout"].strip() else "answered")
+    except ssh.SshError as exc:
+        return False, str(exc)
+
+
+def array_checks(h):
+    """H10: each array whose login is stored on the host answers. Nothing is checked when no login is stored (the LVM lab, or a host that is not set up for arrays yet)."""
+    try:
+        rows = h.mover("array.list")["arrays"]
+    except ssh.SshError:
+        return []
+    out = []
+    for row in rows:
+        ok, detail = array_check(h, row)
+        out.append(rec("H10", "Array %s answers" % row["name"], ok, detail,
+                       "Store the login again, check the management address from the host, and for a FlashArray add the host's key to the array user (docs/ARRAY_API.md)."))
     return out
 
 

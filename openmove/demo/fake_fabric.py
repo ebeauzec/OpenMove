@@ -96,6 +96,9 @@ class FakeMover:
             raise SshError("%s/%s was not created by OpenMove (no 'openmove' tag): it is not touched" % (vg, origin))
         return {"lv": copy.deepcopy(self.add(vg, name, size, self.content[(vg, origin)], origin=origin)), "existed": False}
 
+    def v_array_list(self, a):
+        return {"arrays": []}
+
     def v_lv_extend(self, a):
         vg, name, size = a["vg"], a["name"], int(a["bytes"])
         r = self.lv[vg].get(name)

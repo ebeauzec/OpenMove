@@ -13,6 +13,9 @@ What it does, and what it never does:
   * It removes only what it created (tag "openmove"); the single exception is `lv.remove_source_snapshots`, which removes named snapshots
     of one named origin, and nothing else.
   * It never runs a shell: every program is started with an argument list.
+  * It calls an array only through a short, fixed list of calls per family (sf.call for SolidFire, pure.cli for FlashArray; docs/ARRAY_API.md).
+    A call off the list is refused. It changes only clones in the migration account (SolidFire) and volumes it made itself (FlashArray).
+    The login of an array is a root-only file in its own folder; it is never returned and never logged.
   * A copy or a hash runs as a background job that survives the loss of the SSH connection, writes its progress to a status file, and can
     be started again: a copy compares first and writes only the blocks that differ, so repeating it is safe and cheap.
 """
@@ -583,7 +586,354 @@ def v_vg_free(a):
     return {"vg": vg, "bytes": int(float(size)), "free_bytes": int(float(free))}
 
 
+# ---- arrays: closed lists of calls (docs/ARRAY_API.md) --------------------------------------------------------------------------
+# The mover calls an array only through a short list per family. A call that is not on the list is refused, whatever the controller sends.
+# The login for each array is a root-only file in the mover's own folder, written by `array.set`. It is never returned and never logged.
+ARRAYS = os.path.join(HOME, "arrays")
+ARRAY_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,40}$")
+ADDRESS_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.:-]{0,120}$")
+USER_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,60}$")
+LOOPBACK = ("127.0.0.1", "localhost", "::1")
+SF_READ = ("GetClusterInfo", "GetClusterVersionInfo", "GetClusterCapacity", "ListAccounts", "GetAccountByName", "ListVolumes", "ListSnapshots",
+           "GetAsyncResult", "ListSyncJobs", "ListVolumeAccessGroups", "ListDeletedVolumes")
+SF_WRITE = ("CloneVolume", "AddVolumesToVolumeAccessGroup", "RemoveVolumesFromVolumeAccessGroup", "DeleteVolume", "PurgeDeletedVolume")
+SF_CLONE_KEYS = ("volumeID", "snapshotID", "name", "newAccountID", "access", "attributes")
+STAGE_NAME = re.compile(r"^(stage|om)-[A-Za-z0-9][A-Za-z0-9._-]{0,58}$")
+CINDER_NAME = re.compile(r"^volume-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-cinder$")
+SNAP_SUFFIX = re.compile(r"^(snapshot-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|om-[A-Za-z0-9._-]{1,50})$")
+SIZE_OK = re.compile(r"^[1-9][0-9]{0,9}[MGT]$")
+IQN_OK = re.compile(r"^(iqn\.[0-9]{4}-[0-9]{2}\.[A-Za-z0-9.:_-]{1,200}|eui\.[0-9A-Fa-f]{16})$")
+PORTAL_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.:-]{0,100}:[0-9]{1,5}$")
+DEVICE_DIRS = ("/dev/disk/by-path/", "/dev/mapper/", "/dev/disk/by-id/")
+
+
+def array_file(name, ext="json"):
+    if not isinstance(name, str) or not ARRAY_NAME.match(name):
+        raise MoverError("array name %r is not a safe name" % (name,))
+    return os.path.join(ARRAYS, "%s.%s" % (name, ext))
+
+
+def write_private(path, text):
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def array_config(name):
+    try:
+        with open(array_file(name)) as f:
+            return json.load(f)
+    except (IOError, OSError):
+        raise MoverError("no login is stored for the array %r on this host (array.set)" % name)
+    except ValueError:
+        raise MoverError("the stored login of the array %r cannot be read" % name)
+
+
+def v_array_set(a):
+    """Store the login of one array: root-only file, never returned. SolidFire: management address, user, password, the id of the migration
+    account that owns the clones. FlashArray: management address, a user that logs in with a key, the name of the migration host's host object."""
+    name, family, mgmt = a.get("name"), a.get("family"), a.get("mgmt")
+    array_file(name)
+    if family not in ("solidfire", "pure"):
+        raise MoverError("family must be solidfire or pure")
+    if not isinstance(mgmt, str) or not ADDRESS_OK.match(mgmt):
+        raise MoverError("the management address %r is not valid" % (mgmt,))
+    user = a.get("user") or ("pureuser" if family == "pure" else "")
+    if not USER_OK.match(user or ""):
+        raise MoverError("the user name is not valid")
+    cfg = {"name": name, "family": family, "mgmt": mgmt, "user": user}
+    if family == "solidfire":
+        scheme = a.get("scheme") or "https"
+        if scheme not in ("https", "http") or (scheme == "http" and mgmt.split(":")[0] not in LOOPBACK):
+            raise MoverError("the scheme must be https (http only to this machine, for tests)")
+        acct, pw = a.get("migration_account_id"), a.get("password")
+        if not isinstance(acct, int) or isinstance(acct, bool) or acct <= 0:
+            raise MoverError("migration_account_id must be the number of the account that owns the clones")
+        if not isinstance(pw, str) or not pw:
+            raise MoverError("a password is needed")
+        cfg.update(scheme=scheme, password=pw, migration_account_id=acct, insecure=bool(a.get("insecure")), api_version=str(a.get("api_version") or "11.0"))
+    else:
+        host = a.get("host_object")
+        if not isinstance(host, str) or not NAME_OK.match(host):
+            raise MoverError("host_object must be the name of the migration host's host object on the array")
+        ident = a.get("identity")
+        if ident is not None and (not isinstance(ident, str) or not os.path.isfile(ident)):
+            raise MoverError("the identity file %r does not exist on this host" % (ident,))
+        cfg.update(host_object=host, identity=ident)
+    write_private(array_file(name), json.dumps(cfg))
+    return {"stored": True, "name": name, "family": family, "mgmt": mgmt, "insecure": bool(cfg.get("insecure"))}
+
+
+def v_array_list(a):
+    out = []
+    if os.path.isdir(ARRAYS):
+        for fn in sorted(os.listdir(ARRAYS)):
+            if fn.endswith(".json"):
+                try:
+                    with open(os.path.join(ARRAYS, fn)) as f:
+                        c = json.load(f)
+                except (IOError, OSError, ValueError):
+                    continue
+                out.append({k: c.get(k) for k in ("name", "family", "mgmt", "user", "scheme", "insecure", "migration_account_id", "host_object")})
+    return {"arrays": out}
+
+
+def v_array_forget(a):
+    gone = False
+    for ext in ("json", "made"):
+        try:
+            os.remove(array_file(a.get("name"), ext))
+            gone = gone or ext == "json"
+        except OSError:
+            pass
+    return {"removed": gone}
+
+
+# ---- SolidFire: the Element API --------------------------------------------------------------------------------------------------
+def sf_post(cfg, method, params, version=None):
+    import base64
+    import ssl
+    import urllib.error
+    import urllib.request
+    url = "%s://%s/json-rpc/%s" % (cfg.get("scheme", "https"), cfg["mgmt"], version or cfg.get("api_version") or "11.0")
+    body = json.dumps({"method": method, "params": params, "id": 1}).encode()
+    req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json", "Authorization": "Basic " + base64.b64encode(
+        ("%s:%s" % (cfg["user"], cfg["password"])).encode()).decode()})
+    ctx = ssl._create_unverified_context() if cfg.get("insecure") and url.startswith("https") else None
+    try:
+        with urllib.request.urlopen(req, timeout=120, context=ctx) as r:
+            raw = r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        raise MoverError("Element %s: HTTP %s: %s" % (method, exc.code, exc.read().decode("utf-8", "replace")[:2000]))
+    except Exception as exc:
+        raise MoverError("Element %s: %s: %s" % (method, type(exc).__name__, exc))
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        raise MoverError("Element %s gave an answer that is not JSON: %s" % (method, raw[:500]))
+    if "error" in data:
+        raise MoverError("Element %s error: %s" % (method, json.dumps(data["error"])))
+    return data.get("result")
+
+
+def sf_int(value, what):
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise MoverError("%s must be a positive whole number" % what)
+    return value
+
+
+def sf_owned(cfg, volume_id):
+    """True when the volume belongs to the migration account (only clones OpenMove made live there)."""
+    res = sf_post(cfg, "ListVolumes", {"volumeIDs": [volume_id]}) or {}
+    vols = res.get("volumes") or []
+    if not vols:
+        res = sf_post(cfg, "ListDeletedVolumes", {}) or {}
+        vols = [v for v in res.get("volumes") or [] if v.get("volumeID") == volume_id]
+    return bool(vols) and vols[0].get("accountID") == cfg["migration_account_id"]
+
+
+def sf_check(cfg, method, p):
+    if method in SF_READ:
+        return
+    if method not in SF_WRITE:
+        raise MoverError("the Element method %s is not on the list of calls the mover makes (docs/ARRAY_API.md)" % method)
+    if method == "CloneVolume":
+        extra = sorted(set(p) - set(SF_CLONE_KEYS))
+        if extra:
+            raise MoverError("CloneVolume does not take %s here" % ", ".join(extra))
+        sf_int(p.get("volumeID"), "volumeID")
+        if "snapshotID" in p:
+            sf_int(p["snapshotID"], "snapshotID")
+        if p.get("newAccountID") != cfg["migration_account_id"]:
+            raise MoverError("a clone must belong to the migration account %s" % cfg["migration_account_id"])
+        if p.get("access") != "readOnly":
+            raise MoverError("a clone is made read only")
+        nm = p.get("name")
+        if not isinstance(nm, str) or not NAME_OK.match(nm) or len(nm) > 64:
+            raise MoverError("the clone name must be a safe name of at most 64 characters")
+        return
+    if method in ("AddVolumesToVolumeAccessGroup", "RemoveVolumesFromVolumeAccessGroup"):
+        sf_int(p.get("volumeAccessGroupID"), "volumeAccessGroupID")
+        vols = p.get("volumes")
+        if not isinstance(vols, list) or not vols:
+            raise MoverError("volumes must be a list of volume ids")
+        for v in vols:
+            if not sf_owned(cfg, sf_int(v, "a volume id")):
+                raise MoverError("volume %s does not belong to the migration account: the mover does not change its access" % v)
+        return
+    vid = sf_int(p.get("volumeID"), "volumeID")                     # DeleteVolume, PurgeDeletedVolume
+    if not sf_owned(cfg, vid):
+        raise MoverError("volume %s does not belong to the migration account: the mover removes only the clones it made" % vid)
+
+
+def v_sf_call(a):
+    cfg = array_config(a.get("array"))
+    if cfg.get("family") != "solidfire":
+        raise MoverError("%r is not a SolidFire array" % a.get("array"))
+    method, params = a.get("method"), a.get("params") or {}
+    if not isinstance(method, str) or not isinstance(params, dict):
+        raise MoverError("method must be a name and params an object")
+    sf_check(cfg, method, params)
+    return {"reply": sf_post(cfg, method, params, a.get("version")), "method": method}
+
+
+# ---- FlashArray: the Purity CLI over SSH ----------------------------------------------------------------------------------------
+def made_names(array):
+    try:
+        with open(array_file(array, "made")) as f:
+            return set(x.strip() for x in f if x.strip())
+    except (IOError, OSError):
+        return set()
+
+
+def save_made(array, names):
+    write_private(array_file(array, "made"), "\n".join(sorted(names)) + ("\n" if names else ""))
+
+
+def pure_check(cfg, argv):
+    """Returns (kind, ledger change) for an allowed command, or raises. Write commands touch only volumes this mover made."""
+    if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
+        raise MoverError("argv must be a list of strings")
+    made, a = made_names(cfg["name"]), argv
+    vname = lambda x: isinstance(x, str) and (STAGE_NAME.match(x) or CINDER_NAME.match(x))
+    ours = lambda x: x in made
+    if a[:2] == ["purearray", "list"] and a[2:] in ([], ["--space"]) or a == ["pureport", "list"]:
+        return "read", None
+    if a[:2] == ["purevol", "list"]:
+        rest = a[2:]
+        for flag in (["--snap"], ["--connect"], []):
+            if rest[:len(flag)] == flag and rest[len(flag):len(flag) + 2] == ["--notitle", "--csv"] and len(rest) == len(flag) + 3:
+                nm = rest[-1]
+                if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$", nm):
+                    raise MoverError("%r is not a volume name" % nm)
+                return "read", None
+        raise MoverError("this purevol list form is not on the list")
+    if len(a) == 5 and a[:3] == ["purevol", "create", "--size"] and SIZE_OK.match(a[3]) and STAGE_NAME.match(a[4]):
+        return "write", ("add", a[4])
+    if len(a) == 5 and a[:3] == ["purevol", "setattr", "--size"] and SIZE_OK.match(a[3]) and ours(a[4]):
+        return "write", None
+    if len(a) == 5 and a[:3] == ["purevol", "snap", "--suffix"] and SNAP_SUFFIX.match(a[3]) and ours(a[4]):
+        return "write", None
+    if len(a) == 4 and a[:2] == ["purevol", "rename"] and ours(a[2]) and vname(a[3]):
+        return "write", ("rename", a[2], a[3])
+    if len(a) == 5 and a[:2] == ["purehost", "connect"] and a[2] == "--vol" and ours(a[3]) and a[4] == cfg["host_object"]:
+        return "write", None
+    if len(a) == 5 and a[:2] == ["purehost", "disconnect"] and a[2] == "--vol" and ours(a[3]) and a[4] == cfg["host_object"]:
+        return "write", None
+    if len(a) == 3 and a[:2] == ["purevol", "destroy"]:
+        base, _, suffix = a[2].partition(".")
+        if ours(a[2]):
+            return "write", ("remove", a[2])
+        if suffix and ours(base) and SNAP_SUFFIX.match(suffix):
+            return "write", None
+    raise MoverError("this Purity command is not on the list of commands the mover runs, or it names an object this mover did not make (docs/ARRAY_API.md)")
+
+
+def v_pure_cli(a):
+    cfg = array_config(a.get("array"))
+    if cfg.get("family") != "pure":
+        raise MoverError("%r is not a FlashArray" % a.get("array"))
+    argv = a.get("argv")
+    kind, change = pure_check(cfg, argv)
+    cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=yes"]
+    if cfg.get("identity"):
+        cmd += ["-i", cfg["identity"]]
+    cmd += ["%s@%s" % (cfg["user"], cfg["mgmt"])] + list(argv)
+    rc, out, err = run(cmd, timeout=int(a.get("timeout") or 120))
+    if rc == 0 and change:
+        made = made_names(cfg["name"])
+        if change[0] == "add":
+            made.add(change[1])
+        elif change[0] == "rename":
+            made.discard(change[1])
+            made.add(change[2])
+        elif change[0] == "remove":
+            made.discard(change[1])
+        save_made(cfg["name"], made)
+    return {"rc": rc, "stdout": out, "stderr": err, "kind": kind}
+
+
+# ---- iSCSI sessions and devices the arrays present ---------------------------------------------------------------------------------
+def sessions_file():
+    return os.path.join(ARRAYS, "iscsi-sessions.made")
+
+
+def v_iscsi_login(a):
+    portal, iqn = a.get("portal"), a.get("iqn")
+    if not isinstance(portal, str) or not PORTAL_OK.match(portal) or not isinstance(iqn, str) or not IQN_OK.match(iqn):
+        raise MoverError("portal must be address:port and iqn a valid target name")
+    rc, out, err = run(["iscsiadm", "-m", "session"])
+    if rc == 0 and any((" %s," % portal) in line and (" %s " % iqn) in line + " " for line in out.splitlines()):
+        return {"existed": True}
+    rc, out, err = run(["iscsiadm", "-m", "discovery", "-t", "sendtargets", "-p", portal])
+    if rc != 0:
+        raise MoverError("iscsiadm discovery on %s failed (rc %s): %s" % (portal, rc, (err or out).strip()))
+    rc, out, err = run(["iscsiadm", "-m", "node", "-T", iqn, "-p", portal, "-l"])
+    if rc != 0 and "already present" not in (err + out):
+        raise MoverError("iscsiadm login to %s at %s failed (rc %s): %s" % (iqn, portal, rc, (err or out).strip()))
+    keep = set()
+    try:
+        with open(sessions_file()) as f:
+            keep = set(x.strip() for x in f if x.strip())
+    except (IOError, OSError):
+        pass
+    keep.add("%s %s" % (portal, iqn))
+    write_private(sessions_file(), "\n".join(sorted(keep)) + "\n")
+    return {"existed": False}
+
+
+def v_iscsi_logout(a):
+    """Only sessions this mover opened are closed: never the sessions Cinder's own volume service uses."""
+    portal, iqn = a.get("portal"), a.get("iqn")
+    if not isinstance(portal, str) or not PORTAL_OK.match(portal) or not isinstance(iqn, str) or not IQN_OK.match(iqn):
+        raise MoverError("portal must be address:port and iqn a valid target name")
+    keep = set()
+    try:
+        with open(sessions_file()) as f:
+            keep = set(x.strip() for x in f if x.strip())
+    except (IOError, OSError):
+        pass
+    key = "%s %s" % (portal, iqn)
+    if key not in keep:
+        raise MoverError("the mover did not log in to %s at %s: it does not log out of it" % (iqn, portal))
+    rc, out, err = run(["iscsiadm", "-m", "node", "-T", iqn, "-p", portal, "-u"])
+    if rc != 0 and "No matching sessions" not in (err + out) and "not logged in" not in (err + out).lower():
+        raise MoverError("iscsiadm logout from %s at %s failed (rc %s): %s" % (iqn, portal, rc, (err or out).strip()))
+    keep.discard(key)
+    write_private(sessions_file(), "\n".join(sorted(keep)) + ("\n" if keep else ""))
+    return {"logged_out": True}
+
+
+def v_dev_wait(a):
+    """Rescan and wait until a device path exists; report its size and, when asked, check it (a path under /dev/disk or /dev/mapper only)."""
+    path = a.get("path")
+    if not isinstance(path, str) or ".." in path or not any(path.startswith(d) for d in DEVICE_DIRS):
+        raise MoverError("%r is not a device path under /dev/disk or /dev/mapper" % (path,))
+    end = time.time() + min(int(a.get("timeout") or 60), 600)
+    while True:
+        if os.path.exists(path):
+            rc, out, err = run(["blockdev", "--getsize64", path])
+            if rc == 0 and out.strip().isdigit():
+                size = int(out.strip())
+                want = a.get("bytes")
+                if want is not None and int(want) != size:
+                    raise MoverError("%s has %d bytes, not the %d expected" % (path, size, int(want)))
+                return {"path": path, "bytes": size}
+        if time.time() >= end:
+            raise MoverError("the device %s did not appear in time" % path)
+        if which("iscsiadm"):
+            run(["iscsiadm", "-m", "session", "--rescan"])
+        if which("multipath"):
+            run(["multipath", "-r"])
+        time.sleep(2)
+
+
 VERBS = {"probe": v_probe, "lv.list": v_lv_list, "lv.create": v_lv_create, "lv.snapshot": v_lv_snapshot, "lv.rename": v_lv_rename, "lv.extend": v_lv_extend,
+         "array.set": v_array_set, "array.list": v_array_list, "array.forget": v_array_forget, "sf.call": v_sf_call, "pure.cli": v_pure_cli,
+         "iscsi.login": v_iscsi_login, "iscsi.logout": v_iscsi_logout, "dev.wait": v_dev_wait,
          "lv.remove": v_lv_remove, "lv.remove_source_snapshots": v_lv_remove_source_snapshots, "job.start": v_job_start,
          "job.status": v_job_status, "job.cancel": v_job_cancel, "cleanup": v_cleanup, "diag": v_diag, "bench": v_bench, "vg.free": v_vg_free}
 

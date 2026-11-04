@@ -1153,6 +1153,7 @@ ROUTES = {
     ("GET", "hosts/setup-script"): server_hosts.api_hosts_setup_script,
     ("POST", "hosts/probe"): server_hosts.api_hosts_probe,
     ("POST", "hosts/setup"): server_hosts.api_hosts_setup,
+    ("POST", "hosts/array"): server_hosts.api_hosts_array,
     ("POST", "hosts/save"): server_hosts.api_hosts_save,
     ("POST", "hosts/remove"): server_hosts.api_hosts_remove,
     ("POST", "hosts/scan"): server_hosts.api_hosts_scan,

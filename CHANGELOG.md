@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.0 (2026-11-04)
+
+### Added
+- Researched which array calls the staged method needs (docs/ARRAY_API.md: Element API, Purity CLI and what the Queens drivers do for SolidFire, FlashArray and ONTAP, with each fact marked as read in a driver, in the playbook scripts, in vendor documentation, or still to confirm). The data mover now makes array calls only from a closed list per family: sf.call (Element API; a clone must be read only and in the migration account; delete, purge and access changes are refused for volumes outside it) and pure.cli (Purity CLI over SSH with a key; changes only volumes the mover made, tracked in a ledger; never eradicate, copy, pods or host objects). New verbs: array.set, array.list, array.forget (the array login is a root-only file on the host and is never returned or traced), iscsi.login, iscsi.logout (only sessions the mover opened), dev.wait. New route POST /api/hosts/array and host check H10. Call-log arguments named password, secret or token are masked. The SolidFire and FlashArray adapters are not built; ONTAP stores snapshots as LUN clones and needs a design first. Safety rows 55 and 56.
+
 ## 0.9.2 (2026-11-04)
 
 ### Changed

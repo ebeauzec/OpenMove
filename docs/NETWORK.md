@@ -15,7 +15,7 @@ Requirement R2: OpenMove talks to OpenStack and nothing else, and every destinat
 | This machine only (no destination) | The installation self-check: reads the program's own files and runs `ssh -V` to read the OpenSSH client's version | `selfcheck.py` (runs the local `ssh`; opens no connection) | `--self-check`, and on request |
 | The OpenStack lab on this machine (identity, Horizon) | Lab mode only: find the lab's address, check that its dashboard answers | `lab/__init__.py` | `--lab` only |
 
-Nothing else is contacted. OpenMove never connects to a database, and never to an array's management address: the migration host, which the person registered, reaches the arrays' storage. A Cinder host or migration host is reached only after a person registered it and pinned its host key. No password is ever used: SSH logs in with OpenMove's own key pair, in the data folder.
+Nothing else is contacted. OpenMove never connects to a database, and never to an array's management address: the migration host, which the person registered, reaches the arrays' storage and, for the staged method, their management addresses (the Element API over HTTPS on the SolidFire management address; SSH to the FlashArray management address; `ARRAY_API.md`). A Cinder host or migration host is reached only after a person registered it and pinned its host key. No password is ever used: SSH logs in with OpenMove's own key pair, in the data folder.
 
 ## What listens
 
