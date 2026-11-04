@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.2 (2026-11-04)
+
+### Fixed
+- On the Pre-flight tab the Attest button was the last column of the platform checks table, so on a normal window it was off the right edge and needed a sideways scroll. It is now the column after Status, and the Check column has a minimum width so its text no longer wraps one word to a line.
+
 ## 0.10.1 (2026-11-04)
 
 ### Fixed

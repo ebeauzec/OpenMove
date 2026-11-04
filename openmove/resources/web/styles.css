@@ -63,6 +63,8 @@ table { border-collapse: collapse; width: 100%; font-size: .87rem; margin: 8px 0
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
 th { color: var(--muted); font-weight: 600; white-space: nowrap; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.checks td:nth-child(2) { min-width: 14em; }
+table.checks td.action { white-space: nowrap; }
 code, .mono { font-family: ui-monospace, Consolas, monospace; font-size: .85em; }
 .cls { display: inline-block; min-width: 1.6em; text-align: center; font-weight: 700; border-radius: 4px; padding: 0 6px; background: var(--info-bg); }
 .cls-E { background: var(--bad-bg); color: var(--bad); } .cls-D { background: var(--warn-bg); color: var(--warn); }

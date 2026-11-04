@@ -508,12 +508,12 @@
       v.appendChild(ul);
     }
     v.appendChild(el('h3', { text: 'Platform checks' }));
-    var t = el('table'), head = el('tr');
-    ['ID', 'Check', 'Status', 'Evidence', 'What it means', ''].forEach(function (h) { head.appendChild(el('th', { text: h })); });
+    var t = el('table', { class: 'checks' }), head = el('tr');
+    ['ID', 'Check', 'Status', '', 'Evidence', 'What it means'].forEach(function (h) { head.appendChild(el('th', { text: h })); });
     t.appendChild(el('thead', {}, [head]));
     var tb = el('tbody');
     c.platform.concat(c.volume.filter(function (x) { return x.id === 'V9' || x.id === 'V10'; })).forEach(function (k) {
-      var a = att[k.id], action = el('td');
+      var a = att[k.id], action = el('td', { class: 'action' });
       if (k.status === 'warn' || k.status === 'not_checked') {
         var b = el('button', { class: 'secondary', text: a ? 'Withdraw' : 'Attest' });
         b.addEventListener('click', function () {
@@ -523,8 +523,8 @@
         action.appendChild(b);
       }
       var meaning = k.meaning + (a ? '  Attested by ' + a.by + ': ' + a.note : '');
-      tb.appendChild(el('tr', {}, [el('td', { class: 'mono', text: k.id }), el('td', { text: k.title }), el('td', {}, [chip(k.status)]),
-        el('td', { text: k.evidence }), el('td', { text: meaning }), action]));
+      tb.appendChild(el('tr', {}, [el('td', { class: 'mono', text: k.id }), el('td', { text: k.title }), el('td', {}, [chip(k.status)]), action,
+        el('td', { text: k.evidence }), el('td', { text: meaning })]));
       if (attesting === k.id) tb.appendChild(el('tr', {}, [el('td', { colspan: '6' }, [attestForm(c, k)])]));
     });
     t.appendChild(tb); v.appendChild(el('div', { class: 'table-wrap' }, [t]));
