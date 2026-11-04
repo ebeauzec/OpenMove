@@ -70,10 +70,22 @@ class Engine(StagedMixin):
         out = {}
         for vid in ids:
             v = self.inv(vid)
+            if v is None:                          # a volume that is under way but not in the inventory read now (it already left the source back-end, or the inventory is a later one): how it was started is in the journal
+                out[vid] = self.spec_from_journal(vid, types)
+                continue
             tt, why = plan.target_type_for(v.get("volume_type"), type_map, types, c["target_backend"])
             out[vid] = {"class": v.get("class"), "source_backend": c["source_backend"], "target_backend": c["target_backend"],
                         "target_type": tt, "why_no_type": why, "types": types, "source_type": v.get("volume_type")}
         return out
+
+    def spec_from_journal(self, vid, types):
+        """The spec a volume was started with, read from its precheck event. Never guessed: without the event the volume gets no target type and the engine says why."""
+        pre = next((e for e in L.history(self.state.journal, vid) if e["phase"] == "precheck"), None) or {}
+        c = self.state.checks or {}
+        return {"class": pre.get("class"), "source_backend": pre.get("source_backend") or c.get("source_backend"),
+                "target_backend": pre.get("target_backend") or c.get("target_backend"), "target_type": pre.get("target_type"),
+                "why_no_type": "" if pre.get("target_type") else "the journal has no record of how this volume was started",
+                "types": types, "source_type": pre.get("source_type")}
 
     def movable(self):
         """The classes this engine moves now: A and B always (Cinder's retype); C when a migration host and a Cinder host are registered and ready."""

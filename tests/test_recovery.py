@@ -17,7 +17,7 @@ from openmove.demo.mock_cloud import PASSWORD, MockCloud
 from openmove.engine import runner
 from openmove.server import create_server
 
-from tests.test_engine import SECOND, V1, EngineCase
+from tests.test_engine import GATE, SECOND, V1, EngineCase
 
 
 class EngineLoopTests(EngineCase):
@@ -119,6 +119,18 @@ class EngineLoopTests(EngineCase):
         j.record("engine_run", "batch", {})
         j.record("engine_end", "batch", {"reason": "finished"})
         self.assertFalse(recovery.engine_should_resume(j))
+
+    def test_a_volume_under_way_that_is_not_in_the_inventory_read_after_a_restart_keeps_its_spec(self):
+        """After a restart the inventory is read for the source back-end only, and a volume that was moved is no longer there."""
+        from openmove import lifecycle as L
+        L.enter(self.state.journal, V1, "precheck", {"class": "A", "method": L.RETYPE, "source_backend": "sf-1", "target_backend": "pure-1",
+                                                      "source_type": "fast", "target_type": "pure"}, gate=GATE, now=self.now)
+        self.state.inventory = {"volumes": []}                      # the volume left the source back-end
+        sp = self.engine.specs(self.engine.acts(), [V1], {})[V1]
+        self.assertEqual((sp["target_type"], sp["source_type"], sp["class"]), ("pure", "fast", "A"))
+        sp = self.engine.specs(self.engine.acts(), ["unknown"], {})["unknown"]       # no record: no type, and a reason, not a crash
+        self.assertIsNone(sp["target_type"])
+        self.assertIn("no record", sp["why_no_type"])
 
     def test_the_view_tells_the_page_about_trouble_gaps_and_revivals(self):
         v = self.engine.view()
@@ -332,6 +344,56 @@ class OneInstanceTests(unittest.TestCase):
         import os
         from openmove.server import _Server
         self.assertEqual(_Server.allow_reuse_address, os.name != "nt")
+
+
+class FakeViewEngine:
+    status = "running"
+    trouble, gaps, revived = "", [], 0
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    def view(self):
+        return {"volumes": self.rows}
+
+
+class ProgressPageTests(unittest.TestCase):
+    """The Progress page counts only what the engine holds, and says what each volume waits for."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.server, self.state = create_server("127.0.0.1", 0, Path(self.dir.name))
+
+    def tearDown(self):
+        self.server.server_close()
+        self.state.journal.close()
+        self.dir.cleanup()
+
+    def row(self, vid, phase, g2=False, g3=False, g4=False):
+        return {"id": vid, "phase": phase, "note": "note %s" % vid, "gates": {"G2": g2, "G3": g3, "G4": g4}}
+
+    def phase(self, vid, phase):
+        from openmove import lifecycle
+        self.state.journal.record(lifecycle.KIND, vid, {"phase": phase})
+
+    def test_volumes_that_need_a_second_person_are_counted_and_the_percentage_stays_under_100(self):
+        for vid, ph in (("a", "validate"), ("b", "recheck"), ("c", "postcheck"), ("old1", "done"), ("old2", "done")):
+            self.phase(vid, ph)                                    # old1 and old2 are earlier work that is not part of this run
+        self.state.engine = FakeViewEngine([self.row("a", "validate"), self.row("b", "recheck"), self.row("c", "postcheck"), self.row("q", "queued")])
+        live = S.api_live(self.state, {}, {})
+        self.assertEqual(live["total"], 4)
+        self.assertEqual((live["need_g23"], live["need_g4"], live["ready"]), (2, 1, 0))
+        self.assertLessEqual(live["overall"], 100)
+        self.assertEqual({v["id"] for v in live["volumes"]}, {"a", "b", "c", "q"})
+        self.assertEqual(next(v for v in live["volumes"] if v["id"] == "a")["note"], "note a")
+
+    def test_signed_volumes_wait_for_the_release_not_for_a_person(self):
+        self.phase("a", "validate")
+        self.state.engine = FakeViewEngine([self.row("a", "validate", True, True)])
+        live = S.api_live(self.state, {}, {})
+        self.assertEqual((live["need_g23"], live["ready"]), (0, 1))
+        self.state.released = {"a"}
+        self.assertEqual(S.api_live(self.state, {}, {})["ready"], 0)
 
 
 class FakeClock:

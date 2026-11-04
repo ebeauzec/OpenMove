@@ -1044,7 +1044,7 @@
     var rows = [], kind = 'ok', eng = (lastStatus.recovery || {}).engine || null;
     function say(k, t) { rows.push(t); if (k === 'bad' || (k === 'warn' && kind !== 'bad')) kind = k; }
     if (l.halted) say('bad', 'Everything is stopped: ' + l.halted.by + ' pressed the emergency stop (' + l.halted.reason + '). Nothing moves until someone allows changes again.');
-    if (l.need_g23) say('warn', 'Nothing is stuck. ' + l.need_g23 + ' volume' + (l.need_g23 === 1 ? ' is' : 's are') + ' copied and checked, and waiting for a second person to approve (checks G2 and G3). Use the button "Approve G2 and G3" below. The second person must not be the one who started the move.');
+    if (l.need_g23) say('warn', 'Nothing is stuck. ' + l.need_g23 + ' volume' + (l.need_g23 === 1 ? ' needs' : 's need') + ' a second person to approve it (checks G2 and G3) before it can be switched. Until then it keeps being checked. Use the button "Approve G2 and G3" below. The second person must not be the one who started the move.');
     if (l.need_g4) say('warn', l.need_g4 + ' volume' + (l.need_g4 === 1 ? ' is' : 's are') + ' switched over and waiting for a second person to approve the result (check G4). Use the button "Approve G4" below.');
     if (l.ready && !l.need_g23) say('warn', l.ready + ' volume' + (l.ready === 1 ? ' is' : 's are') + ' copied and checked, and waiting for your release. Use the button "Release all volumes that are ready to switch".');
     if (eng && eng.trouble) say('warn', 'The move hit a problem and is trying again by itself: ' + eng.trouble);

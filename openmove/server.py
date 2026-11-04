@@ -763,12 +763,17 @@ def api_live(state, body, query):
     inv = {v["id"]: v for v in (state.inventory or {}).get("volumes", [])}
     admitted = selection.selected_ids(state)
     sim = state.sim
+    mine = {}                                          # the real engine: only the volumes it holds count, and what each one waits for comes from the engine
+    if state.engine is not None and not state.demo:
+        mine = {r["id"]: r for r in state.engine.view()["volumes"]}
+        st = {k: st.get(k) or {"phase": "queued", "at": None} for k in mine}
     opts = selection.options_of(state)
     ready = {v for v, pl in (sim._plan.items() if sim else ()) if pl.get("stage") == "ready"}
     g4wait = {v for v, pl in (sim._plan.items() if sim else ()) if pl.get("stage") == "g4wait"}
     copy_pct = sim.progress if sim else {}
     g = _gate(state)
     counts, rows = {}, []
+    wait23 = wait4 = held = 0
     for vid, e in st.items():
         ph = e["phase"]
         counts[ph] = counts.get(ph, 0) + 1
@@ -779,21 +784,31 @@ def api_live(state, body, query):
                                if ph in ("sync", "recheck", "postcheck") else None),
                      "note": (sim.notes.get(vid) if sim and ph not in ("aborted", "rollback") else None) or e.get("reason") or
                              ("source changed: back to sync" if e.get("regression") else "")})
-    total = len(admitted) or len(st)
+        if mine:                                       # what each volume waits for, read from the engine and the gates
+            gs = mine[vid]["gates"]
+            rows[-1]["note"] = mine[vid]["note"] or rows[-1]["note"]
+            rows[-1]["gates"] = {k: (s or {}).get("by") for k, s in lifecycle.gates_of(state.journal, vid, g).items()}
+            if ph in ("validate", "recheck") and not (gs["G2"] and gs["G3"]):
+                wait23 += 1
+            elif ph in ("validate", "recheck") and vid not in state.released:
+                held += 1
+            elif ph == "postcheck" and not gs["G4"]:
+                wait4 += 1
+    total = len(mine) if mine else (len(admitted) or len(st))
     done = sum(r["progress"] for r in rows)
     active = [r for r in rows if r["phase"] not in ("soak", "done", "aborted", "rollback")]
     rows.sort(key=lambda r: (r["phase"] in ("soak", "done", "aborted", "rollback"), -r["progress"], r["id"]))
     unresolved = state.journal.unresolved_steps()
-    need_g23 = sum(1 for r in rows if r["ready"] and r["gates"] and not (r["gates"]["G2"] and r["gates"]["G3"]))
+    need_g23 = wait23 if mine else sum(1 for r in rows if r["ready"] and r["gates"] and not (r["gates"]["G2"] and r["gates"]["G3"]))
     events = [{"id": e["id"], "ts": e["ts"], "kind": e["kind"], "line": _event_line(e)} for e in state.journal.events(None, None, 40)
               if e["kind"] in ("phase", "refusal", "halt", "resume", "preflight", "signoff", "attestation", "demo", "report", "audit", "inventory", "platform")]
     return {"mode": ("simulation" if sim else "idle") if state.demo else "idle",
             "engine": "not built" if not state.demo else "simulated, demonstration only",
             "simulation": {"status": sim.status, "running": sim.running, "throughput_mb_s": round(sim.throughput),
                            "rate_cap_mb_s": opts["rate_cap_mb_s"], "virtual_time": sim.vnow.strftime("%Y-%m-%d %H:%M"), "ticks": sim.ticks} if sim else None,
-            "total": total, "started": len(st), "active": len(active), "counts": counts, "ready": len(ready), "need_g23": need_g23, "need_g4": len(g4wait), "auto_sign": state.auto_sign, "options": opts,
+            "total": total, "started": len(st), "active": len(active), "counts": counts, "ready": held if mine else len(ready), "need_g23": need_g23, "need_g4": wait4 if mine else len(g4wait), "auto_sign": state.auto_sign, "options": opts,
             "by_class": {k: sum(1 for v in admitted if inv.get(v, {}).get("class") == k) for k in "ABC"} if admitted else {},
-            "overall": round(done / total, 1) if total else 0, "volumes": rows[:150], "volumes_more": max(0, len(rows) - 150),
+            "overall": min(100.0, round(done / total, 1)) if total else 0, "volumes": rows[:150], "volumes_more": max(0, len(rows) - 150),
             "gate": {"status": g["status"], "message": g["message"]} if g else None,
             "halted": safety.halted(state.journal), "unresolved_steps": len(unresolved), "events": events,
             "cutover_rules": ["two passed rechecks in a row", "at least 5 minutes apart", "newest no older than 15 minutes",

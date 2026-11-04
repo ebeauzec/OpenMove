@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.1 (2026-11-04)
+
+### Fixed
+- Two faults found while proving the failsafe on the lab. (1) The Progress page counted every volume in the journal against only the selected ones, so a real move could show 282% done, and it listed volumes that were not part of the move; the volumes waiting for a second person (G2 and G3 before the switch, G4 after it) were only counted for the simulation, so a real move that waited for approval looked stuck and the page said nothing. It now counts the volumes the engine holds, never shows more than 100%, and says in a sentence what each volume waits for (approval, release, a retry). (2) After a restart the engine could not take up a volume that was under way but had already left the source back-end, because the inventory is read for the source back-end only and the spec of the volume came from it; the restore failed with a missing-value error. The spec of such a volume is now read from its precheck event in the journal, never guessed.
+
 ## 0.12.0 (2026-11-04)
 
 ### Added
