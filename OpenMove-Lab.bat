@@ -13,6 +13,7 @@ REM   OpenMove-Lab.bat list       show them
 REM   OpenMove-Lab.bat status     is the lab cloud answering?
 REM   OpenMove-Lab.bat down       stop the lab gracefully (its data is kept); OpenMove-Lab-Stop.bat does the same by double-click
 REM   OpenMove-Lab.bat reset      start OpenMove in lab mode with an empty journal and evidence
+REM   OpenMove-Lab.bat --port 9000 --no-browser    any option that starts with a dash goes on to OpenMove
 setlocal
 cd /d "%~dp0"
 title OpenMove lab
@@ -28,6 +29,7 @@ if "%PYTHON%"=="" (
 
 set CMD=%1
 if "%CMD%"=="" goto :run
+if "%CMD:~0,1%"=="-" goto :run
 if /i "%CMD%"=="up" goto :tool
 if /i "%CMD%"=="down" goto :tool
 if /i "%CMD%"=="seed" goto :tool
@@ -52,9 +54,23 @@ goto :finished
 if errorlevel 1 (
     echo The lab cloud is not answering. Starting it ...
     %PYTHON% tools\lab\lab.py up
-    if errorlevel 1 goto :finished
+    if errorlevel 1 call :partial
+    if defined LABFAILED goto :finished
 )
 %PYTHON% -m openmove --lab %*
+
+goto :finished
+
+:partial
+REM the cloud may answer although a guest did not start: OpenMove can still start, and says what is missing
+%PYTHON% tools\lab\lab.py status >nul 2>nul
+if errorlevel 1 (
+    set LABFAILED=1
+    exit /b 1
+)
+echo.
+echo The lab cloud answers, but not everything started. OpenMove starts anyway; the message above says what is missing.
+exit /b 0
 
 :finished
 if errorlevel 1 (

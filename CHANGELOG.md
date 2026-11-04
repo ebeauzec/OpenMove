@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.1 (2026-11-04)
+
+### Fixed
+- OpenMove-Lab.bat from a cold machine stopped after DevStack came up: nova-compute starts before Keystone answers and fails about 30 seconds later, after lab_up.sh had already looked for failed units, so the compute service stayed down and the batch file stopped before OpenMove started. lab_up.sh now waits for Keystone and checks that nova-compute stays up, restarting it up to five times. The batch file starts OpenMove even when the cloud answers but a guest did not start, passes options that start with a dash on to OpenMove, and the batch files are kept CRLF (.gitattributes).
+
 ## 0.10.0 (2026-11-04)
 
 ### Added

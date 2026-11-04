@@ -1,8 +1,8 @@
 {
-  "version": "0.10.0",
+  "version": "0.10.1",
   "major": 0,
   "minor": 10,
-  "patch": 0,
+  "patch": 1,
   "date": "2026-11-04",
-  "notes": "Array calls on the migration host: closed lists for SolidFire and FlashArray"
+  "notes": "Lab cold start: nova-compute is restarted when Keystone was not ready"
 }
