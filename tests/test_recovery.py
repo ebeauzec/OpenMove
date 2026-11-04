@@ -387,6 +387,31 @@ class ProgressPageTests(unittest.TestCase):
         self.assertEqual({v["id"] for v in live["volumes"]}, {"a", "b", "c", "q"})
         self.assertEqual(next(v for v in live["volumes"] if v["id"] == "a")["note"], "note a")
 
+    def test_what_waits_for_a_person_is_listed_with_where_to_do_it(self):
+        self.state.journal.record("engine_start", "batch", {"by": "Olive Operator"})
+        self.state.engine = FakeViewEngine([self.row("a", "validate"), self.row("b", "recheck"), self.row("c", "validate", True, True),
+                                            self.row("d", "postcheck"), self.row("e", "postcheck", g4=True), self.row("f", "queued")])
+        w = {x["kind"]: x for x in S.api_status(self.state, {}, {})["waiting"]}
+        self.assertEqual({k: v["count"] for k, v in w.items()}, {"g23": 2, "release": 1, "g4": 1})
+        self.assertEqual((w["g23"]["tab"], w["g23"]["button"]), ("live", "sign-g23"))
+        self.assertIn("Olive Operator", w["g23"]["text"])           # who may not approve
+        self.assertIn("Approve before switching", w["g23"]["action"])      # where, and what to press
+        self.state.released = {"c"}
+        self.assertNotIn("release", {x["kind"] for x in S.api_status(self.state, {}, {})["waiting"]})
+
+    def test_release_reaches_a_volume_in_flight_that_is_not_in_todays_choice(self):
+        self.state.engine = FakeViewEngine([self.row("held", "recheck", True, True)])
+        self.state.selection = set()                                 # the choice no longer holds it (a restart, a changed choice)
+        with self.assertRaises(ValueError):
+            S.api_release(self.state, {"all": True, "by": "x"}, {})
+        S.api_release(self.state, {"all": True, "by": "Olive Operator"}, {})
+        self.assertEqual(self.state.released, {"held"})
+
+    def test_nothing_waits_when_nothing_needs_a_person(self):
+        self.assertEqual(S.api_status(self.state, {}, {})["waiting"], [])
+        self.state.engine = FakeViewEngine([self.row("a", "cutover"), self.row("f", "queued")])
+        self.assertEqual(S.api_status(self.state, {}, {})["waiting"], [])
+
     def test_signed_volumes_wait_for_the_release_not_for_a_person(self):
         self.phase("a", "validate")
         self.state.engine = FakeViewEngine([self.row("a", "validate", True, True)])

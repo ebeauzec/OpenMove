@@ -256,6 +256,8 @@ class ApiError(Exception):
 # ---- API handlers: (state, body, query) -> JSON-able ---------------------------------------------
 
 def api_status(state, body, query):
+    rows = _engine_rows(state)
+    waiting = _waiting(state, rows)
     with state.lock:
         g = _gate(state)
         return {"version": __version__, "home": str(state.home), "connected": state.session is not None,
@@ -264,7 +266,7 @@ def api_status(state, body, query):
                 "platform": state.platform is not None, "inventory": state.inventory is not None,
                 "audit": state.audit is not None, "checks": state.checks is not None, "gate": g["status"] if g else None,
                 "read_only": (state.platform or {}).get("read_only", True),
-                "unresolved_steps": len(state.journal.unresolved_steps()), "lab_form": _lab_form(state), "recovery": _recovery_view(state),
+                "unresolved_steps": len(state.journal.unresolved_steps()), "lab_form": _lab_form(state), "recovery": _recovery_view(state), "waiting": waiting, "board": _board(state, rows, waiting),
                 "wizard": wizard.steps(state, g)}
 
 
@@ -557,6 +559,8 @@ def api_release(state, body, query):
     if len(by) < 3:
         raise ValueError("releasing needs the name of the person who releases")
     sel = selection.selected_ids(state)
+    if state.engine is not None and not state.demo:         # a volume already in flight is released even when today's choice no longer holds it (a restart, a changed choice)
+        sel = list(dict.fromkeys(list(sel) + [r["id"] for r in _engine_rows(state)]))
     if body.get("all"):
         ids = list(sel)
     else:
@@ -757,6 +761,102 @@ def api_volume(state, body, query):
     return view
 
 
+STAGES = (("queued", "waiting to start"), ("copy", "being copied and checked"), ("switch", "being switched"), ("verify", "switched, being verified"),
+          ("soak", "in the safety period"), ("done", "finished"), ("stopped", "stopped or put back"))
+STAGE_OF = {"queued": "queued", "precheck": "copy", "validate": "copy", "sync": "copy", "copy": "copy", "recheck": "copy", "cutover": "switch", "postcheck": "verify",
+            "soak": "soak", "done": "done", "aborted": "stopped", "rollback": "stopped"}
+
+
+def _engine_rows(state):
+    if state.demo or state.engine is None:
+        return []
+    try:
+        return state.engine.view()["volumes"]
+    except Exception:
+        return []
+
+
+def _board(state, rows, waiting):
+    """The three things shown at the top of every page: the status of the move, how far it has got, and what a person has to do. Plain words, one level
+    (ok, warn, bad, idle) that decides the colour."""
+    if state.demo or state.session is None:
+        return None
+    e, h = state.engine, safety.halted(state.journal)
+    counts = {}
+    for r in rows:
+        k = STAGE_OF.get(r["phase"], "copy")
+        counts[k] = counts.get(k, 0) + 1
+    total = len(rows)
+    switched = sum(counts.get(k, 0) for k in ("verify", "soak", "done"))
+    failed = sum(1 for r in rows if r.get("failed"))
+    active = total - counts.get("done", 0) - counts.get("soak", 0) - counts.get("stopped", 0)
+    pct = round(sum(lifecycle.progress(r["phase"]) for r in rows if r["phase"] != "queued") / total, 1) if total else 0
+    status = (e.status if e else "idle") or "idle"
+    n = len(waiting)
+    if h:
+        level, name, detail = "bad", "Everything is stopped", "%s pressed the emergency stop: %s. Nothing is changed until someone allows changes again." % (h["by"], h["reason"])
+    elif status.startswith("stopped after an error"):
+        level, name, detail = "bad", "Stopped by an error", "%s. Nothing was lost; start the move again from step 5, Move." % status
+    elif not rows and status in ("idle", "finished"):
+        level, name, detail = "idle", "No move is running", "Nothing is moving. Go on with the steps; the move is started in step 5, Move."
+    elif e and e.trouble:
+        level, name, detail = "warn", "Trying again", "The move hit a problem and tries again by itself: %s" % e.trouble
+    elif n:
+        level, name, detail = "warn", "Waiting for you", "%d thing%s only a person can do. Nothing else is holding the move back." % (n, "" if n == 1 else "s")
+    elif status == "finished" or (rows and active == 0):
+        level, name, detail = "ok", "Finished", "Every volume of this move has reached its end."
+    elif status == "stopped":
+        level, name, detail = "warn", "Stopped by a person", "No new volume is taken. Volumes already sent carry on in the cloud."
+    else:
+        level, name, detail = "ok", "Moving", "%d volume%s in progress. Nothing needs you right now." % (active, "" if active == 1 else "s")
+    return {"level": level, "state": name, "detail": detail, "total": total, "switched": switched, "active": active, "failed": failed, "percent": min(100.0, pct),
+            "stages": [{"id": k, "label": label, "count": counts[k]} for k, label in STAGES if counts.get(k)], "actions": waiting}
+
+
+def _waits(state, rows):
+    """What a real move waits for, from the engine's rows: (volumes that need a second person for G2 and G3, volumes that wait for the release, volumes that need a second person for G4)."""
+    wait23 = held = wait4 = 0
+    for r in rows:
+        ph, gs = r["phase"], r["gates"]
+        if ph in ("validate", "recheck") and not (gs["G2"] and gs["G3"]):
+            wait23 += 1
+        elif ph in ("validate", "recheck") and r["id"] not in state.released:
+            held += 1
+        elif ph == "postcheck" and not gs["G4"]:
+            wait4 += 1
+    return wait23, held, wait4
+
+
+def _operator(state):
+    e = state.journal.latest("engine_start")
+    return ((e or {}).get("data") or {}).get("by") or ""
+
+
+def _waiting(state, rows):
+    """Everything a person has to do before the move can go on, in plain words, and where to do it. Empty when nothing waits for a person."""
+    if not rows:
+        return []
+    w23, held, w4 = _waits(state, rows)
+    who = _operator(state)
+    other = ("%s started the move and cannot approve it." % who) if who else "The person who started the move cannot approve it."
+    out = []
+    if w23:
+        out.append({"kind": "g23", "count": w23, "tab": "live", "button": "sign-g23",
+                    "title": "%d volume%s waiting for a second person to approve %s before %s switched" % (w23, " is" if w23 == 1 else "s are", "it" if w23 == 1 else "them", "it is" if w23 == 1 else "they are"),
+                    "text": other,
+                    "action": "Press \"Approve before switching\" (it pulses). A second person looks at them first (checks G2 and G3)."})
+    if held:
+        out.append({"kind": "release", "count": held, "tab": "live", "button": "live-release",
+                    "title": "%d volume%s approved and waiting for you to release %s" % (held, " is" if held == 1 else "s are", "it" if held == 1 else "them"),
+                    "text": "Nothing is switched until you say so.", "action": "Press \"Release all volumes that are ready to switch\" (it pulses)."})
+    if w4:
+        out.append({"kind": "g4", "count": w4, "tab": "live", "button": "sign-g4",
+                    "title": "%d volume%s switched over and waiting for a second person to approve the result" % (w4, " is" if w4 == 1 else "s are"),
+                    "text": other,
+                    "action": "Press \"Approve the result\" (it pulses). A second person confirms the volume works on its new storage (check G4)."})
+    return out
+
+
 def api_live(state, body, query):
     """What is happening now: per-phase counts, per-volume progress, the gate, the halt, and the newest journal events."""
     st = lifecycle.states(state.journal)
@@ -774,6 +874,8 @@ def api_live(state, body, query):
     g = _gate(state)
     counts, rows = {}, []
     wait23 = wait4 = held = 0
+    if mine:
+        wait23, held, wait4 = _waits(state, list(mine.values()))
     for vid, e in st.items():
         ph = e["phase"]
         counts[ph] = counts.get(ph, 0) + 1
@@ -785,15 +887,8 @@ def api_live(state, body, query):
                      "note": (sim.notes.get(vid) if sim and ph not in ("aborted", "rollback") else None) or e.get("reason") or
                              ("source changed: back to sync" if e.get("regression") else "")})
         if mine:                                       # what each volume waits for, read from the engine and the gates
-            gs = mine[vid]["gates"]
             rows[-1]["note"] = mine[vid]["note"] or rows[-1]["note"]
             rows[-1]["gates"] = {k: (s or {}).get("by") for k, s in lifecycle.gates_of(state.journal, vid, g).items()}
-            if ph in ("validate", "recheck") and not (gs["G2"] and gs["G3"]):
-                wait23 += 1
-            elif ph in ("validate", "recheck") and vid not in state.released:
-                held += 1
-            elif ph == "postcheck" and not gs["G4"]:
-                wait4 += 1
     total = len(mine) if mine else (len(admitted) or len(st))
     done = sum(r["progress"] for r in rows)
     active = [r for r in rows if r["phase"] not in ("soak", "done", "aborted", "rollback")]

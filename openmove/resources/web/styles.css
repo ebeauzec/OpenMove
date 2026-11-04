@@ -86,8 +86,6 @@ th.sortable:hover { color: var(--accent); }
 .bar > span { display: block; height: 100%; width: 0; background: var(--ok); transition: width .5s ease; }
 .bar.big { height: 22px; border-radius: 8px; } .bar.big > span { background: linear-gradient(90deg, var(--accent), var(--ok)); }
 .bar.warn > span { background: var(--warn); } .bar.bad > span { background: var(--bad); }
-.gprog { display: flex; align-items: center; gap: 10px; padding: 3px 14px; font-size: .82rem; }
-.gprog .bar { flex: 1; height: 8px; }
 .live-top { display: grid; grid-template-columns: minmax(220px, 1fr) 2fr; gap: 18px; align-items: end; margin: 8px 0 4px; }
 .live-top .v { font-size: 1.6rem; font-weight: 700; }
 .pipe { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -227,3 +225,46 @@ dialog.help dt { font-weight: 700; margin-top: 8px; } dialog.help dd { margin: 0
 .livenow.bad { border-left-color: var(--bad); }
 .livenow.ok { border-left-color: var(--ok); }
 .livenow p { margin: 2px 0; }
+
+/* something waits for a person: a strip on every page, a number on the tab, a pulse on the button */
+.tab-badge { display: inline-block; min-width: 1.3em; padding: 0 .4em; margin-left: .35em; border-radius: 999px; background: var(--warn); color: #fff; font-size: .75rem; font-weight: 700; text-align: center; }
+button.attention { animation: attn 1.4s ease-in-out infinite; outline: 3px solid var(--warn); outline-offset: 2px; }
+@keyframes attn { 50% { outline-color: transparent; } }
+
+/* the board at the top of every page: status, progress, open actions */
+.topboard { position: sticky; top: 0; z-index: 55; display: grid; grid-template-columns: minmax(200px, 1fr) minmax(220px, 1.2fr) minmax(260px, 2fr); gap: 0; background: var(--surface); border-bottom: 3px solid var(--border); box-shadow: 0 2px 6px rgba(0,0,0,.12); }
+.topboard > div { padding: 8px 14px; border-left: 1px solid var(--border); min-width: 0; }
+.topboard > div:first-child { border-left: 0; }
+.topboard .tb-label { font-size: .7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+.topboard .tb-state { font-size: 1.15rem; font-weight: 800; line-height: 1.2; }
+.topboard .tb-detail { font-size: .82rem; margin-top: 2px; }
+.topboard .tb-bar { height: 14px; background: var(--border); border-radius: 7px; overflow: hidden; }
+.topboard .tb-bar span { display: block; height: 100%; background: var(--ok); transition: width .6s; }
+.topboard .tb-nums { font-weight: 700; margin-top: 4px; }
+.topboard .tb-stages { font-size: .78rem; color: var(--muted); margin-top: 2px; }
+.topboard .tb-none { color: var(--ok); font-weight: 700; }
+.topboard .ny-item { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 4px 0; }
+.topboard .ny-item + .ny-item { border-top: 1px dashed var(--warn); }
+.topboard .ny-item > div { flex: 1 1 220px; }
+.topboard .ny-title { font-weight: 700; }
+.topboard .ny-text { font-size: .82rem; }
+.topboard .ny-do { font-weight: 700; font-size: .85rem; }
+.topboard .ny-item button { white-space: nowrap; }
+.topboard.lvl-ok { border-bottom-color: var(--ok); }
+.topboard.lvl-ok .tb-state { color: var(--ok); }
+.topboard.lvl-warn { border-bottom-color: var(--warn); }
+.topboard.lvl-warn .tb-state { color: var(--warn); }
+.topboard.lvl-bad { border-bottom-color: var(--bad); }
+.topboard.lvl-bad .tb-state { color: var(--bad); }
+.topboard.lvl-idle .tb-state { color: var(--muted); }
+.topboard .tb-actions.has { background: var(--warn-bg); }
+.topboard .tb-actions .tb-label { color: var(--warn); }
+.tb-count { display: inline-block; min-width: 1.4em; padding: 0 .45em; margin-left: .4em; border-radius: 999px; background: var(--warn); color: #fff; font-size: .8rem; text-align: center; }
+@media (max-width: 900px) { .topboard { position: static; grid-template-columns: 1fr; } .topboard > div { border-left: 0; border-top: 1px solid var(--border); } }
+
+.topboard .ny-item > div { flex: 1 1 200px; }
+.topboard .ny-item { padding: 3px 0; }
+.topboard .ny-title { font-size: .95rem; line-height: 1.25; }
+.topboard .ny-do { font-size: .82rem; font-weight: 600; }
+.topboard .ny-text { font-size: .78rem; color: var(--muted); }
+.topboard .tb-detail { font-size: .78rem; }

@@ -30,6 +30,8 @@ If something cannot be put back, the page says what and gives **Try again** and 
 
 ## When the move is waiting for a person
 
+The top of every page (the board) shows three things: **Status** (green, amber, red or grey), **Progress** (the bar and the volumes switched) and **Open actions** (what only a person can do, why, and where). The page also opens on Progress when something waits. `GET /api/status` carries it as `board` and `waiting`.
+
 A move that "does not progress" is very often waiting for a second person: the copy is finished and checked, and G2 and G3 (before the switch) or G4 (after it) need the signature of a person who is not the operator. The Progress page now says so in a sentence at the top ("Nothing is stuck. 7 volumes are copied and checked, and waiting for a second person to approve ..."). A retry or a pause of the computer is shown the same way.
 
 ## What a move does when the computer sleeps

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.2 (2026-11-04)
+
+### Changed
+- The top of every page now shows three things, coloured by how it is: Status (green moving or finished, amber waiting for a person or trying again, red stopped, grey no move running), Progress (the bar, the volumes switched and how many are at each stage, in plain words) and Open actions (what only a person can do, who may not do it, and which button, with a button that takes you there). The tab that holds the button shows a number and the button pulses. The page opens on Progress when something waits, instead of on Connect. The old thin progress bar is gone. Buttons are named for what they do (Approve before switching, Approve the result). GET /api/status carries board and waiting. Fixed: the step label showed the tab badge (Progress10). Fixed: Release said "no selected volume to release" for volumes already in flight that were not in today's choice (after a restart or a changed choice); it now releases every volume the move holds.
+
 ## 0.12.1 (2026-11-04)
 
 ### Fixed

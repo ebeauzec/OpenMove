@@ -118,6 +118,7 @@
     if (name === 'hosts') loadHosts();
     if (name === 'diagnostics') loadDiag();
     currentTab = name;
+    if (lastStatus && lastStatus.board) drawBoard(lastStatus.board, lastStatus.waiting);
     drawWizard();
   }
   // The wizard is gated: the server says which step is open (every step before it is done) and what is missing for the next one.
@@ -176,6 +177,7 @@
     else if (numbered && w && w.done && st.after) g.appendChild(el('p', { class: 'guide-done', text: '\u2713 ' + st.after }));
     else if (st.todo && st.todo.length) g.appendChild(el('ol', { class: 'guide-todo' }, st.todo.map(function (x) { return el('li', { text: x }); })));
   }
+  function tabName(b) { return ((b.firstChild && b.firstChild.nodeType === 3 ? b.firstChild.textContent : b.textContent) || '').trim(); }
   function drawWizard() {
     drawGuide();
     var steps = wizardSteps(), i = -1;
@@ -188,17 +190,17 @@
     });
     hint.textContent = '';
     if (i < 0) {                                   // the journal is not a step: Back returns to the last one
-      back.disabled = false; back.textContent = 'Back to ' + steps[steps.length - 1].textContent.trim();
+      back.disabled = false; back.textContent = 'Back to ' + tabName(steps[steps.length - 1]);
       next.disabled = true; next.textContent = 'Next'; lab.textContent = currentTab === 'hosts' ? 'Hosts' : currentTab === 'diagnostics' ? 'Diagnostics' : 'Journal';
       return;
     }
     back.disabled = i === 0;
-    back.textContent = i === 0 ? 'Back' : 'Back: ' + steps[i - 1].textContent.trim();
+    back.textContent = i === 0 ? 'Back' : 'Back: ' + tabName(steps[i - 1]);
     var nw = i < steps.length - 1 ? wizardInfo(steps[i + 1].dataset.tab) : null;
     next.disabled = i === steps.length - 1 || !!(nw && !nw.open);
-    next.textContent = i === steps.length - 1 ? 'Next' : 'Next: ' + steps[i + 1].textContent.trim();
+    next.textContent = i === steps.length - 1 ? 'Next' : 'Next: ' + tabName(steps[i + 1]);
     if (nw && !nw.open) hint.textContent = 'To continue: ' + nw.needs;
-    lab.textContent = 'Step ' + (i + 1) + ' of ' + steps.length + ': ' + steps[i].textContent.trim().replace(/^\d+\.\s*/, '');
+    lab.textContent = 'Step ' + (i + 1) + ' of ' + steps.length + ': ' + tabName(steps[i]).replace(/^\d+\.\s*/, '');
   }
   function wizardGo(delta) {
     var steps = wizardSteps(), i = -1;
@@ -248,6 +250,9 @@
       if (s.demo) drawScenarios(s.demo_scenario);
       drawHalt(s.halted);
       drawRecovery(s.recovery);
+      drawBoard(s.board, s.waiting);
+      if (!landed && !deepLink && (s.waiting || []).length) { landed = true; showTab('live', true); }
+      landed = true;
       $('live-start').classList.toggle('hidden', !s.demo); 
       if (s.lab_form && !$('connect-form').dataset.labFilled) {          // lab mode: the form is filled in; the password is the lab's own
         var cf = $('connect-form');
@@ -280,7 +285,7 @@
   }
 
   // ---- the program stopped and started again: say what happened, and what OpenMove does about it ----
-  var recShown = '';
+  var recShown = '', landed = false;
   function drawRecovery(r) {
     var box = $('recovery');
     if (!r || r.status === 'none') { box.className = 'recovery hidden'; recShown = ''; return; }
@@ -356,7 +361,46 @@
       if (misses >= 2) showGone();
     }).then(function () { setTimeout(watchServer, goneSince ? 2000 : 5000); });
   }
-  setInterval(function () { if (!document.hidden && !goneSince && !addrBad) refreshStatus(); }, 10000);   // keeps the steps and the recovery note current
+  setInterval(function () { if (!document.hidden && !goneSince && !addrBad) refreshStatus(); }, 5000);   // keeps the steps and the recovery note current
+
+  // ---- the board at the top of every page: status, progress and open actions. Colour says how it is: green all well, amber a person is needed, red stopped, grey nothing running ----
+  var NY_BUTTONS = ['sign-g23', 'live-release', 'sign-g4'];
+  function drawBoard(b, list) {
+    var box = $('topboard'); list = list || [];
+    document.querySelectorAll('#tabs .tab-badge').forEach(function (x) { x.parentNode.removeChild(x); });
+    NY_BUTTONS.forEach(function (id) { $(id).classList.remove('attention'); });
+    if (!b) { box.className = 'topboard hidden'; clear(box); return; }
+    var tabs = {};
+    list.forEach(function (w) { tabs[w.tab] = (tabs[w.tab] || 0) + w.count; $(w.button).classList.add('attention'); });
+    Object.keys(tabs).forEach(function (t) {
+      var tb = document.querySelector('#tabs button[data-tab="' + t + '"]');
+      if (tb) tb.appendChild(el('span', { class: 'tab-badge', text: String(tabs[t]), title: 'Waiting for a person' }));
+    });
+    clear(box); box.className = 'topboard lvl-' + b.level;
+    var st = el('div', {}, [el('div', { class: 'tb-label', text: 'Status' }), el('div', { class: 'tb-state', text: b.state }), el('div', { class: 'tb-detail', text: b.detail })]);
+    var pr = el('div', {}, [el('div', { class: 'tb-label', text: 'Progress' })]);
+    var bar = el('div', { class: 'tb-bar', role: 'progressbar', 'aria-valuenow': String(Math.round(b.percent)), 'aria-valuemin': '0', 'aria-valuemax': '100' }, [el('span', {})]);
+    bar.firstChild.style.width = b.percent + '%';
+    pr.appendChild(bar);
+    pr.appendChild(el('div', { class: 'tb-nums', text: b.total ? Math.round(b.percent) + '%   ' + b.switched + ' of ' + b.total + ' volumes switched' + (b.failed ? '   ' + b.failed + ' failed' : '') : 'No volume has been started' }));
+    if (b.stages.length) pr.appendChild(el('div', { class: 'tb-stages', text: b.stages.map(function (x) { return x.count + ' ' + x.label; }).join('  |  ') }));
+    var ac = el('div', { class: 'tb-actions' + (list.length ? ' has' : '') });
+    var head = el('div', { class: 'tb-label', text: 'Open actions' });
+    if (list.length) head.appendChild(el('span', { class: 'tb-count', text: String(list.length) }));
+    ac.appendChild(head);
+    if (!list.length) ac.appendChild(el('div', { class: 'tb-none', text: 'Nothing needs you right now.' }));
+    list.forEach(function (w) {
+      var item = el('div', { class: 'ny-item' });
+      item.appendChild(el('div', {}, [el('div', { class: 'ny-title', text: w.title }), el('div', { class: 'ny-do', text: w.action }), el('div', { class: 'ny-text', text: w.text })]));
+      if (currentTab !== w.tab) {
+        var go = el('button', { class: 'primary', type: 'button', text: 'Go to the button' });
+        go.addEventListener('click', function () { showTab(w.tab, true); setTimeout(function () { var x = $(w.button); if (x && x.scrollIntoView) x.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); });
+        item.appendChild(go);
+      }
+      ac.appendChild(item);
+    });
+    box.appendChild(st); box.appendChild(pr); box.appendChild(ac);
+  }
 
   // ---- halt ----
   function askWho(title, intro, okText) {
@@ -1033,10 +1077,6 @@
       (l.need_g23 || l.need_g4 ? 'The signer must not be the operator of the run.' : '');
     drawLiveNow(l);
     $('live-ready').textContent = l.ready ? l.ready + ' volume(s) are copied and checked, and wait for your release. You can change this in step 4, Choose.' : '';
-    var gp = $('gprog');
-    gp.classList.toggle('hidden', !l.started);
-    $('gprog-fill').style.width = l.overall + '%';
-    $('gprog-text').textContent = 'Move ' + l.overall.toFixed(0) + '% done  |  ' + l.active + ' in progress' + (l.halted ? '  |  EVERYTHING IS STOPPED' : '');
   }
   // One plain sentence about what is going on, so a person who comes back to the screen knows at once whether anything needs them.
   function drawLiveNow(l) {
@@ -1044,8 +1084,8 @@
     var rows = [], kind = 'ok', eng = (lastStatus.recovery || {}).engine || null;
     function say(k, t) { rows.push(t); if (k === 'bad' || (k === 'warn' && kind !== 'bad')) kind = k; }
     if (l.halted) say('bad', 'Everything is stopped: ' + l.halted.by + ' pressed the emergency stop (' + l.halted.reason + '). Nothing moves until someone allows changes again.');
-    if (l.need_g23) say('warn', 'Nothing is stuck. ' + l.need_g23 + ' volume' + (l.need_g23 === 1 ? ' needs' : 's need') + ' a second person to approve it (checks G2 and G3) before it can be switched. Until then it keeps being checked. Use the button "Approve G2 and G3" below. The second person must not be the one who started the move.');
-    if (l.need_g4) say('warn', l.need_g4 + ' volume' + (l.need_g4 === 1 ? ' is' : 's are') + ' switched over and waiting for a second person to approve the result (check G4). Use the button "Approve G4" below.');
+    if (l.need_g23) say('warn', 'Nothing is stuck. ' + l.need_g23 + ' volume' + (l.need_g23 === 1 ? ' needs' : 's need') + ' a second person to approve it (checks G2 and G3) before it can be switched. Until then it keeps being checked. Press "Approve before switching" below. The second person must not be the one who started the move.');
+    if (l.need_g4) say('warn', l.need_g4 + ' volume' + (l.need_g4 === 1 ? ' is' : 's are') + ' switched over and waiting for a second person to approve the result (check G4). Press "Approve the result" below.');
     if (l.ready && !l.need_g23) say('warn', l.ready + ' volume' + (l.ready === 1 ? ' is' : 's are') + ' copied and checked, and waiting for your release. Use the button "Release all volumes that are ready to switch".');
     if (eng && eng.trouble) say('warn', 'The move hit a problem and is trying again by itself: ' + eng.trouble);
     if (eng && eng.gaps && eng.gaps.length) say('ok', 'The computer paused for ' + eng.gaps[eng.gaps.length - 1] + ' s (sleep or a stall). OpenMove looked at every volume again; nothing was lost.');

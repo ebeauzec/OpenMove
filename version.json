@@ -1,8 +1,8 @@
 {
-  "version": "0.12.1",
+  "version": "0.12.2",
   "major": 0,
   "minor": 12,
-  "patch": 1,
+  "patch": 2,
   "date": "2026-11-04",
-  "notes": "Progress page counts the real move; a restart keeps volumes that already left the source"
+  "notes": "A board at the top of every page: status, progress and open actions"
 }
