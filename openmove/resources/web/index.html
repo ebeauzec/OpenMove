@@ -19,6 +19,7 @@
 </header>
 
 <div id="banner" class="banner hidden" role="status" aria-live="polite"></div>
+<div id="conn-lost" class="connlost hidden" role="alert"></div>
 
 <div id="gprog" class="gprog hidden" title="How far the move has got"><div id="gprog-bar" class="bar"><span id="gprog-fill"></span></div><span id="gprog-text"></span></div>
 
@@ -48,6 +49,7 @@
     <button role="tab" data-tab="diagnostics" class="adv">Support</button>
   </nav>
 
+  <div id="recovery" class="recovery hidden" aria-live="polite"></div>
   <div id="guide" class="guide" aria-live="polite"></div>
 
   <section id="tab-connect" class="panel">
@@ -294,6 +296,7 @@
 
   <section id="tab-live" class="panel hidden">
     <h2>Progress</h2>
+    <div id="live-now" class="livenow hidden" aria-live="polite"></div>
     <div id="live-note" class="banner warn static"></div>
     <div class="actions inline">
       <button class="primary hidden" id="live-start">Start the simulated move</button>

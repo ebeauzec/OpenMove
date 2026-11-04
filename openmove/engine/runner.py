@@ -24,6 +24,9 @@ from .staged import StagedMixin
 
 ROTATION_TIMEOUT = timedelta(hours=72)      # how long a class B volume may wait for its snapshots to rotate away before it is given up
 MIGRATION_TIMEOUT = timedelta(hours=6)      # how long a retype may run before the engine halts and asks a person
+LOOP_PAUSE = 5                              # seconds between two ticks
+GAP_SECONDS = 90                            # a longer silence between two ticks means the computer slept or the program was stalled
+MAX_RETRIES = 40                            # errors in a row (with a growing pause, up to a minute) before the loop gives up and leaves the volumes to a person
 RETYPE_GRACE = timedelta(seconds=30)        # after this long, a volume that is back to normal and not on the target means the retype was undone
 # The fields a retype must never change (playbook step 5.10.5): who owns the volume, where it lives and what it was made from.
 IDENTITY_FIELDS = (("id", "id"), ("creation time", "created_at"), ("project", "os-vol-tenant-attr:tenant_id"), ("user", "user_id"),
@@ -45,6 +48,7 @@ class Engine(StagedMixin):
         self.queue, self.active, self.failed, self.finished = [], [], set(), set()
         self.window = (None, None)                    # (start_at, stop_at): when new volumes may be taken and a retype may be sent (R3); None = no limit
         self.status, self.ticks, self._specs = "idle", 0, {}
+        self.trouble, self.gaps, self.revived = "", [], 0      # the loop's last error while it retries; the silences it noticed; how many times its thread was started again
         self.errors, self._bundled = {}, set()          # the full text of the last error per volume; the reasons a bundle was already written for
         self._thread, self._stop, self._mutex = None, threading.Event(), threading.RLock()
 
@@ -188,13 +192,16 @@ class Engine(StagedMixin):
             self.failed, self.finished = set(), set()
             self._specs = self.specs(acts, list(set(self.queue) | set(self.active)), self.type_map) if (self.queue or self.active) else {}
             self.status, self._stop = "running", threading.Event()
+            self.trouble = ""
             self.state.journal.record("engine_run", "batch", {"queued": len(self.queue), "resumed": len(self.active), "type_map": self.type_map})
             if thread:
                 self._thread = threading.Thread(target=self._loop, daemon=True)
                 self._thread.start()
 
-    def stop(self):
-        """Stop taking new volumes and stop ticking. Nothing in flight is touched: a retype already sent carries on in the cloud."""
+    def stop(self, reason="stopped"):
+        """Stop taking new volumes and stop ticking. Nothing in flight is touched: a retype already sent carries on in the cloud.
+        `reason` is "stopped" for a person's stop and "shutdown" when the program is closing; a shutdown is carried on at the next start."""
+        was = self.status == "running"
         self._stop.set()
         t = self._thread
         if t and t is not threading.current_thread():
@@ -202,18 +209,64 @@ class Engine(StagedMixin):
         with self._mutex:
             if self.status == "running":
                 self.status = "stopped"
+        if was:
+            self.ended(reason)
+
+    def ended(self, reason):
+        """The run ended, by a person (stopped), by itself (finished), by an error or by the program closing (shutdown). The next start reads this."""
+        try:
+            self.state.journal.record("engine_end", "batch", {"reason": reason, "ticks": self.ticks})
+        except Exception:                                  # a closed journal at shutdown must not raise
+            pass
+
+    def ensure_alive(self):
+        """Called by the guardian: if the run is meant to go on but its thread is gone, start the thread again. The journal carries the state, so nothing is lost."""
+        with self._mutex:
+            t = self._thread
+            if self.status != "running" or self._stop.is_set() or (t is not None and t.is_alive()):
+                return False
+            self.revived += 1
+            self.state.journal.record("engine_revive", "batch", {"times": self.revived})
+            self._thread = threading.Thread(target=self._loop, daemon=True)
+            self._thread.start()
+            return True
 
     def _loop(self):
-        while not self._stop.is_set():
-            try:
-                self.tick()
-            except Exception as exc:                          # fail closed: stop the loop, change nothing more
-                self.status = "stopped after an error: %s" % exc
-                self.failure("the engine loop stopped", exc)
-                return
-            if self.status != "running":
-                return
-            self._stop.wait(5)
+        """Tick until the run ends. An error is not the end: the loop waits (longer each time, up to a minute) and looks again, because a tick
+        reads the cloud afresh and the journal has every step. Only a long unbroken run of errors hands the volumes back to a person."""
+        fails, last = 0, self.clock()
+        try:
+            while not self._stop.is_set():
+                begun = self.clock()
+                gap = (begun - last).total_seconds()                  # from the start of the last look to the start of this one: a tick plus the pause, normally under a minute
+                last = begun
+                if gap > GAP_SECONDS + LOOP_PAUSE and self.ticks:
+                    self.gaps.append(round(gap))
+                    self.trouble = ""
+                    self.state.journal.record("engine_gap", "batch", {"seconds": round(gap), "note": "the computer slept or the program was stalled; every volume is read afresh"})
+                    for vid in self.active:
+                        self.note(vid, "the program was paused for %d s (sleep?); looking at the volume again" % round(gap))
+                try:
+                    self.tick()
+                    fails, self.trouble = 0, ""
+                except Exception as exc:                      # not the end: wait and look again
+                    fails += 1
+                    self.trouble = "retrying after an error (%d in a row): %s: %s" % (fails, type(exc).__name__, exc)
+                    self.failure("the engine loop had an error (%d in a row)" % fails, exc)
+                    if fails >= MAX_RETRIES:
+                        self.status = "stopped after an error: %s" % exc
+                        self.ended("error")
+                        return
+                    self._stop.wait(min(60, LOOP_PAUSE * 2 ** min(fails, 4)))
+                    continue
+                if self.status != "running":
+                    if self.status == "finished":
+                        self.ended("finished")
+                    return
+                self._stop.wait(LOOP_PAUSE)
+        except BaseException as exc:                          # the thread is going down for a reason we did not plan for: leave the marker, the guardian starts it again
+            self.failure("the engine thread ended unexpectedly", exc)
+            raise
 
     def in_window(self):
         lo, hi = self.window
@@ -607,4 +660,5 @@ class Engine(StagedMixin):
         return {"window": {"start_at": lo.strftime("%Y-%m-%dT%H:%M:%SZ") if lo else None, "stop_at": hi.strftime("%Y-%m-%dT%H:%M:%SZ") if hi else None,
                            "open": self.in_window()}, "reversible": len(self.reversible()),
                 "status": self.status, "ticks": self.ticks, "queued": len(self.queue), "active": len(self.active), "finished": len(self.finished),
-                "failed": len(self.failed), "volumes": rows, "more": max(0, len(ids) - 300), "halted": safety.halted(j)}
+                "failed": len(self.failed), "volumes": rows, "more": max(0, len(ids) - 300), "halted": safety.halted(j),
+                "trouble": self.trouble, "gaps": self.gaps[-5:], "revived": self.revived}

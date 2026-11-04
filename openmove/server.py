@@ -9,6 +9,7 @@ lives in memory only.
 """
 import hmac
 import json
+import os
 import secrets
 import threading
 from datetime import datetime, timezone
@@ -21,6 +22,7 @@ from . import server_hosts
 from . import __version__, discovery, exports, handling, inventory, lifecycle, paths, phase0, profiles, safety, selection, wizard
 from . import risk as risk_mod
 from . import tree as tree_mod
+from . import recovery
 from . import audit as audit_mod
 from .checks import gate as gate_mod
 from .checks import run as checks_run
@@ -42,7 +44,9 @@ class AppState:
     def __init__(self, home):
         self.home = home
         self.journal = Journal(home / "journal.db")
-        self.token = secrets.token_urlsafe(24)
+        self.token = recovery.token(home)          # kept in the data folder: the open page and the printed address still work after a restart
+        self.recovery = {"status": "none"}       # what the last stop left behind and how far the restore is (openmove/recovery.py)
+        self.scan_args = None      # backend and window of the last inventory read from the API, so a restart can read the same again
         self.lock = threading.RLock()
         self.session = None
         self.platform = None
@@ -71,7 +75,7 @@ class AppState:
         self.extra_hosts = ()  # Host header values accepted besides loopback; set with --allow-host
         self._raw = None  # last API collection, kept so a back-end filter can be re-applied without calling the cloud
 
-    def disconnect(self):
+    def disconnect(self, reason="stopped"):
         with self.lock:
             if self.session:
                 self.session.close()
@@ -81,7 +85,7 @@ class AppState:
             self.selection = self.options = self.selection_ok = None
             self.released = set()
             if self.engine:
-                self.engine.stop()
+                self.engine.stop(reason)
                 self.engine = None
 
 
@@ -187,6 +191,8 @@ def make_handler(state, port_getter):
             url = urlsplit(self.path)
             path = url.path
             try:
+                if method == "GET" and path == "/healthz":                    # is the program alive? (the supervisor and the page ask this; it says nothing else)
+                    return self._send(200, {"ok": True, "version": __version__})
                 if method == "GET" and path == "/":
                     q = parse_qs(url.query)
                     if not self._token_ok((q.get("token") or [""])[0]):
@@ -209,6 +215,11 @@ def make_handler(state, port_getter):
                 body = self._body() if method == "POST" else {}
                 query = {k: v[0] for k, v in parse_qs(url.query).items()}
                 result = handler(state, body, query)
+                if method == "POST":
+                    try:
+                        recovery.save(state)                                  # whatever the call changed is on disk before the page hears the answer
+                    except Exception:
+                        pass
                 if isinstance(result, Download):
                     return self._send(200, result.data, result.ctype, {
                         "Content-Disposition": 'attachment; filename="%s"' % result.filename})
@@ -253,8 +264,35 @@ def api_status(state, body, query):
                 "platform": state.platform is not None, "inventory": state.inventory is not None,
                 "audit": state.audit is not None, "checks": state.checks is not None, "gate": g["status"] if g else None,
                 "read_only": (state.platform or {}).get("read_only", True),
-                "unresolved_steps": len(state.journal.unresolved_steps()), "lab_form": _lab_form(state),
+                "unresolved_steps": len(state.journal.unresolved_steps()), "lab_form": _lab_form(state), "recovery": _recovery_view(state),
                 "wizard": wizard.steps(state, g)}
+
+
+def _recovery_view(state):
+    r = dict(state.recovery or {"status": "none"})
+    e = state.engine
+    r["engine"] = {"status": e.status, "trouble": e.trouble, "gaps": e.gaps[-3:], "revived": e.revived} if e else None
+    return r
+
+
+def api_recover(state, body, query):
+    """Try again to put the saved work back (after a failed restore, or after signing in to the cloud)."""
+    if not state.session:
+        raise ApiError("sign in to the cloud first (step 1, Connect)", 409)
+    if state.recovery.get("status") not in ("waiting", "failed"):
+        return _recovery_view(state)
+    if not recovery.start_restore(state):
+        raise ApiError(state.recovery.get("message") or "there is nothing saved to put back", 409)
+    return _recovery_view(state)
+
+
+def api_recover_discard(state, body, query):
+    """Start fresh: forget the saved work. The history of every step already taken stays."""
+    by = (body.get("by") or "").strip()
+    if len(by) < 3:
+        raise ValueError("forgetting the saved work needs the name of the person who decides")
+    recovery.discard(state)
+    return _recovery_view(state)
 
 
 def _lab_form(state):
@@ -806,7 +844,8 @@ def api_connect(state, body, query):
         state.session = s
     state.journal.record("connect", s.project_name, {"auth_url": s.auth_url, "user": s.username,
                                                      "tls_verification": s.verify, "roles": info["roles"]})
-    return {"ok": True, "project_id": info["project_id"], "roles": info["roles"]}
+    restoring = recovery.start_restore(state)           # the work saved before a stop is put back now that the cloud answers
+    return {"ok": True, "project_id": info["project_id"], "roles": info["roles"], "restoring": restoring}
 
 
 def _need_session(state):
@@ -855,6 +894,7 @@ def api_inventory_run(state, body, query):
     result["warnings"] = raw["warnings"]
     with state.lock:
         state._raw = raw
+        state.scan_args = {"backend": backend, "window_days": window}
     _remember_inventory(state, result, raw["servers"], raw["root_volumes"], session.project_name, "api")
     return result
 
@@ -1122,6 +1162,8 @@ ROUTES = {
     ("GET", "status"): api_status,
     ("POST", "connect"): api_connect,
     ("POST", "disconnect"): api_disconnect,
+    ("POST", "recover"): api_recover,
+    ("POST", "recover/discard"): api_recover_discard,
     ("POST", "discover"): api_discover,
     ("GET", "platform"): api_platform,
     ("POST", "inventory/run"): api_inventory_run,
@@ -1182,15 +1224,21 @@ ROUTES = {
 }
 
 
+class _Server(ThreadingHTTPServer):
+    # On Windows SO_REUSEADDR lets a second program take the same port; that must never happen to a program that moves volumes.
+    allow_reuse_address = os.name != "nt"
+
+
 def create_server(host="127.0.0.1", port=0, home=None):
     """Create (but do not start) the server. Returns (server, state)."""
     state = AppState(home or paths.app_home())
     from .diag import Diag
     state.diag = Diag(state.home)
     state.diag.attach()
+    recovery.begin(state)
     holder = {}
     handler = make_handler(state, lambda: holder["server"].server_address[1])
-    server = ThreadingHTTPServer((host, port), handler)
+    server = _Server((host, port), handler)
     server.daemon_threads = True
     holder["server"] = server
     return server, state

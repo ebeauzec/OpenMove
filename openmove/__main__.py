@@ -114,6 +114,8 @@ def main(argv=None):
     ap.add_argument("--allow-host", action="append", default=[],
                     help="extra Host header value to accept, for example the name used behind a container port mapping")
     ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--supervise", action="store_true",
+                    help="run OpenMove under a supervisor that starts it again if it stops or stops answering; a move that was running is carried on (docs/RECOVERY.md)")
     ap.add_argument("--bundle", action="store_true", help="write a support bundle (everything needed to find a fault) and exit; add --redact to hide customer data")
     ap.add_argument("--redact", choices=("none", "standard", "strict"), default=None, help="with --bundle: how much of the data to replace with tokens (default: the setting, usually standard)")
     ap.add_argument("--no-remote", action="store_true", help="with --bundle: do not collect from the registered hosts")
@@ -128,6 +130,9 @@ def main(argv=None):
         from .connectors import ssh
         sys.stdout.write(os.environ.get(ssh.PASSWORD_ENV, "") + "\n")
         return 0
+    if a.supervise and not os.environ.get("OPENMOVE_SUPERVISED") and not (a.bundle or a.decode or a.self_check or a.host_setup or a.list_scenarios or a.askpass):
+        from . import supervisor
+        return supervisor.run(list(sys.argv[1:] if argv is None else argv))
     if a.bundle or a.decode:
         return support(a)
     if a.self_check or a.host_setup:
@@ -152,7 +157,20 @@ def main(argv=None):
         home.mkdir(parents=True, exist_ok=True)
     elif a.home:
         os.environ["OPENMOVE_HOME"] = a.home
-    server, state = create_server(a.host, a.port, home)
+    from . import paths as paths_mod
+    from . import recovery
+    lock_home = home or (Path(a.home) if a.home else paths_mod.app_home())
+    try:
+        lock = recovery.acquire_lock(lock_home)                 # one OpenMove per data folder; kept until the process ends
+    except recovery.AlreadyRunning as e:
+        print(str(e), file=sys.stderr)
+        return 2                                                # not started again by the supervisor
+    try:
+        server, state = create_server(a.host, a.port, home)
+    except OSError as e:
+        print("OpenMove could not listen on %s:%d (%s). Is another OpenMove already running on that port? Choose another with --port." % (a.host, a.port, e), file=sys.stderr)
+        return 2
+    state.instance_lock = lock
     state.extra_hosts = tuple(h.lower() for h in a.allow_host)
     if a.demo:
         from . import demo
@@ -179,6 +197,11 @@ def main(argv=None):
         except Exception as e:                      # class C stays held back; the reason is in the log and the bundle
             state.diag.exception("preparing the lab hosts", e)
             print("Lab hosts: could not be prepared, class C stays held back (%s). Details are in the log." % e, flush=True)
+    if a.lab:                                       # the lab signs in by itself, so the work saved before a stop is put back at once
+        if recovery.start_restore(state):
+            print("Putting back the work saved before the last stop ...", flush=True)
+    guardian = recovery.Guardian(state)
+    guardian.start()
     port = server.server_address[1]
     shown = "127.0.0.1" if a.host in ("0.0.0.0", "::") else a.host
     url = "http://%s:%d/?token=%s" % (shown, port, state.token)
@@ -198,13 +221,17 @@ def main(argv=None):
                 open_browser("http://%s:%d/lab/dashboard?token=%s" % (urlsplit(cfg["auth_url"]).hostname or shown, port, state.token), say)
             else:
                 say("The OpenStack dashboard (Horizon) does not answer at %s; it may still be starting, or not installed." % lab_mod.horizon_url(cfg))
+    clean = False
     try:
         server.serve_forever()
+        clean = True
     except KeyboardInterrupt:
-        pass
+        clean = True
     finally:
+        guardian.stop()
         server.server_close()
-        state.disconnect()
+        recovery.finish(state, clean)               # the context is saved once more; a normal stop is written in the journal
+        state.disconnect("shutdown")                # a move that was running is carried on at the next start
         state.journal.close()
         if a.demo:
             demo.stop(state)

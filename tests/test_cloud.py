@@ -223,7 +223,7 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(st["connected"] and st["platform"] and st["inventory"] and st["read_only"])
         # the journal holds the events and never the password
         status, body = self.call("GET", "/api/journal")
-        kinds = {e["kind"] for e in json.loads(body)["events"]}
+        kinds = {e["kind"] for e in json.loads(body)["events"]} - {"server_start"}      # the start of the program is journaled too
         self.assertEqual(kinds, {"connect", "platform", "inventory"})
         self.assertNotIn(PASSWORD.encode(), body)
         self.assertNotIn(PASSWORD.encode(), (Path(self.dir.name) / "journal.db").read_bytes())

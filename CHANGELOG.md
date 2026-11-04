@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.0 (2026-11-04)
+
+### Added
+- A stop of OpenMove, of the computer or of the network in the middle of a move no longer costs anything. Found when a person came back to a move that looked stuck and a page that was broken: the copy had finished and was waiting for a second person's approval (G2 and G3), the computer then restarted, and with it the lab and OpenMove, whose memory held the pre-flight, the choice and the access address. New: a supervisor (--supervise, used by OpenMove.bat and OpenMove-Lab.bat) starts OpenMove again within seconds if it ends or stops answering, and gives up with a clear message after eight quick stops; the work is saved to resume.json (pre-flight run, choice, options, releases; never a password or cloud token) and put back after the cloud sign-in, which the lab does by itself, and the move that was running is carried on through the engine under the usual permit; the access address is kept across restarts so the open page keeps working; the engine loop retries after an error instead of ending (up to 40 in a row), records a sleep or stall, and a guardian thread starts it again if its thread dies and keeps Windows awake while a move runs; one OpenMove per data folder (a lock; two programs could share a port on Windows before); the page shows a bar when OpenMove is not answering and carries on by itself when it is back, shows what was restored, and the Progress page says in a sentence when volumes only wait for a second person's approval or the move is retrying. New routes POST /api/recover and /api/recover/discard, GET /healthz, journal events server_start, server_stop, engine_end, engine_gap, engine_revive, engine_resume, recovery. Proven on the lab by killing OpenMove five times with volumes in flight, once just after a retype was sent. Documented in docs/RECOVERY.md. The sleep prevention is Windows only; a restart of the whole computer still needs OpenMove started again.
+
 ## 0.11.0 (2026-11-04)
 
 ### Changed

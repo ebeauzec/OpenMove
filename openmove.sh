@@ -11,7 +11,7 @@ if [ -x "./OpenMove" ]; then
 fi
 for py in python3 python; do
     if command -v "$py" >/dev/null 2>&1 && "$py" -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' 2>/dev/null; then
-        exec "$py" -m openmove "$@"
+        exec "$py" -m openmove --supervise "$@"
     fi
 done
 echo "Python 3 was not found. Install it, or use the OpenMove program package." >&2

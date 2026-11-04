@@ -9,6 +9,7 @@
 | `OPTIONS.md` | Every option and setting in one place: launchers, command line, modes, each screen's fields, the settings with defaults and limits, the gates, and the fixed values. |
 | `ARCHITECTURE.md` | How OpenMove is built today: context, layers, runtime, the order of a move with diagrams, the safety architecture, data, modes, tests and what is not built. Start here to understand the code. |
 | `INSTALL.md` | Requirements, installing from source or as a packaged program, checking the installation, data folders, upgrading and removing. |
+| `RECOVERY.md` | If OpenMove, the computer or the network stops in the middle of a move: what protects the move (journal, saved work, supervisor, retrying loop, guardian, one program per data folder), what the screen shows, and what is not covered. |
 | `OPERATIONS.md` | How to run a migration, step by step: roles, preparation, the procedure from Connect to Soak, the way back, halting and restarting, what every note means, checklists. |
 | `DEVELOPMENT.md` | Development workflow: hooks, the sensitive-data guard, versioning, releases. |
 | `REQUIREMENTS.md` | Product requirements from the owner: standalone, minimal communication, control, checks, resilience, rollback. |

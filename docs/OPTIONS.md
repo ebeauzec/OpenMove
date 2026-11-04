@@ -30,6 +30,7 @@ One page for everything that can be chosen in OpenMove: how it is started, what 
 | `--home <folder>` | the user data folder | Where the journal and evidence are kept |
 | `--allow-host <name>` | none | An extra name clients may use in the address (behind a container port mapping or a reverse proxy). Repeatable |
 | `--no-browser` | off | Print the link, do not open the browser |
+| `--supervise` | off (on in `OpenMove.bat` and `OpenMove-Lab.bat`) | Run under a supervisor that starts OpenMove again if it stops or stops answering, and carries on a move that was running (`RECOVERY.md`) |
 | `--self-check` | off | Check that this installation holds everything class A, B and C need and exit (`DEPLOYMENT.md`) |
 | `--host-setup ROLE` | off | Write `prepare_host.sh` (to `--out`, default the current folder) and print the command that runs it, with OpenMove's key filled in; ROLE is `mover`, `cinder` or `both` |
 

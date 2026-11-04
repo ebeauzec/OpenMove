@@ -14,12 +14,12 @@ if exist "%~dp0OpenMove.exe" (
 )
 where py >nul 2>nul
 if %errorlevel%==0 (
-    py -3 -m openmove %*
+    py -3 -m openmove --supervise %*
     goto :finished
 )
 where python >nul 2>nul
 if %errorlevel%==0 (
-    python -m openmove %*
+    python -m openmove --supervise %*
     goto :finished
 )
 echo.

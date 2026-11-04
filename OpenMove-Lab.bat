@@ -5,6 +5,7 @@ REM OpenMove against the OpenStack LAB on this machine (a real Keystone, Nova an
 REM This is not the demonstration: the engine really moves volumes, inside the lab only.
 REM
 REM   OpenMove-Lab.bat            start the lab if needed, then OpenMove in lab mode; opens OpenMove and the OpenStack dashboard (Horizon)
+REM                               OpenMove runs under a supervisor: if it stops or hangs it is started again and a move that was running is carried on (docs\RECOVERY.md)
 REM   OpenMove-Lab.bat up         start the lab cloud
 REM   OpenMove-Lab.bat seed       create the test volumes and servers in the lab
 REM   OpenMove-Lab.bat more       add the second, larger set of volumes of every class
@@ -57,7 +58,7 @@ if errorlevel 1 (
     if errorlevel 1 call :partial
     if defined LABFAILED goto :finished
 )
-%PYTHON% -m openmove --lab %*
+%PYTHON% -m openmove --lab --supervise %*
 
 goto :finished
 

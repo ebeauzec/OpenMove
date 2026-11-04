@@ -22,9 +22,13 @@
     if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
     return fetch('/api/' + path, opts).then(function (r) {
       return r.json().then(function (d) {
+        if (r.status === 401) { addressChanged(); throw new Error("This page's access address is no longer valid. Open the address that OpenMove printed in its window."); }
         if (!r.ok) throw new Error(d.error || ('request failed (' + r.status + ')'));
         return d;
       });
+    }, function () {
+      noAnswer();                                                       // the program is not answering: say so at the top, and keep trying
+      throw new Error('OpenMove is not answering right now. Your work is saved. This page carries on by itself when OpenMove is back.');
     });
   }
 
@@ -243,6 +247,7 @@
       $('inv-demo-export').classList.toggle('hidden', !s.demo);
       if (s.demo) drawScenarios(s.demo_scenario);
       drawHalt(s.halted);
+      drawRecovery(s.recovery);
       $('live-start').classList.toggle('hidden', !s.demo); 
       if (s.lab_form && !$('connect-form').dataset.labFilled) {          // lab mode: the form is filled in; the password is the lab's own
         var cf = $('connect-form');
@@ -273,6 +278,85 @@
       return s;
     }).catch(function () {});
   }
+
+  // ---- the program stopped and started again: say what happened, and what OpenMove does about it ----
+  var recShown = '';
+  function drawRecovery(r) {
+    var box = $('recovery');
+    if (!r || r.status === 'none') { box.className = 'recovery hidden'; recShown = ''; return; }
+    var key = r.status + '|' + (r.message || '');
+    if (key === recShown && !box.classList.contains('hidden')) return;
+    recShown = key; clear(box);
+    var kind = r.status === 'done' || r.status === 'info' ? 'ok' : r.status === 'failed' ? 'bad' : '';
+    box.className = 'recovery ' + kind;
+    var title = { waiting: 'OpenMove was restarted. Your work is saved.', restoring: 'Getting back to where you were ...', done: 'Back where you were.', failed: 'Could not get back to where you were.', info: 'OpenMove was stopped without closing.' }[r.status] || '';
+    box.appendChild(el('h3', { text: title }));
+    box.appendChild(el('p', { text: r.message || '' }));
+    var acts = el('div', { class: 'actions inline' });
+    if (r.status === 'waiting' || r.status === 'failed') {
+      var c = r.connection || {};
+      if (r.status === 'waiting') {
+        var go = el('button', { class: 'primary', type: 'button', text: 'Sign in again' + (c.project_name ? ' to ' + c.project_name : '') });
+        go.addEventListener('click', function () {
+          var cf = $('connect-form');
+          Object.keys(c).forEach(function (k) { if (cf.elements[k] && c[k] != null && k !== 'verify') cf.elements[k].value = c[k]; });
+          showTab('connect', true); if (cf.elements.password) cf.elements.password.focus();
+        });
+        acts.appendChild(go);
+      } else {
+        var again = el('button', { class: 'primary', type: 'button', text: 'Try again' });
+        again.addEventListener('click', function () { api('POST', 'recover', {}).then(refreshStatus).catch(function (e) { banner('bad', e.message); }); });
+        acts.appendChild(again);
+      }
+      var fresh = el('button', { class: 'secondary', type: 'button', text: 'Start fresh' });
+      fresh.addEventListener('click', function () {
+        ask({ title: 'Start fresh?', intro: 'OpenMove forgets the work it saved (the checks, the choice of volumes, the approvals of this session). The history of every step already taken stays. A move that was running is not carried on.', ok: 'Forget it', danger: true, fields: [nameField('Your name')] })
+          .then(function (v) { if (v) { me = v.by; return api('POST', 'recover/discard', { by: v.by }).then(refreshStatus); } }).catch(function (e) { banner('bad', e.message); });
+      });
+      acts.appendChild(fresh);
+    } else if (r.status === 'done' || r.status === 'info') {
+      var x = el('button', { class: 'secondary', type: 'button', text: 'Close' });
+      x.addEventListener('click', function () { box.className = 'recovery hidden'; });
+      acts.appendChild(x);
+    }
+    if (acts.firstChild) box.appendChild(acts);
+    if (r.status === 'restoring') setTimeout(refreshStatus, 2000);
+  }
+
+  // ---- OpenMove is not answering (it stopped, the computer slept or restarted): a bar at the top, and the page carries on by itself when it is back ----
+  var misses = 0, goneSince = 0, addrBad = false;
+  function noAnswer() { misses = Math.max(misses, 2); showGone(); }
+  function showGone() {
+    if (!goneSince) goneSince = Date.now();
+    var bar = $('conn-lost'); bar.classList.remove('hidden');
+    var secs = Math.round((Date.now() - goneSince) / 1000);
+    clear(bar);
+    bar.appendChild(document.createTextNode('OpenMove is not answering (for ' + secs + ' s). Your work is saved.'));
+    bar.appendChild(el('small', { text: 'If the computer or OpenMove restarted, this page carries on by itself as soon as OpenMove is back; a move that was running is carried on too. ' +
+      (secs > 60 ? 'It has been more than a minute: start OpenMove again (for the lab, OpenMove-Lab.bat) and open the address it prints.' : 'Nothing needs to be done yet.') }));
+  }
+  function addressChanged() {
+    addrBad = true;
+    var bar = $('conn-lost'); bar.classList.remove('hidden'); clear(bar);
+    bar.appendChild(document.createTextNode('This page belongs to an earlier start of OpenMove.'));
+    bar.appendChild(el('small', { text: 'Open the address that OpenMove printed in its window (or start it again with OpenMove-Lab.bat).' }));
+  }
+  function watchServer() {
+    fetch('/healthz', { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) throw new Error('not ok');
+      if (goneSince) {
+        goneSince = 0; misses = 0;
+        $('conn-lost').classList.add('hidden');
+        banner('ok', 'OpenMove is back. The page is up to date again.');
+        refreshStatus().then(function () { pollLive(); });
+      }
+      misses = 0;
+    }).catch(function () {
+      misses++;
+      if (misses >= 2) showGone();
+    }).then(function () { setTimeout(watchServer, goneSince ? 2000 : 5000); });
+  }
+  setInterval(function () { if (!document.hidden && !goneSince && !addrBad) refreshStatus(); }, 10000);   // keeps the steps and the recovery note current
 
   // ---- halt ----
   function askWho(title, intro, okText) {
@@ -947,11 +1031,28 @@
     $('sign-demo').textContent = l.auto_sign ? 'Demo: stop the made-up second person approving' : 'Demo: a made-up second person approves';
     $('sign-status').textContent = (l.need_g23 ? l.need_g23 + ' volume(s) wait for your approval of G2 and G3. ' : '') + (l.need_g4 ? l.need_g4 + ' volume(s) wait for your approval of G4. ' : '') +
       (l.need_g23 || l.need_g4 ? 'The signer must not be the operator of the run.' : '');
+    drawLiveNow(l);
     $('live-ready').textContent = l.ready ? l.ready + ' volume(s) are copied and checked, and wait for your release. You can change this in step 4, Choose.' : '';
     var gp = $('gprog');
     gp.classList.toggle('hidden', !l.started);
     $('gprog-fill').style.width = l.overall + '%';
     $('gprog-text').textContent = 'Move ' + l.overall.toFixed(0) + '% done  |  ' + l.active + ' in progress' + (l.halted ? '  |  EVERYTHING IS STOPPED' : '');
+  }
+  // One plain sentence about what is going on, so a person who comes back to the screen knows at once whether anything needs them.
+  function drawLiveNow(l) {
+    var box = $('live-now'); clear(box);
+    var rows = [], kind = 'ok', eng = (lastStatus.recovery || {}).engine || null;
+    function say(k, t) { rows.push(t); if (k === 'bad' || (k === 'warn' && kind !== 'bad')) kind = k; }
+    if (l.halted) say('bad', 'Everything is stopped: ' + l.halted.by + ' pressed the emergency stop (' + l.halted.reason + '). Nothing moves until someone allows changes again.');
+    if (l.need_g23) say('warn', 'Nothing is stuck. ' + l.need_g23 + ' volume' + (l.need_g23 === 1 ? ' is' : 's are') + ' copied and checked, and waiting for a second person to approve (checks G2 and G3). Use the button "Approve G2 and G3" below. The second person must not be the one who started the move.');
+    if (l.need_g4) say('warn', l.need_g4 + ' volume' + (l.need_g4 === 1 ? ' is' : 's are') + ' switched over and waiting for a second person to approve the result (check G4). Use the button "Approve G4" below.');
+    if (l.ready && !l.need_g23) say('warn', l.ready + ' volume' + (l.ready === 1 ? ' is' : 's are') + ' copied and checked, and waiting for your release. Use the button "Release all volumes that are ready to switch".');
+    if (eng && eng.trouble) say('warn', 'The move hit a problem and is trying again by itself: ' + eng.trouble);
+    if (eng && eng.gaps && eng.gaps.length) say('ok', 'The computer paused for ' + eng.gaps[eng.gaps.length - 1] + ' s (sleep or a stall). OpenMove looked at every volume again; nothing was lost.');
+    if (eng && eng.revived) say('ok', 'The program that watches the move was started again ' + eng.revived + ' time' + (eng.revived === 1 ? '' : 's') + ' by its guardian. Nothing was lost.');
+    if (!rows.length && l.active) say('ok', l.active + ' volume' + (l.active === 1 ? ' is' : 's are') + ' being worked on. Nothing needs you right now.');
+    box.className = 'livenow ' + kind + (rows.length ? '' : ' hidden');
+    rows.forEach(function (t) { box.appendChild(el('p', { text: t })); });
   }
   function pollLive(once) {
     api('GET', 'live').then(renderLive).catch(function () {}).then(function () {
@@ -1710,4 +1811,5 @@
 
   refreshStatus();
   pollLive();
+  watchServer();
 })();

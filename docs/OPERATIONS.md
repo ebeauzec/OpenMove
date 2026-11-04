@@ -174,13 +174,13 @@ The way back is itself a move and has the same risks. Do not reverse a volume th
 | **Resume** (red banner) | Needs a name and a reason. Do it only when the cause is understood. | It does not retry a lost call by itself. The engine reads the cloud and settles it. |
 | **Close OpenMove** | Stops the process. The journal is safe. | A retype already sent continues in the cloud. |
 
-**After a restart, or after a crash:**
+**After a restart, or after a crash** (`RECOVERY.md` has the whole story):
 
-1. Start OpenMove. Connect again (the password is not stored). Press *Detect version and back-ends*.
-2. Read the inventory again and run the pre-flight. Attest and sign again: sign-offs do not carry over.
-3. On the Move tab, enter the same target type.
-4. Press *Start the run*. The engine resumes every volume that is not finished, from the journal, and the table shows them again with their phase. For a step that has an intent and no result, it reads the volume and closes the step with what the cloud shows. It never sends a retype twice.
-5. If a halt was in force, resume it first, with a reason.
+1. If OpenMove was started with the batch file it restarts by itself within seconds when only the program ended; after a restart of the computer, start the batch file again. The page that was open keeps its address and carries on by itself.
+2. Sign in to the cloud again (the password is not stored; the lab signs in by itself). The page shows "OpenMove was restarted. Your work is saved." with a **Sign in again** button that fills in the address, user and project.
+3. OpenMove reads the cloud again and puts the saved work back: the safety checks of the same run (their approvals are in the journal and still count), the choice of volumes, the options, the releases. It then **carries on the move that was running**. You do nothing else.
+4. For a step that has an intent and no result, the engine reads the volume and closes the step with what the cloud shows. It never sends a retype twice.
+5. If a halt was in force, resume it first, with a reason. If the page says it could not put everything back, press **Try again**, or **Start fresh** (the history stays; the move is then started from the Move step again, and it takes up every volume that is not finished).
 
 ## 7. What the notes mean
 

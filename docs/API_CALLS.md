@@ -99,6 +99,8 @@ Protection: every `/api/` call needs the per-run token (printed at start-up and 
 | `GET /api/status` | Version, connection, demo scenario, what has been read, gate status, halt state, number of unresolved steps. | | no |
 | `POST /api/connect` | Log in to a cloud (K2). | address, user, password, project, domains, region, interface, TLS options | no |
 | `POST /api/disconnect` | Forget the session and everything read. | | no |
+| `POST /api/recover` | Try again to put back the work saved before a stop (after a failed restore). Needs the cloud sign-in. Reads the cloud, changes nothing by itself; a move that was running is carried on by the engine under its usual permit. | | no |
+| `POST /api/recover/discard` | Forget the saved work (start fresh). Needs a name. The journal is not touched. | | no |
 | `POST /api/discover` | Platform detection: K1, B0, N0, B1, B2, N1. Infers the release and the release profile. | | no |
 | `GET /api/platform` | The last platform result. | | no |
 | `POST /api/inventory/run` | Read and classify volumes: B3, B4, N2. | back-end, rotation window in days | no |
@@ -188,6 +190,13 @@ The journal is a local SQLite file (`journal.db`). It is append-only in normal u
 | `risk_clearance` | A person clears, or withdraws the clearance of, a high-risk volume. | Volume, role, name, evidence, the risk signature. |
 | `risk_mark` | A person marks a volume as a risk, or withdraws the mark. | Volume, name, note. |
 | `engine_dry_run` | A dry run is made. | Counts of volumes ready, waiting and blocked. |
+| `server_start` | The program starts. | Process id, whether the last stop was clean, whether saved work exists, whether a move was running, whether a supervisor started it. |
+| `server_stop` | The program is closed in the normal way. A start with no such event before it means the last run was cut off (crash, power, forced close). | Process id. |
+| `engine_end` | A run of the engine ends: `stopped` (a person), `finished`, `error` (too many errors in a row) or `shutdown` (the program was closed). After `shutdown` or `error`, and after no event at all, the next start carries the run on. | Reason, ticks. |
+| `engine_gap` | The engine noticed a silence of more than 90 seconds between two looks (the computer slept, or the program was stalled). Every volume is read afresh. | Seconds. |
+| `engine_revive` | The guardian found the engine's thread gone while the run was meant to go on, and started it again. | Times. |
+| `engine_resume` | After a restart and the cloud sign-in, the engine carries on the run that was cut off. | Name (automatic), volumes. |
+| `recovery` | The saved work is put back after a restart, or forgotten by a person. | Whether it worked, volumes carried on, error. |
 | `engine_run` | A real run starts. | Volumes queued and resumed, the type map. |
 | `engine_start` | A person starts a run. A real run needs a dry run read for the same volumes first (or an earlier run to resume). The run may carry a window (UTC start and stop): outside it no new volume is taken and no retype is sent. | Name, queued and resumed counts, the window. |
 | `engine_reverse_all` | A person puts the whole run back. | Name, reason, number of volumes. |
@@ -209,6 +218,8 @@ The journal is a local SQLite file (`journal.db`). It is append-only in normal u
 | Reports | Only where the browser saves a download. OpenMove keeps no copy. |
 | `evidence/<volume id>/` in the data folder | Per volume the engine moves: `validated.json`, `before.json`, `after.json`, `calls.jsonl` (every change sent or refused, with time and result) and, after a failure or a reverse, `failed.json` or `after-reverse.json`. Cloud answers only; never a password or token. |
 
+| `resume.json` in the data folder | The work to put back after a stop: the pre-flight run, the selection, the options, the releases, the place reached in the steps, the cloud address, user and project. Written whole and renamed over the old file, every few seconds and after every change. Never a password or token of the cloud. Local only; delete it (or press Start fresh) to forget it. |
+| `access-token` in the data folder | The access token of the page, kept so that an open page and the printed address still work after a restart. Readable by the user only. Delete it to get a new one. |
 | `hosts.json`, `ssh/` (OpenMove's own key pair and `known_hosts`) in the data folder | The registered hosts and the keys. The private key never leaves the folder and never goes into a bundle. |
 | `logs/openmove.log`, `logs/calls.jsonl`, `diag/` in the data folder | The diagnostic log (every start, run, stage, refusal and traceback, redacted as set), the settings and the local token map for redaction. The token map is never put in a bundle. |
 | `bundles/openmove-support-*.zip` in the data folder | Support bundles. They are made when a person asks, and automatically (a light bundle without the remote collection) when a run halts or an unexpected error occurs, once per reason, at most eight. |

@@ -97,8 +97,9 @@ The architecture as built is in `docs/ARCHITECTURE.md`: one Python process (stan
 | `openmove/lab/__init__.py` | Lab mode: configuration, connect, the Horizon sign-in. |
 | `openmove/handling.py` | What happens to each class, and the cause and steps for every volume that is not migrated. |
 | `openmove/selection.py`, `openmove/risk.py` | The selection and the settings (R16); workload risk (R17). |
+| `openmove/recovery.py`, `openmove/supervisor.py` | The failsafe (`docs/RECOVERY.md`): the access token kept across restarts, `resume.json` (the saved work), the restore after a cut-off, the guardian thread, the one-program-per-data-folder lock; the supervisor that starts the program again. |
 | `openmove/tree.py` | The volume tree (project, instance, attached volumes) in plain words, with each volume's verdict once the pre-flight has run; `GET /api/tree`. Read only. |
-| `tests/test_engine.py`, `test_access.py`, `test_lab.py`, `test_handling.py`, `test_selection.py`, `test_tree.py` | The engine against a mock cloud with fault injection; access levels and real-lab findings; lab configuration; causes; selection; the volume tree. |
+| `tests/test_engine.py`, `test_access.py`, `test_lab.py`, `test_handling.py`, `test_selection.py`, `test_tree.py`, `test_recovery.py` | The engine against a mock cloud with fault injection; access levels and real-lab findings; lab configuration; causes; selection; the volume tree. |
 | `tests/mock_openstack.py` | A mock Keystone, Cinder and Nova cloud with made-up data. |
 | `tests/test_core.py` | Tests for release inference, profiles, journal, classification and exports. |
 | `tests/test_cloud.py` | Tests for discovery, inventory and the web server against the mock cloud. |

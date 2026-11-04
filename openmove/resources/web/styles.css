@@ -213,3 +213,17 @@ dialog.ask input, dialog.ask textarea, dialog.ask select { width: 100%; }
 dialog.help { width: min(760px, 94vw); max-height: 88vh; overflow: auto; }
 dialog.help dt { font-weight: 700; margin-top: 8px; } dialog.help dd { margin: 0 0 0 0; color: var(--muted); }
 #tree-find, #sel-find { min-width: 280px; }
+
+/* the server went away, and the work saved before a stop is put back */
+.connlost { position: sticky; top: 0; z-index: 60; background: var(--warn-bg); color: var(--warn); border-bottom: 2px solid var(--warn); padding: 10px 16px; font-weight: 600; }
+.connlost small { display: block; font-weight: 400; margin-top: 2px; }
+.recovery { border: 1px solid var(--border); border-left: 4px solid var(--warn); border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; background: var(--surface); }
+.recovery.ok { border-left-color: var(--ok); }
+.recovery.bad { border-left-color: var(--bad); }
+.recovery h3 { margin: 0 0 4px; font-size: 1rem; }
+.recovery .actions { margin-top: 8px; }
+.livenow { border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; background: var(--surface); }
+.livenow.warn { border-left-color: var(--warn); }
+.livenow.bad { border-left-color: var(--bad); }
+.livenow.ok { border-left-color: var(--ok); }
+.livenow p { margin: 2px 0; }

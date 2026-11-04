@@ -338,7 +338,10 @@ Everything OpenMove reads about a customer's cloud stays on the machine it runs 
 | The dry run says a volume is blocked. | Read the failed check beside it. The tool is refusing something unsafe (wrong back-end, a snapshot left, encrypted, a busy instance, a lock state it cannot see). |
 | "the lab validation needs two different people". | Record lab validation (G0) needs two names, and a description of at least 40 characters. |
 | A volume on the Move tab says "the post-check failed: halted". | The result differs from the before-state. Look at the volume and the instance; reverse it, or fix it by hand, then resume. |
-| The engine seems stopped after a restart. | Connect, detect the platform, run the pre-flight, sign again, then press *Start the run* with the same target type. It resumes from the journal (`OPERATIONS.md` section 6). |
+| The engine seems stopped after a restart. | Sign in again when the page asks (the lab does it by itself). OpenMove puts the saved work back and carries on the move; nothing needs to be signed again. If the page says it could not, press *Try again* (`RECOVERY.md`). |
+| A bar at the top says "OpenMove is not answering". | OpenMove stopped or the computer slept. Your work is saved. The page carries on by itself when OpenMove is back; start `OpenMove-Lab.bat` or `OpenMove.bat` if it stays like this for more than a minute. |
+| "OpenMove is already running with this data folder". | Another OpenMove holds the same data folder. Use that one (the address is in its window) or close it first. Two programs on one journal would each move the same volumes. |
+| The Progress page says volumes wait for a second person. | The copy is finished and checked; G2 and G3 (or G4) need a person who is not the operator. Use the Approve button on the page. It is not stuck. |
 
 ## 13. Words used in the screens
 

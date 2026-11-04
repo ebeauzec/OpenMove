@@ -25,7 +25,7 @@ class NetworkTests(unittest.TestCase):
 
     def test_only_the_documented_modules_open_connections(self):
         found = self.files_that_connect()
-        self.assertEqual(set(found), {"connectors/httpclient.py", "connectors/ssh.py", "lab/__init__.py", "lab/hosts.py", "selfcheck.py"}, "a module opens a connection that docs/NETWORK.md does not name: %s" % found)
+        self.assertEqual(set(found), {"connectors/httpclient.py", "connectors/ssh.py", "lab/__init__.py", "lab/hosts.py", "selfcheck.py", "supervisor.py"}, "a module opens a connection that docs/NETWORK.md does not name: %s" % found)
         doc = (ROOT / "docs" / "NETWORK.md").read_text(encoding="utf-8")
         for rel in found:
             self.assertIn(rel.replace("/__init__.py", "/").replace("__init__.py", ""), doc.replace("lab/__init__.py", "lab/"), rel)
