@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.0 (2026-11-04)
+
+### Changed
+- The interface was reworked for a person who has not read the migration plan. Nine technical steps became seven: Connect, Scan (platform, inventory and health check in one button), Safety checks, Choose, Move, Progress, Reports. The server still holds every step closed until the one before it is done, and every rule is unchanged. New: the cloud is shown as a tree (project, instance, attached volumes, volumes not attached) with each volume's group in plain words (Easy, Waits for snapshots, Careful copy, Instance is off, Not moved by this tool) and, after the safety checks, whether it will be moved and why not (GET /api/tree); the Choose step uses the same tree with a box on every project, instance and volume. Messages are fixed to the top of the window, so an error is never off screen (this was why Attest looked broken: its error appeared above the visible page). Every question is one dialog that keeps the server's refusal inside it. Confirm and Approve replace attest and sign-off; a panel at every step says what to do; a Help button explains the words. The safety checks are shown as a to-do list: what failed, what needs a person, what is confirmed, who approved. The page no longer shows safety-check results the server has dropped. Fixed: the lab SSH key file had permissions that let other users read it, so ssh refused it and check P8 failed; OpenMove now limits the key to its owner (icacls on Windows, chmod elsewhere).
+
 ## 0.10.2 (2026-11-04)
 
 ### Fixed

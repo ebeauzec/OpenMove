@@ -113,7 +113,24 @@ def ensure_key(home):
         rc, out, err = run_local([tool("ssh-keygen"), "-q", "-t", "ed25519", "-N", "", "-C", "openmove", "-f", str(k)], timeout=60)
         if rc != 0:
             raise SshError("ssh-keygen failed: %s" % err.decode("utf-8", "replace").strip()[:300])
+    protect_key(k)
     return public_key(home)
+
+
+def protect_key(path):
+    """Only the owner may read the private key. ssh refuses a key that others can read ("UNPROTECTED PRIVATE KEY FILE"). On Windows a file takes the
+    permissions of its folder, which usually lets every user read it, so the inherited rights are removed and the current user is given full control."""
+    path = str(path)
+    if os.name != "nt":
+        os.chmod(path, 0o600)
+        return
+    who = "%s\\%s" % (os.environ.get("USERDOMAIN") or ".", os.environ.get("USERNAME") or "")
+    if who.endswith("\\"):
+        return
+    try:
+        subprocess.run(["icacls", path, "/inheritance:r", "/grant:r", "%s:F" % who], capture_output=True, timeout=30, check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def public_key(home):

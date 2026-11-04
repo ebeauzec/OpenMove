@@ -28,16 +28,75 @@
     });
   }
 
+  // A message is fixed to the top of the window, so it is seen wherever the page is scrolled. A good message goes away by itself; a problem stays until it is closed.
+  var bannerTimer = null;
   function banner(kind, text) {
     var b = $('banner');
+    clearTimeout(bannerTimer);
     if (!text) { b.className = 'banner hidden'; return; }
     b.className = 'banner ' + kind; b.textContent = text;
+    var x = el('button', { class: 'x', type: 'button', text: '\u00d7', title: 'Close this message', 'aria-label': 'Close this message' });
+    x.addEventListener('click', function () { b.className = 'banner hidden'; });
+    b.appendChild(x);
+    if (kind === 'ok') bannerTimer = setTimeout(function () { b.className = 'banner hidden'; }, 9000);
   }
-  function busy(btn, on) { btn.disabled = on; }
+  function busy(btn, on) { btn.disabled = on; btn.classList.toggle('working', on); }
   function guard(btn, fn) {
     busy(btn, true); banner('', '');
     return fn().catch(function (e) { banner('bad', e.message); }).then(function () { busy(btn, false); });
   }
+
+  // One clear box instead of a chain of pop-ups. If the server refuses, the reason is shown inside the box and the box stays open.
+  // fields: {key, label, type (text, textarea, select, password), hint, value, min (least characters), options [[value, text]]}
+  var me = '';                                                    // the name the person gave, kept for this page only
+  function ask(o) {
+    return new Promise(function (resolve) {
+      var d = $('ask'); clear(d);
+      var fields = o.fields || [], inputs = {};
+      var err = el('div', { class: 'banner bad static hidden', role: 'alert' });
+      var form = el('form', { method: 'dialog' });
+      form.appendChild(el('h3', { text: o.title }));
+      if (o.intro) form.appendChild(el('p', { class: 'muted pre', text: o.intro }));
+      fields.forEach(function (f) {
+        var inp;
+        if (f.type === 'textarea') inp = el('textarea', { rows: String(f.rows || 3) });
+        else if (f.type === 'select') { inp = el('select'); f.options.forEach(function (op) { inp.appendChild(el('option', { value: op[0], text: op[1] })); }); }
+        else inp = el('input', { type: f.type || 'text' });
+        if (f.placeholder) inp.setAttribute('placeholder', f.placeholder);
+        if (f.value != null) inp.value = f.value;
+        inputs[f.key] = inp;
+        form.appendChild(el('label', {}, [f.label, inp].concat(f.hint ? [el('span', { class: 'hint', text: f.hint })] : [])));
+      });
+      form.appendChild(err);
+      var ok = el('button', { class: o.danger ? 'primary danger' : 'primary', type: 'submit', text: o.ok || 'OK' });
+      var cancel = el('button', { class: 'secondary', type: 'button', text: o.cancel || 'Cancel' });
+      form.appendChild(el('div', { class: 'actions' }, [ok, cancel]));
+      d.appendChild(form);
+      var finished = false;
+      function done(v) { if (finished) return; finished = true; if (d.open) d.close(); resolve(v); }
+      function fail(msg) { err.textContent = msg; err.classList.remove('hidden'); ok.disabled = false; ok.classList.remove('working'); }
+      cancel.addEventListener('click', function () { done(null); });
+      d.addEventListener('cancel', function (ev) { ev.preventDefault(); done(null); });
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var vals = {}, bad = '';
+        fields.forEach(function (f) {
+          var v = inputs[f.key].value;
+          if (f.type !== 'password') v = v.trim();
+          vals[f.key] = v;
+          if (!bad && f.min && v.length < f.min) bad = f.label + (f.min <= 3 ? ' is needed.' : ': please write at least ' + f.min + ' characters (you wrote ' + v.length + ').');
+        });
+        if (bad) { fail(bad); return; }
+        err.classList.add('hidden');
+        if (!o.submit) { done(vals); return; }
+        ok.disabled = true; ok.classList.add('working');
+        Promise.resolve().then(function () { return o.submit(vals); }).then(function (r) { done(r === undefined ? vals : r); }, function (e) { fail((e && e.message) || String(e)); });
+      });
+      d.showModal();
+      (fields.length ? inputs[fields[0].key] : ok).focus();
+    });
+  }
+  function nameField(label, hint, prefill) { return { key: 'by', label: label || 'Your name', hint: hint, min: 3, value: prefill === false ? '' : me }; }
 
   var currentTab = 'connect';
   // ---- tabs ----
@@ -47,9 +106,10 @@
     document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('active', b.dataset.tab === name); });
     document.querySelectorAll('.panel').forEach(function (p) { p.classList.toggle('hidden', p.id !== 'tab-' + name); });
     if (name === 'journal') loadJournal();
+    if (name === 'scan' && lastStatus.inventory) loadTree();
     if (name === 'preflight') fillBackends();
     if (name === 'live') { pollLive(true); loadUnmigrated(true); }
-    if (name === 'select') { loadSelection(); loadRisk(); }
+    if (name === 'select') { loadSelection(); loadRisk(); loadTree(); }
     if (name === 'move') loadMove();
     if (name === 'hosts') loadHosts();
     if (name === 'diagnostics') loadDiag();
@@ -57,17 +117,63 @@
     drawWizard();
   }
   // The wizard is gated: the server says which step is open (every step before it is done) and what is missing for the next one.
-  function wizardInfo(tab) {
+  function rawStep(tab) {
     var list = (lastStatus && lastStatus.wizard) || [];
     for (var k = 0; k < list.length; k++) { if (list[k].id === tab) return list[k]; }
     return null;
+  }
+  var SCAN_STEPS = ['platform', 'inventory', 'audit'];              // on the page these three are one step, "Scan"
+  function stageOf(id) { return SCAN_STEPS.indexOf(id) >= 0 ? 'scan' : id; }
+  function wizardInfo(tab) {
+    if (tab !== 'scan') return rawStep(tab);
+    var parts = SCAN_STEPS.map(rawStep);
+    if (!parts[0]) return null;
+    return { id: 'scan', open: parts[0].open, done: parts.every(function (p) { return p && p.done; }), needs: parts[0].needs };
   }
   function wizardDone(tab) { var w = wizardInfo(tab); return !w || w.done; }
   // Back and Next walk through the numbered steps in order, so the tabs at the top are not the only way to move
   function wizardSteps() {
     return Array.prototype.filter.call(document.querySelectorAll('#tabs button'), function (b) { return /^\d+\./.test(b.textContent.trim()); });
   }
+  // What each step is for, in plain words, shown at the top of the step. `todo` is what the person does; `after` is said once the step is done.
+  var STAGES = {
+    connect: { title: 'Connect to your cloud', what: 'Sign in to OpenStack with an administrator account. OpenMove only reads at this point. It changes nothing.',
+      todo: ['Enter the address of your cloud and an administrator login.', 'Press Connect.'], after: 'You are connected. Go on to the scan.' },
+    scan: { title: 'Scan your cloud', what: 'OpenMove reads your whole cloud: its version, its storage systems, and every project, instance and volume. It also looks for problems. It changes nothing.',
+      todo: ['Press "Scan the cloud". It takes a minute or two.', 'Look through the list to see what you have. Each volume says how it will be handled.'], after: 'The scan is done. Look through the list, or go on to the safety checks.' },
+    preflight: { title: 'Safety checks', what: 'Before anything is moved, OpenMove checks that the cloud and the storage are ready. A check that fails must be fixed. A check that OpenMove cannot do by itself needs a person to look and confirm. Then two different people approve.',
+      todo: ['Choose where the volumes move from and to.', 'Press "Run the safety checks".', 'Fix anything that failed. Confirm anything that needs a person.', 'Two different people press Approve.'], after: 'The safety checks are approved. Go on and choose the volumes.' },
+    select: { title: 'Choose what to move', what: 'Tick the volumes to move. You can tick a whole project, a whole instance or a single volume. Volumes that cannot be moved are shown with the reason, and they stay where they are.',
+      todo: ['Tick what you want to move. The suggested choice is already ticked.', 'Check the volumes that may break if they are moved.', 'Press "Confirm my choice".'], after: 'Your choice is confirmed. Go on to the move.' },
+    move: { title: 'Move the volumes', what: 'First rehearse: OpenMove lists every call it would make and sends none. Then start the move for real. A second person approves each volume before it is switched.',
+      todo: ['Press "1. Rehearse" and read the result.', 'Press "2. Start moving".'], after: 'The move has been rehearsed. Press "2. Start moving", or watch the Progress step.' },
+    live: { title: 'Progress', what: 'Shows each volume as it is copied, checked and switched, and everything that was refused. A second person approves each volume here.',
+      todo: ['Watch the progress.', 'The second person presses Approve when volumes are ready.'], after: '' },
+    reports: { title: 'Reports', what: 'Word documents and spreadsheets built from the same data the tool holds, so a report cannot disagree with what OpenMove knows.',
+      todo: ['Choose the report you need and press its button.'], after: '' },
+    journal: { title: 'History', what: 'Everything OpenMove did and everything people recorded.', todo: [] },
+    hosts: { title: 'Helper servers', what: 'Servers that copy volumes with long-lived snapshots. You only need them if you have such volumes.', todo: [] },
+    diagnostics: { title: 'Support', what: 'If something goes wrong, make a support bundle and send it to whoever supports you.', todo: [] }
+  };
+  function drawGuide() {
+    var g = $('guide'), st = STAGES[currentTab]; clear(g);
+    g.classList.toggle('hidden', !st);
+    if (!st) return;
+    var steps = wizardSteps(), i = -1;
+    steps.forEach(function (b, k) { if (b.dataset.tab === currentTab) i = k; });
+    var w = wizardInfo(currentTab), numbered = i >= 0;
+    var head = el('div', { class: 'guide-head' });
+    if (numbered) head.appendChild(el('span', { class: 'guide-step', text: 'Step ' + (i + 1) + ' of ' + steps.length }));
+    head.appendChild(el('span', { class: 'guide-title', text: st.title }));
+    if (numbered && w && (!w.open || ['connect', 'scan', 'preflight', 'select', 'move'].indexOf(currentTab) >= 0)) head.appendChild(el('span', { class: 'chip ' + (w.done ? 'ok' : (w.open ? 'warn' : '')), text: w.done ? 'Done' : (w.open ? 'Your turn' : 'Locked') }));
+    g.appendChild(head);
+    g.appendChild(el('p', { text: st.what }));
+    if (numbered && w && !w.open) g.appendChild(el('div', { class: 'banner warn static', text: w.needs }));
+    else if (numbered && w && w.done && st.after) g.appendChild(el('p', { class: 'guide-done', text: '\u2713 ' + st.after }));
+    else if (st.todo && st.todo.length) g.appendChild(el('ol', { class: 'guide-todo' }, st.todo.map(function (x) { return el('li', { text: x }); })));
+  }
   function drawWizard() {
+    drawGuide();
     var steps = wizardSteps(), i = -1;
     steps.forEach(function (b, k) { if (b.dataset.tab === currentTab) i = k; });
     var back = $('wiz-back'), next = $('wiz-next'), lab = $('wiz-step'), hint = $('wiz-hint');
@@ -113,7 +219,14 @@
      ['inventory', 'inv-summary', 'inventory', function (d) { renderInventory(d); }],
      ['audit', 'audit-view', 'audit', function (d) { renderAudit(d); }],
      ['checks', 'pf-view', 'checks', function (d) { renderChecks(d); }]].forEach(function (r) {
-      if (!s[r[0]] || $(r[1]).firstChild || restoring[r[0]]) return;
+      if (!s[r[0]]) {
+        if ($(r[1]).firstChild && !restoring[r[0]]) {
+          clear($(r[1]));
+          if (r[0] === 'checks') $('pf-stale').textContent = 'The earlier safety checks are no longer valid. This happens when the volumes are read again. Run the safety checks again.';
+        }
+        return;
+      }
+      if ($(r[1]).firstChild || restoring[r[0]]) return;
       restoring[r[0]] = true;
       api('GET', r[2]).then(r[3]).catch(function () {}).then(function () { restoring[r[0]] = false; });
     });
@@ -135,56 +248,55 @@
         var cf = $('connect-form');
         Object.keys(s.lab_form).forEach(function (k) { if (cf.elements[k]) cf.elements[k].value = s.lab_form[k]; });
         cf.elements.password.required = false;
-        cf.elements.password.placeholder = 'filled in automatically (lab)';
+        cf.elements.password.placeholder = 'filled in for you (test lab)';
         cf.dataset.labFilled = '1';
       }
       if (s.demo) {
         var out = $('connect-result');
-        if (!out.firstChild) out.appendChild(el('div', { class: 'banner ok', text: 'Demonstration mode: connected to the built-in demonstration cloud. Go to 2. Platform.' }));
+        if (!out.firstChild) out.appendChild(el('div', { class: 'banner ok', text: 'Demonstration: you are connected to the built-in demonstration cloud. Go on to step 2, Scan.' }));
         $('connect-form').classList.add('hidden');
       }
       var m = $('mode');
-      if (!s.connected) { m.className = 'chip'; m.textContent = 'not connected'; }
-      else if (s.platform && s.read_only) { m.className = 'chip warn'; m.textContent = 'read only'; }
-      else if (s.platform) { m.className = 'chip ok'; m.textContent = 'validated release'; }
-      else { m.className = 'chip'; m.textContent = 'connected'; }
+      if (!s.connected) { m.className = 'chip'; m.textContent = 'not connected'; m.title = ''; }
+      else if (s.platform && s.read_only) { m.className = 'chip warn'; m.textContent = 'look only: no changes allowed'; m.title = 'This OpenStack release has not passed its lab tests yet, so OpenMove refuses every change.'; }
+      else if (s.platform) { m.className = 'chip ok'; m.textContent = 'ready to move volumes'; m.title = 'This OpenStack release has passed its lab tests.'; }
+      else { m.className = 'chip'; m.textContent = 'connected'; m.title = ''; }
       var cur = wizardInfo(currentTab);
       if (cur && !cur.open) {                      // the step we are on closed (disconnected, a new pre-flight run, a changed selection): go back to the first open one that is not done
         var open = (s.wizard || []).filter(function (w) { return w.open && !w.done; })[0] || (s.wizard || [])[0];
-        if (open) showTab(open.id, true);
+        if (open) showTab(stageOf(open.id), true);
       }
       drawWizard();
       drawMoveGate();
       restoreViews(s);
-      if (deepLink) { var go = deepLink; deepLink = ''; if (wizardInfo(go) || go === 'journal' || go === 'hosts' || go === 'diagnostics') showTab(go); }     // a link such as  /#preflight  opens that step if it is open
+      if (deepLink) { var go = stageOf(deepLink); deepLink = ''; if (wizardInfo(go) || go === 'journal' || go === 'hosts' || go === 'diagnostics') showTab(go); }     // a link such as  /#preflight  opens that step if it is open
       return s;
     }).catch(function () {});
   }
 
   // ---- halt ----
-  function askWho(what) {
-    var by = window.prompt(what + '\n\nYour name:');
-    if (!by || !by.trim()) return null;
-    var reason = window.prompt('Reason (at least 8 characters):');
-    if (!reason || reason.trim().length < 8) { banner('bad', 'A reason of at least 8 characters is needed. Nothing was changed.'); return null; }
-    return { by: by.trim(), reason: reason.trim() };
+  function askWho(title, intro, okText) {
+    return ask({ title: title, intro: intro, ok: okText, danger: true, fields: [nameField('Your name'), { key: 'reason', label: 'Why?', type: 'textarea', min: 8, hint: 'A few words. This is saved in the history.' }] })
+      .then(function (v) { if (v) me = v.by; return v; });
   }
   function drawHalt(h) {
     var b = $('halt-banner'); clear(b);
     b.classList.toggle('hidden', !h);
     $('halt-btn').classList.toggle('hidden', !!h);
     if (!h) return;
-    b.appendChild(el('span', { text: 'ALL CHANGES ARE HALTED by ' + h.by + ' (' + h.at + '): ' + h.reason }));
-    var r = el('button', { text: 'Resume' });
+    b.appendChild(el('span', { text: 'EVERYTHING IS STOPPED. ' + h.by + ' pressed the emergency stop (' + h.at + '): ' + h.reason }));
+    var r = el('button', { text: 'Allow changes again' });
     r.addEventListener('click', function () {
-      var w = askWho('Resume changes? Only do this once the reason for the halt is resolved.');
-      if (w) api('POST', 'resume', w).then(refreshStatus).catch(function (e) { banner('bad', e.message); });
+      askWho('Allow changes again?', 'Only do this once the reason for the stop is solved.', 'Allow changes').then(function (w) {
+        if (w) api('POST', 'resume', w).then(refreshStatus).catch(function (e) { banner('bad', e.message); });
+      });
     });
     b.appendChild(r);
   }
   $('halt-btn').addEventListener('click', function () {
-    var w = askWho('HALT all changes now? Nothing that changes the cloud will be sent until someone resumes.');
-    if (w) api('POST', 'halt', w).then(refreshStatus).catch(function (e) { banner('bad', e.message); });
+    askWho('Emergency stop', 'This stops every change to the cloud at once. Nothing that changes the cloud will be sent until someone allows changes again. Use it when something looks wrong.', 'Stop everything').then(function (w) {
+      if (w) api('POST', 'halt', w).then(refreshStatus).catch(function (e) { banner('bad', e.message); });
+    });
   });
 
   // ---- demonstration scenarios ----
@@ -199,7 +311,8 @@
     $('demo-desc').textContent = info.summary + ' Cloud: ' + info.distribution + '. Source ' + info.source + ', default target ' + info.target + '.';
   }
   function resetViews() {
-    ['platform-view', 'inv-summary', 'audit-view', 'pf-view'].forEach(function (id) { clear($(id)); });
+    ['platform-view', 'inv-summary', 'audit-view', 'pf-view', 'scan-summary', 'scan-mode', 'tree-view', 'sel-tree'].forEach(function (id) { clear($(id)); });
+    treeData = null; $('tree-box').classList.add('hidden'); $('scan-status').textContent = '';
     clear($('inv-table').tBodies[0]); $('inv-table').hidden = true; $('inv-more').textContent = '';
     ['inv-backend', 'pf-source', 'pf-target'].forEach(function (id) { $(id).value = ''; });
     $('rep-status').textContent = ''; $('inv-filter').hidden = true;
@@ -209,15 +322,15 @@
     var sel = $('demo-scenario');
     sel.disabled = true;
     api('POST', 'demo/scenario', { id: sel.value }).then(function () {
-      resetViews(); banner('ok', 'Switched the demonstration. Nothing has been read yet: start with 2. Platform.');
+      resetViews(); banner('ok', 'Switched the demonstration. Nothing has been read yet: start with step 2, Scan.');
       return refreshStatus();
-    }).catch(function (e) { banner('bad', e.message); }).then(function () { sel.disabled = false; showTab('platform'); });
+    }).catch(function (e) { banner('bad', e.message); }).then(function () { sel.disabled = false; showTab('scan'); });
   });
   $('inv-demo-export').addEventListener('click', function () {
     guard($('inv-demo-export'), function () {
       return api('POST', 'demo/db-export', {}).then(function (inv) {
         renderInventory(inv); refreshStatus();
-        banner('ok', 'Loaded the demonstration database export: provider ids and snapshot history are now included, so classes B and the provider_id checks appear.');
+        banner('ok', 'Loaded the demonstration database export. Snapshot history and provider ids are now included.');
       });
     });
   });
@@ -233,10 +346,10 @@
       return api('POST', 'connect', d).then(function (r) {
         f.elements.password.value = '';
         var out = $('connect-result'); clear(out);
-        out.appendChild(el('div', { class: 'banner ok', text: 'Connected. Roles: ' + (r.roles || []).join(', ') }));
+        out.appendChild(el('div', { class: 'banner ok', text: 'Connected. Your roles: ' + (r.roles || []).join(', ') + '.' }));
         if ((r.roles || []).indexOf('admin') < 0) out.appendChild(el('div', { class: 'banner warn',
-          text: 'This account has no admin role. Back-end, host and all-project data will not be available.' }));
-        return refreshStatus().then(function () { showTab('platform'); });
+          text: 'This account is not an administrator. OpenMove will not be able to see the storage systems, the hosts or the volumes of other projects.' }));
+        return refreshStatus().then(function () { showTab('scan'); });
       });
     });
   });
@@ -262,6 +375,10 @@
     var v = $('platform-view'); clear(v);
     var prof = p.profile || {}, rel = p.release || {};
     var kind = prof.status === 'validated' ? 'ok' : 'warn';
+    var sm = $('scan-mode'); clear(sm);
+    sm.appendChild(el('div', { class: 'banner ' + kind + ' static', text: prof.status === 'validated'
+      ? 'Your OpenStack release (' + prof.release + ') has passed its lab tests. OpenMove may change the cloud when you tell it to.'
+      : 'Look only. ' + String(prof.reason || '').replace(/^./, function (c) { return c.toUpperCase(); }).replace(/\.$/, '') + '. You can scan, check and make reports. OpenMove refuses every change until the lab tests for this release are recorded (step 5, Move, "Lab tests").' }));
     v.appendChild(el('div', { class: 'banner ' + kind, text: prof.status === 'validated'
       ? 'Release ' + prof.release + ' is validated. Changes to the cloud are allowed.'
       : 'Read only. ' + prof.reason + '. Inventory, checks and reports work; every step that changes the cloud is refused.' }));
@@ -304,6 +421,8 @@
   });
 
   // ---- inventory ----
+  var CLS_NAME = { A: 'Easy', B: 'Waits for snapshots', C: 'Careful copy', D: 'Instance is off', E: 'Not moved by this tool' };
+  function clsName(c) { return CLS_NAME[c] || String(c || '-'); }
   function renderInventory(inv) {
     inventory = inv;
     var s = $('inv-summary'); clear(s);
@@ -312,7 +431,7 @@
     cards.appendChild(el('div', { class: 'card' }, [el('div', { class: 'k', text: 'Volumes' }), el('div', { class: 'v', text: String(inv.total) })]));
     cards.appendChild(el('div', { class: 'card' }, [el('div', { class: 'k', text: 'Total GiB' }), el('div', { class: 'v', text: String(inv.total_gib) })]));
     ['A', 'B', 'C', 'D', 'E'].forEach(function (c) {
-      cards.appendChild(el('div', { class: 'card' }, [el('div', { class: 'k', text: 'Class ' + c }), el('div', { class: 'v', text: String(inv.counts[c] || 0) })]));
+      cards.appendChild(el('div', { class: 'card' }, [el('div', { class: 'k', text: clsName(c) }), el('div', { class: 'v', text: String(inv.counts[c] || 0) })]));
     });
     s.appendChild(cards);
     var keys = Object.keys(inv.assumptions || {});
@@ -323,9 +442,10 @@
       s.appendChild(ul);
     }
     var cs = $('inv-class'); clear(cs); cs.appendChild(el('option', { value: '', text: 'all' }));
-    ['A', 'B', 'C', 'D', 'E'].forEach(function (c) { cs.appendChild(el('option', { value: c, text: c })); });
+    ['A', 'B', 'C', 'D', 'E'].forEach(function (c) { cs.appendChild(el('option', { value: c, text: clsName(c) })); });
     $('inv-filter').hidden = false; $('inv-table').hidden = false;
     drawRows();
+    loadTree();
   }
   function drawRows() {
     if (!inventory) return;
@@ -340,7 +460,7 @@
       var att = (v.attachments || []).map(function (a) { return a.server_id; }).filter(Boolean).join(', ');
       tb.appendChild(el('tr', {}, [
         el('td', {}, [el('span', { class: 'mono', text: v.id }), el('div', { class: 'muted', text: v.name || '' })]),
-        el('td', {}, [el('span', { class: 'cls cls-' + v['class'], text: v['class'] })]),
+        el('td', {}, [el('span', { class: 'cls cls-' + v['class'], text: v['class'] }), document.createTextNode(' ' + clsName(v['class']))]),
         el('td', { text: v.reason }),
         el('td', { class: 'num', text: String(v.size) }),
         el('td', { class: 'num', text: String(v.snapshots) }),
@@ -392,7 +512,7 @@
   $('journal-refresh').addEventListener('click', loadJournal);
 
   // ---- shared helpers for checks and the audit ----
-  var STATUS_TEXT = { pass: 'Pass', info: 'Info', warn: 'Warn', fail: 'Fail', not_checked: 'Not checked' };
+  var STATUS_TEXT = { pass: 'OK', info: 'Info', warn: 'Needs attention', fail: 'Failed', not_checked: 'Not checked' };
   function chip(status) { return el('span', { class: 'st st-' + status, text: STATUS_TEXT[status] || status }); }
   function sevChip(sev) { return el('span', { class: 'st sev-' + sev, text: sev.charAt(0).toUpperCase() + sev.slice(1) }); }
   function card(k, v) { return el('div', { class: 'card' }, [el('div', { class: 'k', text: k }), el('div', { class: 'v', text: String(v) })]); }
@@ -408,6 +528,15 @@
       });
       var d = lastStatus.demo_scenario;
       if (d && !$('pf-source').value && !$('pf-target').value) { $('pf-source').value = d.source; $('pf-target').value = d.target; $('pf-access').value = 'full'; }
+      else if (inventory && !$('pf-source').value && !$('pf-target').value) {      // the storage system that holds most volumes is the one they move from; if one other remains, that is where they move to
+        var count = {}, names = {};
+        inventory.volumes.forEach(function (v) { if (v.backend) count[v.backend] = (count[v.backend] || 0) + 1; });
+        p.backends.forEach(function (b) { if (b.backend) names[b.backend] = 1; });
+        var src = Object.keys(count).sort(function (a, b) { return count[b] - count[a]; })[0];
+        var others = Object.keys(names).filter(function (n) { return n !== src; });
+        if (src) $('pf-source').value = src;
+        if (src && others.length === 1) $('pf-target').value = others[0];
+      }
     }).catch(function () {});
   }
 
@@ -415,6 +544,7 @@
   function renderAudit(a) {
     var v = $('audit-view'); clear(v);
     var fc = a.finding_counts || {};
+    $('audit-count').textContent = '(' + a.findings.length + ' found' + (fc.high ? ', ' + fc.high + ' serious' : '') + ')';
     var cards = el('div', { class: 'cards' });
     [['Volumes', a.volumes.total], ['Volume GiB', a.volumes.gib], ['Snapshots', a.snapshots.total], ['Backups', a.backups.total], ['Instances', a.instances.total],
      ['High findings', fc.high || 0], ['Medium findings', fc.medium || 0], ['Low findings', fc.low || 0], ['Info', fc.info || 0]].forEach(function (c) { cards.appendChild(card(c[0], c[1])); });
@@ -455,133 +585,309 @@
     guard($('audit-run'), function () { return api('POST', 'audit/run', {}).then(function (a) { renderAudit(a); return refreshStatus(); }); });
   });
 
-  // ---- pre-flight and the gate ----
-  var GATE_TEXT = { approved: 'GATE OPEN: a migration may start', blocked: 'GATE BLOCKED', open: 'GATE CLOSED: checks need attention',
-                    awaiting_signoff: 'GATE CLOSED: waiting for sign-off', stale: 'GATE CLOSED: the pre-flight is out of date' };
-  var attesting = null;
-
-  function attestForm(c, check) {
-    var name = el('input', { placeholder: 'your name' }), note = el('textarea', { rows: '2', placeholder: 'the evidence or reason, in a few words' });
-    var go = el('button', { class: 'primary', text: 'Record attestation' });
-    go.addEventListener('click', function () {
-      guard(go, function () {
-        return api('POST', 'checks/attest', { check_id: check.id, by: name.value, note: note.value }).then(function (r) { attesting = null; renderChecks(r); return refreshStatus(); });
-      });
+  // ---- scan: platform, volumes and the health check in one go ----
+  $('scan-run').addEventListener('click', function () {
+    var st = $('scan-status');
+    guard($('scan-run'), function () {
+      st.textContent = 'Step 1 of 3: reading the version and the storage systems...';
+      return api('POST', 'discover', {}).then(function (p) { renderPlatform(p); return refreshStatus(); }).then(function () {
+        st.textContent = 'Step 2 of 3: reading every project, instance and volume...';
+        return api('POST', 'inventory/run', { backend: $('inv-backend').value, window_days: Number($('inv-window').value) || 14 }).then(function (inv) { renderInventory(inv); return refreshStatus(); });
+      }).then(function () {
+        st.textContent = 'Step 3 of 3: running the health check...';
+        return api('POST', 'audit/run', {}).then(function (a) { renderAudit(a); return refreshStatus(); });
+      }).then(function () {
+        st.textContent = 'The scan finished at ' + new Date().toLocaleTimeString() + '.';
+        return loadTree();
+      }).catch(function (e) { st.textContent = 'The scan stopped: ' + e.message; throw e; });
     });
-    var cancel = el('button', { class: 'secondary', text: 'Cancel' });
-    cancel.addEventListener('click', function () { attesting = null; renderChecks(c); });
-    return el('div', { class: 'inline-form' }, [
-      el('strong', { text: 'Attest ' + check.id + ': ' + check.title }),
-      el('p', { class: 'muted', text: 'You are stating that this prerequisite is met or accepted. Your name and the evidence go into the journal and the report.' }),
-      el('div', { class: 'grid' }, [el('label', {}, ['Your name', name]), el('label', {}, ['Evidence or reason', note])]),
-      el('div', { class: 'actions' }, [go, cancel])]);
-  }
+  });
 
-  function signBox(c, role, label) {
-    var so = (c.gate.signoffs || {})[role];
-    if (so) return el('div', { class: 'card' }, [el('div', { class: 'k', text: label }), el('div', { class: 'v', text: so.by }), el('div', { class: 'muted', text: so.at })]);
-    var name = el('input', { placeholder: 'name' }), go = el('button', { class: 'primary', text: 'Sign as ' + role });
-    var ready = !c.gate.blockers.length && !c.gate.open_items.length;
-    go.disabled = !ready;
-    go.addEventListener('click', function () {
-      guard(go, function () { return api('POST', 'checks/signoff', { role: role, by: name.value }).then(function (r) { renderChecks(r); return refreshStatus(); }); });
-    });
-    return el('div', { class: 'card' }, [el('div', { class: 'k', text: label }), name, el('div', { class: 'actions' }, [go]),
-      ready ? el('span') : el('div', { class: 'muted', text: 'Signing opens when nothing blocks and nothing is open.' })]);
+  // ---- the volume tree: project, instance, attached volumes ----
+  var treeData = null, treeOpen = {};
+  function loadTree() {
+    return api('GET', 'tree').then(function (t) { treeData = t; drawTree(); drawSelTree(); drawScanSummary(); }).catch(function () {});
   }
+  function legend(box) {
+    clear(box); if (!treeData) return;
+    var ul = el('ul', { class: 'plain' });
+    treeData.legend.forEach(function (l) { ul.appendChild(el('li', {}, [el('span', { class: 'tag tag-' + l.level, text: l.label }), document.createTextNode(' ' + l.meaning)])); });
+    box.appendChild(el('details', {}, [el('summary', { text: 'What do the labels mean?' }), ul]));
+  }
+  function tag(level, text, title) { return el('span', { class: 'tag tag-' + level, text: text, title: title || '' }); }
+  function shortId(id) { return String(id).slice(0, 8); }
+  function uniqueVols(vols) { var seen = {}; return vols.filter(function (v) { if (seen[v.id]) return false; seen[v.id] = 1; return true; }); }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
 
-  function renderChecks(c) {
-    var v = $('pf-view'); clear(v);
-    var g = c.gate, att = c.attestations || {};
-    v.appendChild(el('div', { class: 'gate gate-' + g.status }, [el('div', { class: 'gate-title', text: GATE_TEXT[g.status] || g.status }), el('div', { text: g.message })]));
-    var cards = el('div', { class: 'cards' });
-    [['Pass', c.counts.pass], ['Info', c.counts.info], ['Warn', c.counts.warn], ['Fail', c.counts.fail], ['Not checked', c.counts.not_checked],
-     ['Volumes admitted', c.admitted.length + ' of ' + c.volumes_total]].forEach(function (x) { cards.appendChild(card(x[0], x[1])); });
-    v.appendChild(cards);
-    v.appendChild(el('p', { class: 'muted', text: c.access === 'full'
-      ? 'Access level: APIs, hosts and arrays. Class C volumes can be admitted.'
-      : 'Access level: the OpenStack APIs only. Classes A and B are moved by Cinder (a retype). ' + (c.no_mover && c.no_mover.length ? c.no_mover.length + ' class C volume(s) are held back: they need a data mover host and array access.' : '') }));
-    if (g.blockers.length) {
-      v.appendChild(el('h3', { text: 'Blocks the gate (fix these)' }));
-      var ul = el('ul', { class: 'plain' });
-      g.blockers.forEach(function (b) { ul.appendChild(el('li', { text: b.id + '  ' + b.title + ': ' + b.evidence })); });
-      v.appendChild(ul);
+  function volRow(v, opt) {
+    var row = el('div', { class: 'vrow' });
+    if (opt.check) {
+      var cb = el('input', { type: 'checkbox', 'aria-label': 'Choose ' + (v.name || v.id) });
+      cb.checked = v.verdict === 'Will be moved';
+      cb.disabled = !v.verdict || v.verdict === 'Held back' || !!(selData && selData.running);
+      cb.addEventListener('change', function () { postSelection({ action: cb.checked ? 'add' : 'remove', ids: [v.id] }).catch(function (e) { banner('bad', e.message); }).then(loadTree); });
+      row.appendChild(cb);
     }
-    v.appendChild(el('h3', { text: 'Platform checks' }));
-    var t = el('table', { class: 'checks' }), head = el('tr');
-    ['ID', 'Check', 'Status', '', 'Evidence', 'What it means'].forEach(function (h) { head.appendChild(el('th', { text: h })); });
-    t.appendChild(el('thead', {}, [head]));
-    var tb = el('tbody');
-    c.platform.concat(c.volume.filter(function (x) { return x.id === 'V9' || x.id === 'V10'; })).forEach(function (k) {
-      var a = att[k.id], action = el('td', { class: 'action' });
-      if (k.status === 'warn' || k.status === 'not_checked') {
-        var b = el('button', { class: 'secondary', text: a ? 'Withdraw' : 'Attest' });
-        b.addEventListener('click', function () {
-          if (a) { api('POST', 'checks/attest', { check_id: k.id, by: 'operator', withdraw: true }).then(function (r) { renderChecks(r); refreshStatus(); }); }
-          else { attesting = k.id; renderChecks(c); }
-        });
-        action.appendChild(b);
-      }
-      var meaning = k.meaning + (a ? '  Attested by ' + a.by + ': ' + a.note : '');
-      tb.appendChild(el('tr', {}, [el('td', { class: 'mono', text: k.id }), el('td', { text: k.title }), el('td', {}, [chip(k.status)]), action,
-        el('td', { text: k.evidence }), el('td', { text: meaning })]));
-      if (attesting === k.id) tb.appendChild(el('tr', {}, [el('td', { colspan: '6' }, [attestForm(c, k)])]));
+    var name = [el('b', { text: v.name || ('Volume ' + shortId(v.id)) }), el('span', { class: 'mono muted', text: ' ' + shortId(v.id) })];
+    if (v.boot) name.push(tag('info', 'boot volume'));
+    if (v.device) name.push(el('span', { class: 'muted small', text: ' ' + v.device }));
+    var main = el('div', { class: 'vmain' }, [el('div', {}, name)]);
+    if (v.why) main.appendChild(el('div', { class: 'muted small', text: v.why }));
+    if (opt.check && v.verdict && v.verdict !== 'Held back') {
+      var flag = el('button', { class: 'linklike', type: 'button', text: 'This volume may break if moved' });
+      flag.addEventListener('click', function () { flagRisk(v, flag); });
+      main.appendChild(flag);
+    }
+    row.appendChild(main);
+    row.appendChild(el('span', { class: 'vsize', text: v.size + ' GiB' + (v.snapshots ? ' \u00b7 ' + plural(v.snapshots, 'snapshot') : '') }));
+    row.appendChild(tag(v.level, v.label, v.meaning));
+    if (v.verdict) row.appendChild(tag(v.verdict_level, v.verdict));
+    return row;
+  }
+  // a box that chooses every volume that can be moved below a project or an instance
+  function groupBox(vols) {
+    var pick = uniqueVols(vols).filter(function (v) { return v.verdict && v.verdict !== 'Held back'; });
+    var on = pick.filter(function (v) { return v.verdict === 'Will be moved'; }).length;
+    var cb = el('input', { type: 'checkbox', class: 'gbox', 'aria-label': 'Choose all the volumes in here that can be moved' });
+    cb.checked = pick.length > 0 && on === pick.length; cb.indeterminate = on > 0 && on < pick.length;
+    cb.disabled = !pick.length || !!(selData && selData.running);
+    cb.title = pick.length ? (on + ' of ' + pick.length + ' volumes that can be moved are chosen') : 'None of these volumes can be moved';
+    cb.addEventListener('click', function (ev) { ev.stopPropagation(); });
+    cb.addEventListener('change', function () {
+      postSelection({ action: cb.checked ? 'add' : 'remove', ids: pick.map(function (v) { return v.id; }) }).catch(function (e) { banner('bad', e.message); }).then(loadTree);
     });
-    t.appendChild(tb); v.appendChild(el('div', { class: 'table-wrap' }, [t]));
+    return cb;
+  }
+  // a node whose contents are built the first time it is opened, so a large cloud stays quick
+  function lazyNode(key, sumKids, build, force, mode) {
+    var d = el('details', { class: 'node' }), body = el('div', { class: 'node-body' }), built = false, ok = mode + key;
+    d.appendChild(el('summary', {}, sumKids.filter(Boolean))); d.appendChild(body);
+    function fill() { if (built) return; built = true; build(body); }
+    if (force || treeOpen[ok]) { d.open = true; fill(); }
+    d.addEventListener('toggle', function () { if (!force) treeOpen[ok] = d.open; if (d.open) fill(); });
+    return d;
+  }
+  function gibOf(vols) { return uniqueVols(vols).reduce(function (n, v) { return n + (Number(v.size) || 0); }, 0); }
+  function instNode(p, i, opt, force, mode) {
+    var up = String(i.status).toUpperCase() === 'ACTIVE';
+    return lazyNode('i:' + p.id + ':' + i.id, [opt.check ? groupBox(i.volumes) : null, el('span', { class: 'ico', text: '\u25A3' }), el('b', { text: i.name }),
+      tag(up ? 'ok' : 'warn', up ? 'running' : String(i.status).toLowerCase(), 'The state of the instance'),
+      el('span', { class: 'muted small', text: plural(i.volumes.length, 'volume') + ', ' + gibOf(i.volumes) + ' GiB' + (i.host ? ' \u00b7 on ' + i.host : '') })],
+      function (body) { i.volumes.forEach(function (v) { body.appendChild(volRow(v, opt)); }); }, force, mode);
+  }
+  function projNode(p, opt, force, forceInner, mode) {
+    var all = p.loose.slice();
+    p.instances.forEach(function (i) { all = all.concat(i.volumes); });
+    return lazyNode('p:' + p.id, [opt.check ? groupBox(all) : null, el('span', { class: 'ico', text: '\u25A4' }), el('b', { text: p.name }),
+      el('span', { class: 'muted small', text: plural(p.instances.length, 'instance') + ', ' + plural(uniqueVols(all).length, 'volume') + ', ' + gibOf(all) + ' GiB' })],
+      function (body) {
+        p.instances.forEach(function (i) { body.appendChild(instNode(p, i, opt, forceInner, mode)); });
+        if (p.loose.length) {
+          body.appendChild(lazyNode('l:' + p.id, [opt.check ? groupBox(p.loose) : null, el('span', { class: 'ico', text: '\u25AB' }), el('b', { text: 'Not attached' }),
+            el('span', { class: 'muted small', text: plural(p.loose.length, 'volume') + ', ' + gibOf(p.loose) + ' GiB. Not attached to any instance.' })],
+            function (b2) { p.loose.forEach(function (v) { b2.appendChild(volRow(v, opt)); }); }, forceInner, mode));
+        }
+        if (!p.instances.length && !p.loose.length) body.appendChild(el('p', { class: 'muted', text: 'No volumes.' }));
+      }, force, mode);
+  }
+  function filterTree(data, q) {
+    function hit(s) { return String(s || '').toLowerCase().indexOf(q) >= 0; }
+    var out = [];
+    data.projects.forEach(function (p) {
+      var pm = hit(p.name), insts = [];
+      p.instances.forEach(function (i) {
+        var im = pm || hit(i.name), vs = i.volumes.filter(function (v) { return im || hit(v.name) || hit(v.id); });
+        if (vs.length) insts.push(Object.assign({}, i, { volumes: vs }));
+      });
+      var loose = p.loose.filter(function (v) { return pm || hit(v.name) || hit(v.id); });
+      if (insts.length || loose.length) out.push(Object.assign({}, p, { instances: insts, loose: loose }));
+    });
+    return { projects: out };
+  }
+  function renderTree(box, data, opt) {
+    clear(box);
+    var q = (opt.find || '').toLowerCase().trim(), view = q ? filterTree(data, q) : data;
+    if (!view.projects.length) { box.appendChild(el('p', { class: 'muted', text: q ? 'Nothing matches "' + q + '".' : 'No volumes were found.' })); return; }
+    var n = 0; view.projects.forEach(function (p) { p.instances.forEach(function (i) { n += i.volumes.length; }); n += p.loose.length; });
+    var mode = opt.check ? 'c' : 's';
+    view.projects.forEach(function (p) { box.appendChild(projNode(p, opt, !!q, !!q && n <= 600, mode)); });
+  }
+  function openAll(box, open) {
+    var tries = 0;
+    (function step() {
+      var ds = box.querySelectorAll('details.node' + (open ? ':not([open])' : '[open]'));
+      Array.prototype.forEach.call(ds, function (d) { d.open = open; });
+      if (open && ds.length && tries++ < 4) setTimeout(step, 40);
+    })();
+  }
+  function drawTree() {
+    var box = $('tree-box');
+    if (!treeData || !treeData.total) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    legend($('tree-legend')); renderTree($('tree-view'), treeData, { find: $('tree-find').value });
+  }
+  function drawSelTree() {
+    if (!treeData) return;
+    legend($('sel-legend')); renderTree($('sel-tree'), treeData, { check: true, find: $('sel-find').value });
+  }
+  function drawScanSummary() {
+    var s = $('scan-summary'); clear(s);
+    if (!treeData || !treeData.total || !inventory) return;
+    var insts = 0; treeData.projects.forEach(function (p) { insts += p.instances.length; });
+    s.appendChild(el('p', { class: 'lead', text: 'Found ' + plural(treeData.total, 'volume') + ' (' + treeData.gib + ' GiB) in ' + plural(treeData.projects.length, 'project') +
+      ', attached to ' + plural(insts, 'instance') + '.' }));
+    var cards = el('div', { class: 'cards' });
+    treeData.legend.forEach(function (l) {
+      cards.appendChild(el('div', { class: 'card lvl-' + l.level, title: l.meaning }, [el('div', { class: 'k', text: l.label }), el('div', { class: 'v', text: String((inventory.counts || {})[l.code] || 0) }), el('div', { class: 'muted small', text: l.meaning })]));
+    });
+    s.appendChild(cards);
+    (inventory.warnings || []).forEach(function (w) { s.appendChild(el('div', { class: 'banner warn static', text: w })); });
+  }
+  $('tree-find').addEventListener('input', drawTree);
+  $('sel-find').addEventListener('input', drawSelTree);
+  $('tree-open').addEventListener('click', function () { openAll($('tree-view'), true); });
+  $('tree-close').addEventListener('click', function () { openAll($('tree-view'), false); });
 
-    v.appendChild(el('h3', { text: 'Volume checks (every volume)' }));
-    var rows = c.volume.filter(function (x) { return x.counts; });
-    v.appendChild(table(['ID', 'Check', 'Pass', 'Warn', 'Fail', 'Not checked', ''], rows.map(function (k) {
-      return [k.id, k.title, k.counts.pass, k.counts.warn, k.counts.fail, k.counts.not_checked, att[k.id] ? 'attested by ' + att[k.id].by : ''];
-    })));
-    rows.filter(function (x) { return x.findings && x.findings.length; }).forEach(function (k) {
+  // ---- safety checks (the pre-flight) and the gate ----
+  var GATE_TEXT = { approved: 'All clear: you can go on', blocked: 'Stopped: something failed', open: 'Not ready: a person must confirm some checks',
+                    awaiting_signoff: 'Almost ready: two approvals are needed', stale: 'Out of date: run the safety checks again' };
+
+  function isBlocker(c, k) { return k.status === 'fail' && (c.platform.indexOf(k) >= 0 || k.id === 'V9' || k.id === 'V10'); }
+
+  // A person says they checked it. Errors stay inside the box, so they are never missed.
+  function confirmCheck(c, k) {
+    return ask({ title: 'Confirm: ' + k.title,
+      intro: 'OpenMove could not check this by itself. By confirming, you say that a person has checked it and it is fine, or that the risk is accepted. Your name and what you checked are saved in the history and in the report.\n\nWhat OpenMove saw: ' + (k.evidence || 'nothing'),
+      fields: [nameField('Your name'), { key: 'note', label: 'What did you check?', type: 'textarea', min: 8, hint: 'A few words are enough. For example: "Looked at the Cinder host on 4 Nov. The path is fine."' }],
+      ok: 'Confirm',
+      submit: function (v) {
+        return api('POST', 'checks/attest', { check_id: k.id, by: v.by, note: v.note }).then(function (r) { me = v.by; renderChecks(r); refreshStatus(); return v; }, function (e) {
+          if (/pre-flight checks first/.test(e.message)) { clear($('pf-view')); refreshStatus(); throw new Error('The safety checks are no longer held by OpenMove (the volumes were read again, or OpenMove was restarted). Close this box and run the safety checks again.'); }
+          throw e;
+        });
+      } }).then(function (v) { if (v) banner('ok', 'Confirmed: ' + k.title + '.'); });
+  }
+  function undoConfirm(k, btn) {
+    ask({ title: 'Take back the confirmation', intro: k.title, fields: [nameField('Your name')], ok: 'Take it back',
+      submit: function (v) { return api('POST', 'checks/attest', { check_id: k.id, by: v.by, withdraw: true }).then(function (r) { me = v.by; renderChecks(r); refreshStatus(); }); } });
+  }
+  function checkItem(c, k, mode) {
+    var att = (c.attestations || {})[k.id];
+    var box = el('div', { class: 'citem citem-' + mode }, [
+      el('div', { class: 'ctitle' }, [chip(k.status), document.createTextNode(' '), el('b', { text: k.title }), el('span', { class: 'cid', text: k.id })]),
+      el('div', { class: 'cevidence', text: k.evidence || '' })]);
+    if (k.meaning) box.appendChild(el('div', { class: 'muted small', text: k.meaning }));
+    if (mode === 'needs') {
+      var b = el('button', { class: 'primary', type: 'button', text: 'I have checked this: confirm' });
+      b.addEventListener('click', function () { confirmCheck(c, k); });
+      box.appendChild(el('div', { class: 'actions' }, [b]));
+    }
+    if (mode === 'confirmed' && att) {
+      var u = el('button', { class: 'secondary', type: 'button', text: 'Take back' });
+      u.addEventListener('click', function () { undoConfirm(k, u); });
+      box.appendChild(el('div', { class: 'cconfirmed' }, [document.createTextNode('\u2713 Confirmed by ' + att.by + ' on ' + (att.at || '').slice(0, 10) + ': ' + att.note + '  '), u]));
+    }
+    if (k.findings && k.findings.length) {
       var ulf = el('ul'); k.findings.slice(0, 100).forEach(function (f) { ulf.appendChild(el('li', {}, [chip(f.status), document.createTextNode(' '), el('span', { class: 'mono', text: f.volume }), document.createTextNode('  ' + f.evidence)])); });
       if (k.findings.length > 100) ulf.appendChild(el('li', { text: 'and ' + (k.findings.length - 100) + ' more (all are in the report)' }));
-      var det = el('details', {}, [el('summary', { text: k.id + ': ' + k.findings.length + ' volume(s) to look at' }), ulf]);
-      v.appendChild(det);
-      if ((k.status === 'warn' || k.status === 'not_checked') && !att[k.id]) {
-        var b2 = el('button', { class: 'secondary', text: 'Attest ' + k.id });
-        b2.addEventListener('click', function () { attesting = k.id; renderChecks(c); });
-        v.appendChild(b2);
-        if (attesting === k.id) v.appendChild(attestForm(c, k));
-      }
+      box.appendChild(el('details', {}, [el('summary', { text: 'Which volumes (' + k.findings.length + ')' }), ulf]));
+    }
+    return box;
+  }
+  function signBox(c, role, label, help) {
+    var so = (c.gate.signoffs || {})[role], box = el('div', { class: 'card sign' }, [el('div', { class: 'k', text: label })]);
+    if (so) {
+      box.appendChild(el('div', { class: 'v', text: '\u2713 ' + so.by })); box.appendChild(el('div', { class: 'muted small', text: 'Approved ' + String(so.at).replace('T', ' ').replace('Z', ' UTC') }));
+      return box;
+    }
+    var ready = !c.gate.blockers.length && !c.gate.open_items.length, go = el('button', { class: 'primary', type: 'button', text: 'Approve' });
+    go.disabled = !ready;
+    go.addEventListener('click', function () {
+      ask({ title: 'Approve the safety checks (' + label.toLowerCase() + ')',
+        intro: 'You are saying that you have read the safety checks and that the move may go ahead. Two different people must approve.',
+        fields: [nameField('Your name', role === 'reviewer' ? 'You must be a different person from the first approver.' : '', role === 'operator')], ok: 'Approve',
+        submit: function (v) { return api('POST', 'checks/signoff', { role: role, by: v.by }).then(function (r) { if (role === 'operator') me = v.by; renderChecks(r); refreshStatus(); }); } })
+        .then(function (v) { if (v) banner('ok', 'Approved by ' + v.by + '.'); });
     });
-    v.appendChild(el('h3', { text: 'Sign-off (four eyes)' }));
-    v.appendChild(el('p', { class: 'muted', text: 'Two different people sign: one as operator, one as reviewer. A new pre-flight run needs new sign-offs.' }));
-    v.appendChild(el('div', { class: 'signs' }, [signBox(c, 'operator', 'Operator'), signBox(c, 'reviewer', 'Reviewer')]));
-    var later = el('details', {}, [el('summary', { text: 'Checks that run during and after the migration (' + c.later.length + ')' }),
-      table(['ID', 'Check', 'Runs', 'Needs'], c.later.map(function (k) { return [k.id, k.title, k.phase, k.needs.join(', ')]; }))]);
-    v.appendChild(later);
+    box.appendChild(el('div', { class: 'muted small', text: help })); box.appendChild(go);
+    if (!ready) box.appendChild(el('div', { class: 'muted small', text: 'Available when nothing has failed and everything that needs a person is confirmed.' }));
+    return box;
+  }
+  function renderChecks(c) {
+    var v = $('pf-view'); clear(v); $('pf-stale').textContent = '';
+    var g = c.gate, att = c.attestations || {}, all = c.platform.concat(c.volume);
+    var blockers = all.filter(function (k) { return isBlocker(c, k); });
+    var needs = all.filter(function (k) { return (k.status === 'warn' || k.status === 'not_checked') && !att[k.id]; });
+    var confirmed = all.filter(function (k) { return (k.status === 'warn' || k.status === 'not_checked') && att[k.id]; });
+    var passed = c.platform.filter(function (k) { return k.status === 'pass' || k.status === 'info'; });
+    v.appendChild(el('div', { class: 'gate gate-' + g.status }, [el('div', { class: 'gate-title', text: GATE_TEXT[g.status] || g.status }), el('div', { text: g.message })]));
+
+    var todo = el('ol', { class: 'todo' });
+    function line(ok, text) { todo.appendChild(el('li', { class: ok ? 'done' : 'open' }, [el('span', { class: 'tick', text: ok ? '\u2713' : '\u2022' }), document.createTextNode(' ' + text)])); }
+    line(!g.blockers.length, g.blockers.length ? plural(g.blockers.length, 'check') + ' failed. Fix the cause, then run the safety checks again.' : 'Nothing has failed.');
+    line(!g.open_items.length, g.open_items.length ? plural(g.open_items.length, 'check') + ' need a person to look and confirm.' : 'Every check that needs a person has been confirmed.');
+    line(g.status === 'approved', g.status === 'approved' ? 'Two different people have approved.' : 'Two different people must approve (below).');
+    v.appendChild(todo);
+    v.appendChild(el('p', { class: 'muted', text: c.admitted.length + ' of ' + plural(c.volumes_total, 'volume') + ' can be moved. ' + (c.access === 'full'
+      ? 'OpenMove can reach the cloud, the helper servers and the arrays, so volumes with long-lived snapshots can be moved too.'
+      : 'OpenMove can reach the OpenStack cloud only.' + (c.no_mover && c.no_mover.length ? ' ' + plural(c.no_mover.length, 'volume') + ' with long-lived snapshots stay behind: they need a helper server (see "Helper servers").' : '')) }));
+
+    if (blockers.length || g.blockers.some(function (b) { return b.id === '-'; })) {
+      v.appendChild(el('h3', { text: 'Fix these first' }));
+      blockers.forEach(function (k) { v.appendChild(checkItem(c, k, 'fail')); });
+      g.blockers.filter(function (b) { return b.id === '-'; }).forEach(function (b) { v.appendChild(el('div', { class: 'citem citem-fail' }, [el('div', { class: 'ctitle' }, [el('b', { text: b.title })]), el('div', { class: 'cevidence', text: b.evidence })])); });
+    }
+    if (needs.length) {
+      v.appendChild(el('h3', { text: 'A person needs to check these (' + needs.length + ')' }));
+      v.appendChild(el('p', { class: 'muted', text: 'OpenMove could not check these by itself, often because it has no access yet. Check each one yourself. Then press "I have checked this" and write down what you checked.' }));
+      needs.forEach(function (k) { v.appendChild(checkItem(c, k, 'needs')); });
+    }
+    if (confirmed.length) {
+      v.appendChild(el('h3', { text: 'Confirmed by a person (' + confirmed.length + ')' }));
+      confirmed.forEach(function (k) { v.appendChild(checkItem(c, k, 'confirmed')); });
+    }
+    v.appendChild(el('h3', { text: 'Approval by two different people' }));
+    v.appendChild(el('p', { class: 'muted', text: 'One person runs the move. A second, independent person reviews it. A new run of the safety checks needs new approvals.' }));
+    v.appendChild(el('div', { class: 'signs' }, [signBox(c, 'operator', 'First approver', 'The person who runs the move.'), signBox(c, 'reviewer', 'Second approver', 'A different person, who reviews the checks.')]));
+
+    v.appendChild(el('details', { class: 'more' }, [el('summary', { text: 'Checks that passed (' + passed.length + ')' }),
+      table(['Check', 'Result', 'What OpenMove saw'], passed.map(function (k) { return [k.title, STATUS_TEXT[k.status], k.evidence]; }))]));
+    var rows = c.volume.filter(function (x) { return x.counts; });
+    v.appendChild(el('details', { class: 'more' }, [el('summary', { text: 'Results for each volume' }),
+      table(['Check', 'OK', 'Needs attention', 'Failed', 'Not checked'], rows.map(function (k) { return [k.title, k.counts.pass, k.counts.warn, k.counts.fail, k.counts.not_checked]; })),
+      el('p', { class: 'muted', text: 'A volume that fails one of its checks is not moved. It stays where it is. The reason is shown in the list of volumes.' })]));
+    v.appendChild(el('details', { class: 'more' }, [el('summary', { text: 'Checks that run later, during and after the move (' + c.later.length + ')' }),
+      table(['Check', 'When', 'Needs'], c.later.map(function (k) { return [k.title, k.phase, k.needs.join(', ')]; }))]));
   }
   $('pf-run').addEventListener('click', function () {
+    if (!$('pf-source').value || !$('pf-target').value) { banner('warn', 'First choose where the volumes move from and where they move to.'); return; }
     guard($('pf-run'), function () {
-      attesting = null;
       return api('POST', 'checks/run', { source_backend: $('pf-source').value, target_backend: $('pf-target').value, access: $('pf-access').value })
         .then(function (c) { renderChecks(c); return refreshStatus(); });
     });
   });
   $('pf-demo-validate').addEventListener('click', function () {
     guard($('pf-demo-validate'), function () {
-      return api('POST', 'demo/validate', {}).then(function () { banner('ok', 'Recorded a lab validation of the demonstration cloud. Run the pre-flight again.'); return refreshStatus(); });
+      return api('POST', 'demo/validate', {}).then(function () { banner('ok', 'Recorded a lab validation of the demonstration cloud. Run the safety checks again.'); return refreshStatus(); });
     });
   });
 
   $('pf-lab-approve').addEventListener('click', function () {
     guard($('pf-lab-approve'), function () {
-      return api('POST', 'lab/approve', {}).then(function (r) { renderChecks(r); banner('ok', 'Lab: the open items were attested and the gate signed by two lab users. This is not a customer sign-off.'); return refreshStatus(); });
+      return api('POST', 'lab/approve', {}).then(function (r) { renderChecks(r); banner('ok', 'Test lab: the open checks were confirmed and two lab users approved. This is not a customer approval.'); return refreshStatus(); });
     });
   });
   $('pf-demo-approve').addEventListener('click', function () {
     guard($('pf-demo-approve'), function () {
-      return api('POST', 'demo/approve', {}).then(function (r) { renderChecks(r); banner('ok', 'Demonstration: the open items were attested and the gate signed by two made-up people.'); return refreshStatus(); });
+      return api('POST', 'demo/approve', {}).then(function (r) { renderChecks(r); banner('ok', 'Demonstration: the open checks were confirmed and two made-up people approved.'); return refreshStatus(); });
     });
   });
 
   // ---- live view ----
-  var PHASES = [['precheck', 'Pre-check'], ['validate', 'Validate'], ['copy', 'Copy'], ['sync', 'Keep in sync'], ['recheck', 'Recheck'],
-                ['cutover', 'Cutover'], ['postcheck', 'Post-check'], ['soak', 'Soak'], ['done', 'Done'], ['aborted', 'Aborted']];
+  var PHASES = [['precheck', 'Pre-checks'], ['validate', 'Plan check'], ['copy', 'Copy'], ['sync', 'Keep in step'], ['recheck', 'Check again'],
+                ['cutover', 'Switch'], ['postcheck', 'Check after'], ['soak', 'Wait period'], ['done', 'Done'], ['aborted', 'Stopped']];
   var PHASE_HELP = {
-    precheck: 'The pre-flight gate is approved for this run. Nothing has been touched.',
+    precheck: 'The safety checks are approved for this run. Nothing has been touched.',
     validate: 'The plan for this volume is checked against the target: room, mapping, which host copies. Nothing has been touched.',
     copy: 'The full copy to a staging volume on the target array. The source is only read.',
     sync: 'The target is kept in step with the source until the cutover is possible. The source is only read.',
@@ -599,8 +905,8 @@
     var sim = l.simulation;
     $('live-note').className = 'banner ' + (l.mode === 'simulation' ? 'ok' : 'warn');
     $('live-note').textContent = lastStatus.demo
-      ? 'DEMONSTRATION: the migration engine is not built. This view shows a simulated run: made-up evidence, a virtual clock, and the real order, gate and halt rules. Nothing is sent to any system.'
-      : 'The migration engine is not built yet, so nothing can be running. This view fills in when migrations run: the order, the checks and every refusal appear here as they happen.';
+      ? 'DEMONSTRATION: this shows a simulated move with made-up data and a made-up clock. The real order and the real safety rules apply. Nothing is sent to any system.'
+      : 'This page fills in while a move is running. Every volume shows its stage, and every refusal appears in the event feed.';
     $('live-start').classList.toggle('hidden', !lastStatus.demo || (sim && sim.running));
     $('live-stop').classList.toggle('hidden', !(sim && sim.running));
     $('live-status').textContent = sim ? 'Simulation: ' + sim.status + '  |  virtual time ' + sim.virtual_time : '';
@@ -638,14 +944,14 @@
     $('sign-g23').classList.toggle('hidden', !l.need_g23);
     $('sign-g4').classList.toggle('hidden', !l.need_g4);
     $('sign-demo').classList.toggle('hidden', !(lastStatus && lastStatus.demo));
-    $('sign-demo').textContent = l.auto_sign ? 'Demo: stop the made-up second person signing' : 'Demo: a made-up second person signs';
-    $('sign-status').textContent = (l.need_g23 ? l.need_g23 + ' volume(s) wait for G2 and G3. ' : '') + (l.need_g4 ? l.need_g4 + ' volume(s) wait for G4. ' : '') +
+    $('sign-demo').textContent = l.auto_sign ? 'Demo: stop the made-up second person approving' : 'Demo: a made-up second person approves';
+    $('sign-status').textContent = (l.need_g23 ? l.need_g23 + ' volume(s) wait for your approval of G2 and G3. ' : '') + (l.need_g4 ? l.need_g4 + ' volume(s) wait for your approval of G4. ' : '') +
       (l.need_g23 || l.need_g4 ? 'The signer must not be the operator of the run.' : '');
-    $('live-ready').textContent = l.ready ? l.ready + ' volume(s) are in sync and checked, waiting for your release. The settings are on the Select tab.' : '';
+    $('live-ready').textContent = l.ready ? l.ready + ' volume(s) are copied and checked, and wait for your release. You can change this in step 4, Choose.' : '';
     var gp = $('gprog');
     gp.classList.toggle('hidden', !l.started);
     $('gprog-fill').style.width = l.overall + '%';
-    $('gprog-text').textContent = 'Migration ' + l.overall.toFixed(0) + '%  |  ' + l.active + ' in flight' + (l.halted ? '  |  HALTED' : '');
+    $('gprog-text').textContent = 'Move ' + l.overall.toFixed(0) + '% done  |  ' + l.active + ' in progress' + (l.halted ? '  |  EVERYTHING IS STOPPED' : '');
   }
   function pollLive(once) {
     api('GET', 'live').then(renderLive).catch(function () {}).then(function () {
@@ -695,47 +1001,59 @@
   }
   $('um-report').addEventListener('click', function () { downloadReport('unmigrated', $('um-report')); });
 
-  // ---- select: volumes one by one, by group, and the settings ----
+  // ---- choose: the volumes in a tree, by group, and the settings ----
   var selData = null, selKind = 'class', selTimer = null;
-  function selBy() { return ($('sel-by').value || '').trim(); }
+  function needName(why) {                                          // every choice is saved with a name: ask once, then remember it for this page
+    if (me) return Promise.resolve(me);
+    return ask({ title: 'Who are you?', intro: why, fields: [nameField('Your name')], ok: 'Continue' }).then(function (v) { if (v) me = v.by; return me; });
+  }
   $('sel-confirm').addEventListener('click', function () {
-    var by = $('sel-by').value.trim() || window.prompt('Confirm this selection. Your name:');
-    if (!by || by.trim().length < 3) return;
-    guard($('sel-confirm'), function () {
-      return api('POST', 'selection/confirm', { by: by.trim() }).then(function (r) {
-        banner('ok', 'Selection confirmed: ' + r.volumes + ' volume(s). Next: 7. Move.');
-        return refreshStatus();
-      });
-    });
+    var n = selData ? selData.selected : 0, gib = selData ? selData.selected_gib : 0;
+    ask({ title: 'Confirm your choice',
+      intro: 'You are confirming that these ' + plural(n, 'volume') + ' (' + gib + ' GiB) are the ones to move. If you change your choice later, or run the safety checks again, you must confirm again.',
+      fields: [nameField('Your name')], ok: 'Confirm',
+      submit: function (v) { return api('POST', 'selection/confirm', { by: v.by }).then(function (r) { me = v.by; return refreshStatus().then(function () { return r; }); }); } })
+      .then(function (r) { if (r && r.volumes != null) banner('ok', 'Choice confirmed: ' + plural(r.volumes, 'volume') + '. Go on to step 5, Move.'); });
   });
   function drawSelConfirm() {
     var ok = wizardDone('select'), b = $('sel-confirm');
-    b.textContent = ok ? 'Selection confirmed' : 'Confirm this selection';
+    b.textContent = ok ? 'Choice confirmed' : 'Confirm my choice';
     b.disabled = ok;
-    $('sel-confirm-note').textContent = ok ? 'Confirmed. Changing the selection, or running the pre-flight again, asks for it to be confirmed again.' :
-      'Step 7 stays closed until you confirm the selection as it stands.';
+    $('sel-confirm-note').textContent = ok ? 'Confirmed. If you change the choice, or run the safety checks again, you must confirm again.' :
+      'The next step (Move) stays closed until you confirm your choice.';
   }
   function drawMoveGate() {
     var w = wizardInfo('move');
     if (w) { drawSelConfirm(); }
     var st = $('mv-start');
-    if (st) {                                       // a real run needs a dry run read first; the server enforces it too
+    if (st) {                                       // a real run needs a rehearsal first; the server enforces it too
       st.disabled = !wizardDone('move');
-      st.title = st.disabled ? 'Run the dry run first (button 1).' : '';
+      st.title = st.disabled ? 'Rehearse first (button 1).' : '';
     }
   }
   function loadSelection() {
     api('GET', 'selection').then(renderSelection).catch(function (e) {
-      $('sel-summary').className = 'banner warn'; $('sel-summary').textContent = 'Not available yet: ' + e.message + ' Run the inventory and the pre-flight first.';
+      $('sel-summary').className = 'banner warn static'; $('sel-summary').textContent = 'Not available yet: ' + e.message + ' Run the safety checks first.';
     });
   }
-  function postSelection(body) { body.by = selBy(); return api('POST', 'selection', body).then(function (d) { renderSelection(d); refreshStatus(); if (d.refused && d.refused.length) banner('warn', d.refused.length + ' volume(s) were not selected: ' + d.refused[0].reason + '.'); }); }
+  function postSelection(body) {
+    return needName('Your name is saved with every choice, so there is a record of who chose what.').then(function (by) {
+      if (!by) return null;
+      body.by = by;
+      return api('POST', 'selection', body).then(function (d) {
+        renderSelection(d); refreshStatus();
+        if (d.refused && d.refused.length) banner('warn', plural(d.refused.length, 'volume') + ' could not be chosen: ' + d.refused[0].reason + '.');
+        return d;
+      });
+    });
+  }
   function renderSelection(d) {
     selData = d;
     var sum = $('sel-summary');
-    sum.className = 'banner ' + (d.selected ? 'ok' : 'warn');
-    sum.textContent = d.selected + ' of ' + d.eligible + ' admitted volumes are selected (' + d.selected_gib + ' GiB); ' + (d.total - d.eligible) + ' of ' + d.total + ' are held back by the pre-flight.' +
-      (d.default ? ' This is the default selection.' : ' The selection was changed.') + (d.running ? ' A run is in progress: stop it to change the selection.' : '');
+    sum.className = 'banner static ' + (d.selected ? 'ok' : 'warn');
+    sum.textContent = d.selected + ' of the ' + d.eligible + ' volumes that can be moved are chosen (' + d.selected_gib + ' GiB). ' + (d.total - d.eligible) + ' of ' + d.total +
+      ' volumes will stay where they are, because the safety checks held them back. ' + (d.default ? 'This is the suggested choice.' : 'You changed the suggested choice.') +
+      (d.running ? ' A move is running: stop it to change the choice.' : '');
     ['sel-all', 'sel-none', 'sel-reset'].forEach(function (id) { $(id).disabled = !!d.running; });
     var ks = $('sel-kind');
     if (!ks.options.length) {
@@ -746,11 +1064,11 @@
     (d.groups[selKind] || []).forEach(function (g) {
       function btn(label, action) {
         var b = el('button', { class: 'secondary small', text: label }); b.disabled = !g.eligible || !!d.running;
-        b.addEventListener('click', function () { postSelection({ action: action, group: { kind: selKind, key: g.key } }).catch(function (e) { banner('bad', e.message); }); });
+        b.addEventListener('click', function () { postSelection({ action: action, group: { kind: selKind, key: g.key } }).catch(function (e) { banner('bad', e.message); }).then(loadTree); });
         return b;
       }
       tb.appendChild(el('tr', {}, [el('td', { text: g.key }), el('td', { text: String(g.count) }), el('td', { text: String(g.eligible) }), el('td', { text: String(g.gib) }),
-        el('td', {}, [btn('Add', 'add'), document.createTextNode(' '), btn('Only', 'set'), document.createTextNode(' '), btn('Remove', 'remove')])]));
+        el('td', {}, [btn('Add them', 'add'), document.createTextNode(' '), btn('Only these', 'set'), document.createTextNode(' '), btn('Remove them', 'remove')])]));
     });
     drawSelVolumes();
     drawOptions(d);
@@ -761,10 +1079,10 @@
     var rows = selData.volumes.filter(function (v) { return !q || [v.id, v.name, v.project, v['class'], v.attached.join(' ')].join(' ').toLowerCase().indexOf(q) >= 0; });
     rows.slice(0, 600).forEach(function (v) {
       var cb = el('input', { type: 'checkbox' }); cb.checked = v.selected; cb.disabled = !v.eligible || selData.running;
-      cb.addEventListener('change', function () { postSelection({ action: cb.checked ? 'add' : 'remove', ids: [v.id] }).catch(function (e) { banner('bad', e.message); }); });
-      var tr = el('tr', { title: v.why || 'Click for the steps of this volume' }, [el('td', {}, [cb]), el('td', { class: 'mono', text: v.id.slice(-12) }), el('td', { text: v.name || '-' }), el('td', { text: v['class'] || '-' }),
+      cb.addEventListener('change', function () { postSelection({ action: cb.checked ? 'add' : 'remove', ids: [v.id] }).catch(function (e) { banner('bad', e.message); }).then(loadTree); });
+      var tr = el('tr', { title: v.why || 'Click for the steps of this volume' }, [el('td', {}, [cb]), el('td', { class: 'mono', text: v.id.slice(-12) }), el('td', { text: v.name || '-' }), el('td', { text: clsName(v['class']) }),
         el('td', { text: v.project }), el('td', { text: String(v.size) }), el('td', { text: String(v.snapshots) }), el('td', { text: v.attached.join(', ') }),
-        el('td', { text: v.eligible ? (v.selected ? 'selected' : 'not selected') : 'held back: ' + v.why })]);
+        el('td', { text: v.eligible ? (v.selected ? 'chosen' : 'not chosen') : 'stays where it is: ' + v.why })]);
       tr.addEventListener('click', function (e) { if (e.target.tagName === 'INPUT') return; showTab('live'); loadVolume(v.id, true); });
       tb.appendChild(tr);
     });
@@ -781,11 +1099,11 @@
       if (typeof d.defaults[k] === 'boolean') {
         var cb = el('input', { type: 'checkbox' }); cb.checked = d.options[k];
         cb.addEventListener('change', function () { setOption(k, cb.checked); });
-        wrap = el('label', { class: 'check', title: 'default: ' + (d.defaults[k] ? 'on' : 'off') }, [cb, document.createTextNode(' ' + d.labels[k])]);
+        wrap = el('label', { class: 'check', title: 'safe value: ' + (d.defaults[k] ? 'on' : 'off') }, [cb, document.createTextNode(' ' + d.labels[k])]);
       } else {
         var inp = el('input', { type: 'number', min: String(lim[0]), max: String(lim[1]), value: String(d.options[k]), title: lim[2] });
         inp.addEventListener('change', function () { setOption(k, parseInt(inp.value, 10)); });
-        wrap = el('label', { title: lim[2] }, [document.createTextNode(d.labels[k] + ' (' + lim[0] + ' to ' + lim[1] + ', default ' + d.defaults[k] + ')'), inp]);
+        wrap = el('label', { title: lim[2] }, [document.createTextNode(d.labels[k] + ' (' + lim[0] + ' to ' + lim[1] + ', safe value ' + d.defaults[k] + ')'), inp]);
       }
       box.appendChild(wrap);
     });
@@ -796,12 +1114,12 @@
   }
   $('sel-kind').addEventListener('change', function () { selKind = $('sel-kind').value; if (selData) renderSelection(selData); });
   $('sel-filter').addEventListener('input', drawSelVolumes);
-  $('sel-all').addEventListener('click', function () { postSelection({ action: 'add', ids: selData.volumes.filter(function (v) { return v.eligible; }).map(function (v) { return v.id; }) }).catch(function (e) { banner('bad', e.message); }); });
-  $('sel-none').addEventListener('click', function () { postSelection({ action: 'none' }).catch(function (e) { banner('bad', e.message); }); });
-  $('sel-reset').addEventListener('click', function () { postSelection({ action: 'reset' }).catch(function (e) { banner('bad', e.message); }); });
-  $('opt-reset').addEventListener('click', function () { postSelection({ reset_options: true }).then(function () { $('opt-status').textContent = 'Back to the defaults.'; }).catch(function (e) { banner('bad', e.message); }); });
+  $('sel-all').addEventListener('click', function () { postSelection({ action: 'add', ids: selData.volumes.filter(function (v) { return v.eligible; }).map(function (v) { return v.id; }) }).catch(function (e) { banner('bad', e.message); }).then(loadTree); });
+  $('sel-none').addEventListener('click', function () { postSelection({ action: 'none' }).catch(function (e) { banner('bad', e.message); }).then(loadTree); });
+  $('sel-reset').addEventListener('click', function () { postSelection({ action: 'reset' }).catch(function (e) { banner('bad', e.message); }).then(loadTree); });
+  $('opt-reset').addEventListener('click', function () { postSelection({ reset_options: true }).then(function () { $('opt-status').textContent = 'Back to the safe values.'; }).catch(function (e) { banner('bad', e.message); }); });
 
-  // ---- workload risk: clear, mark ----
+  // ---- volumes that may break if they are moved: check, mark ----
   var riskData = null;
   function loadRisk() {
     api('GET', 'risk').then(renderRisk).catch(function () { clear($('risk-cards')); clear($('risk-table').tBodies[0]); });
@@ -809,48 +1127,58 @@
   function renderRisk(d) {
     riskData = d;
     var c = $('risk-cards'); clear(c);
-    [['High risk (not moved)', d.high - d.cleared], ['High risk, cleared by two people', d.cleared], ['Medium risk (shown, not blocked)', d.medium]].forEach(function (x) { c.appendChild(card(x[0], x[1])); });
+    [['May break: not moved yet', d.high - d.cleared], ['May break: checked by two people', d.cleared], ['Worth a look (not blocked)', d.medium]].forEach(function (x) { c.appendChild(card(x[0], x[1])); });
     var tb = $('risk-table').tBodies[0]; clear(tb);
     d.rows.forEach(function (r) {
-      var cb = el('input', { type: 'checkbox' }); cb.setAttribute('data-id', r.id); cb.disabled = r.level !== 'high' && !r.marked;
-      tb.appendChild(el('tr', {}, [el('td', {}, [cb]), el('td', { class: 'mono', text: r.id.slice(-12) }), el('td', { text: r.name || '-' }), el('td', { text: r['class'] || '-' }),
-        el('td', {}, [el('span', { class: 'ph ' + (r.level === 'high' ? (r.cleared ? 'ph-cutover' : 'ph-aborted') : 'ph-validate'), text: r.level === 'high' ? (r.cleared ? 'high, cleared' : 'high: not moved') : 'medium' })]),
-        el('td', { text: r.reasons.join(' | ') }), el('td', { text: r.cleared ? (r.operator + ' and ' + r.reviewer) : (r.operator ? 'operator: ' + r.operator + ' (reviewer needed)' : (r.reviewer ? 'reviewer: ' + r.reviewer + ' (operator needed)' : '')) })]));
+      var cb = el('input', { type: 'checkbox' }); cb.setAttribute('data-id', r.id); cb.disabled = r.level !== 'high';
+      var by = r.cleared ? (r.operator + ' and ' + r.reviewer) : (r.operator ? 'first person: ' + r.operator + ' (a second person is needed)' : (r.reviewer ? 'second person: ' + r.reviewer + ' (a first person is needed)' : ''));
+      var last = el('td', {}, [document.createTextNode(by)]);
+      if (r.marked) {
+        var un = el('button', { class: 'linklike', type: 'button', text: ' Remove my mark' });
+        un.addEventListener('click', function () {
+          ask({ title: 'Remove the mark', intro: r.name || r.id, fields: [nameField('Your name')], ok: 'Remove the mark',
+            submit: function (v) { me = v.by; return api('POST', 'risk/mark', { ids: [r.id], by: v.by, withdraw: true }).then(function (x) { renderRisk(x); loadSelection(); refreshStatus(); loadTree(); }); } })
+            .then(function (v) { if (v) banner('ok', 'The mark was removed. The safety checks were run again, so they need the two approvals again.'); });
+        });
+        last.appendChild(un);
+      }
+      tb.appendChild(el('tr', {}, [el('td', {}, [cb]), el('td', { class: 'mono', text: r.id.slice(-12) }), el('td', { text: r.name || '-' }), el('td', { text: clsName(r['class']) }),
+        el('td', {}, [el('span', { class: 'ph ' + (r.level === 'high' ? (r.cleared ? 'ph-cutover' : 'ph-aborted') : 'ph-validate'), text: r.level === 'high' ? (r.cleared ? 'checked by two people' : 'may break: not moved') : 'worth a look' })]),
+        el('td', { text: r.reasons.join(' | ') }), last]));
     });
     var adv = $('risk-advice'); clear(adv);
     if (d.rows.length) {
-      adv.appendChild(el('p', { class: 'muted', text: d.note }));
-      adv.appendChild(el('details', { class: 'cause' }, [el('summary', { text: 'Advice for the reasons above' }),
+      adv.appendChild(el('details', { class: 'cause' }, [el('summary', { text: 'What to do about these' }),
         el('ul', {}, Array.from(new Set([].concat.apply([], d.rows.map(function (r) { return r.advice; })))).map(function (a) { return el('li', { text: a }); }))]));
+    } else {
+      adv.appendChild(el('p', { class: 'muted', text: 'OpenMove found nothing that looks risky. It can only read hints, so use "This volume may break if moved" in the list above for anything you know about.' }));
     }
   }
   function tickedRisk() { return Array.prototype.map.call($('risk-table').querySelectorAll('input[type=checkbox]:checked'), function (b) { return b.getAttribute('data-id'); }); }
-  function riskAction(path, body, btn) {
-    guard(btn, function () { return api('POST', path, body).then(function (d) { renderRisk(d); banner('ok', d.rerun || 'Done.'); loadSelection(); refreshStatus(); }); });
-  }
   function riskClear(role, btn, withdraw) {
-    var ids = tickedRisk(); if (!ids.length) { banner('warn', 'Tick the volumes first.'); return; }
-    var by = window.prompt((withdraw ? 'Withdraw the clearance as ' : 'Clear as ') + role + '.\n\nYour name:'); if (!by) return;
-    var ev = withdraw ? 'withdrawn' : window.prompt('Evidence (at least 20 characters): what was tested, what the owner agreed, what the way back is:');
-    if (!ev) return;
-    riskAction('risk/clear', { ids: ids, role: role, by: by, evidence: ev, withdraw: !!withdraw }, btn);
+    var ids = tickedRisk(); if (!ids.length) { banner('warn', 'Tick the volumes in the table first.'); return; }
+    var fields = [nameField('Your name', role === 'reviewer' ? 'You must be a different person from the first one.' : '', role === 'operator')];
+    if (!withdraw) fields.push({ key: 'evidence', label: 'What did you check?', type: 'textarea', min: 20, hint: 'What you tested, what the owner agreed, and how to go back. At least 20 characters.' });
+    ask({ title: withdraw ? 'Take back your check' : (role === 'operator' ? 'I have checked these volumes (first person)' : 'I have checked these volumes (second person)'),
+      intro: withdraw ? plural(ids.length, 'volume') : 'You are saying that you looked at ' + plural(ids.length, 'volume') + ' and that moving them is safe. Two different people must check each volume.',
+      fields: fields, ok: withdraw ? 'Take it back' : 'Save my check',
+      submit: function (v) {
+        return api('POST', 'risk/clear', { ids: ids, role: role, by: v.by, evidence: withdraw ? 'withdrawn' : v.evidence, withdraw: !!withdraw }).then(function (d) {
+          if (role === 'operator') me = v.by;
+          renderRisk(d); loadSelection(); refreshStatus(); loadTree(); return d;
+        });
+      } }).then(function (d) { if (d && d.rerun) banner('ok', d.rerun); });
   }
   $('risk-op').addEventListener('click', function () { riskClear('operator', $('risk-op')); });
   $('risk-rv').addEventListener('click', function () { riskClear('reviewer', $('risk-rv')); });
   $('risk-wd').addEventListener('click', function () { riskClear('operator', $('risk-wd'), true); });
-  $('risk-mark').addEventListener('click', function () {
-    var ids = Array.prototype.map.call($('sel-table').querySelectorAll('input[type=checkbox]:checked'), function (b) { return b.closest('tr').children[1].textContent; });
-    if (!ids.length || !selData) { banner('warn', 'Tick volumes in the list above (Chosen column) to mark them.'); return; }
-    var full = selData.volumes.filter(function (v) { return ids.indexOf(v.id.slice(-12)) >= 0; }).map(function (v) { return v.id; });
-    var by = window.prompt('Mark ' + full.length + ' volume(s) as a risk.\n\nYour name:'); if (!by) return;
-    var note = window.prompt('Why (the application and the owner, at least 8 characters):'); if (!note) return;
-    riskAction('risk/mark', { ids: full, by: by, note: note }, $('risk-mark'));
-  });
-  $('risk-unmark').addEventListener('click', function () {
-    var ids = tickedRisk(); if (!ids.length) { banner('warn', 'Tick the marked volumes in the risk list first.'); return; }
-    var by = window.prompt('Remove the mark.\n\nYour name:'); if (!by) return;
-    riskAction('risk/mark', { ids: ids, by: by, withdraw: true }, $('risk-unmark'));
-  });
+  function flagRisk(v, btn) {
+    ask({ title: 'This volume may break if moved',
+      intro: 'Use this when you know the volume carries something that can break after a move, for example an old Windows server. OpenMove will not move it until two different people have checked it.\n\nVolume: ' + (v.name || v.id),
+      fields: [nameField('Your name'), { key: 'note', label: 'What does it carry, and who owns it?', type: 'textarea', min: 8 }], ok: 'Mark it as a risk',
+      submit: function (x) { me = x.by; return api('POST', 'risk/mark', { ids: [v.id], by: x.by, note: x.note }).then(function (d) { renderRisk(d); loadSelection(); refreshStatus(); loadTree(); }); } })
+      .then(function (x) { if (x) banner('ok', 'Marked as a risk. The safety checks were run again, so they need the two approvals again.'); });
+  }
 
   // ---- one volume, step by step ----
   var vdId = null, vdLast = 0;
@@ -868,7 +1196,7 @@
     box.appendChild(el('div', { class: 'muted mono', text: v.id + '   class ' + v['class'] + ' (' + v.class_title + ')   ' + v.size + ' GiB   ' + v.snapshots + ' snapshot(s)' + (v.attached_to.length ? '   attached to ' + v.attached_to.join(', ') : '') }));
     box.appendChild(el('div', { class: 'banner ' + (v.unmigrated && (v.unmigrated.outcome === 'stopped' || v.unmigrated.outcome === 'rolled back') ? 'bad' : v.ready ? 'warn' : 'ok') }, [el('b', { text: 'Right now: ' }), document.createTextNode(v.now)]));
     if (v.ready) {
-      var rb = el('button', { class: 'primary', text: 'Release this volume for cutover' });
+      var rb = el('button', { class: 'primary', text: 'Release this volume for the switch' });
       rb.addEventListener('click', function () { releaseVolumes({ ids: [v.id] }, rb); });
       box.appendChild(rb);
     }
@@ -901,21 +1229,24 @@
       box.appendChild(el('div', { class: 'table-wrap' }, [t]));
     }
   }
+  var GATE_PLAIN = { G2: 'the copy is verified', G3: 'the volume is ready to switch', G4: 'the switch is verified' };
   function releaseVolumes(body, btn) {
-    var by = window.prompt('Release for cutover. The cutover rules are still asked again for each volume.\n\nYour name:'); if (!by || by.trim().length < 3) return;
-    body.by = by.trim();
-    guard(btn, function () { return api('POST', 'release', body).then(function (l) { renderLive(l); banner('ok', 'Released. The cutover is attempted only if every condition holds.'); if (vdId) loadVolume(vdId, true); }); });
+    ask({ title: 'Release volumes for the switch',
+      intro: 'These volumes are copied and checked. Releasing them lets OpenMove switch the instances over to the new volumes. OpenMove asks every safety rule again for each volume, so a volume that is not ready is skipped.',
+      fields: [nameField('Your name')], ok: 'Release',
+      submit: function (v) { me = v.by; body.by = v.by; return api('POST', 'release', body).then(function (l) { renderLive(l); if (vdId) loadVolume(vdId, true); }); } })
+      .then(function (v) { if (v) banner('ok', 'Released. A volume is switched only if every condition holds.'); });
   }
   function signGates(names, btn) {
-    var by = window.prompt('Sign as the SECOND person. You must not be the operator of this run.' + String.fromCharCode(10, 10) + 'Your name:' + (lastStatus && lastStatus.demo ? '  (demonstration: try "Demo reviewer")' : '')); if (!by || by.trim().length < 3) return;
-    var note = window.prompt('What did you check? (at least 8 characters, kept in the journal)'); if (!note || note.trim().length < 8) return;
-    guard(btn, function () {
-      var chain = Promise.resolve(null);
-      names.forEach(function (g) {
-        chain = chain.then(function () { return api('POST', 'volume-gate', { gate: g, all: true, by: by.trim(), evidence: note.trim() }); });
-      });
-      return chain.then(function (l) { renderLive(l); banner('ok', 'Signed ' + names.join(' and ') + ' for the volumes that were at that point.'); if (vdId) loadVolume(vdId, true); });
-    });
+    ask({ title: 'Approve as the second person',
+      intro: 'You must not be the person running this move.\n' + names.map(function (g) { return g + ': ' + GATE_PLAIN[g]; }).join('\n') + '\n\nSay what you checked. It is saved in the history.' +
+        (lastStatus && lastStatus.demo ? '\n(Demonstration: you can use the name "Demo reviewer".)' : ''),
+      fields: [nameField('Your name', 'Not the person running the move.', false), { key: 'note', label: 'What did you check?', type: 'textarea', min: 8 }], ok: 'Approve',
+      submit: function (v) {
+        var chain = Promise.resolve(null);
+        names.forEach(function (g) { chain = chain.then(function () { return api('POST', 'volume-gate', { gate: g, all: true, by: v.by, evidence: v.note }); }); });
+        return chain.then(function (l) { renderLive(l); if (vdId) loadVolume(vdId, true); });
+      } }).then(function (v) { if (v) banner('ok', 'Approved ' + names.join(' and ') + ' for the volumes that were at that point.'); });
   }
   $('sign-g23').addEventListener('click', function () { signGates(['G2', 'G3'], $('sign-g23')); });
   $('sign-g4').addEventListener('click', function () { signGates(['G4'], $('sign-g4')); });
@@ -928,7 +1259,7 @@
   function fmtBytes(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' MiB' : n > 1024 ? (n / 1024).toFixed(1) + ' KiB' : n + ' B'; }
   function drawChecks(c) {
     var tb = $('hs-checks').tBodies[0]; clear(tb);
-    $('hs-status').textContent = c ? (c.ready ? 'Ready: class C volumes can be taken into the run (' + c.family + ').' : 'Not ready. ' + (c.why || '')) : '';
+    $('hs-status').textContent = c ? (c.ready ? 'Ready: volumes with long-lived snapshots can be moved (' + c.family + ').' : 'Not ready. ' + (c.why || '')) : '';
     (c && c.checks || []).forEach(function (x) {
       tb.appendChild(el('tr', { class: 'chk-' + x.status }, [el('td', { text: x.id + ' ' + x.title }), el('td', { text: x.status }), el('td', { text: x.detail }), el('td', { text: x.status === 'pass' ? '' : x.hint })]));
     });
@@ -943,21 +1274,23 @@
     (d.hosts || []).forEach(function (h) {
       var acts = el('td');
       function btn(label, fn) { var b = el('button', { class: 'secondary', text: label }); b.addEventListener('click', function () { fn(b); }); acts.appendChild(b); }
-      if (h.transport !== 'local' && !h.pinned) btn('Check host key', function (b) {
+      if (h.transport !== 'local' && !h.pinned) btn('Check the server\'s identity', function (b) {
         guard(b, function () {
           return api('POST', 'hosts/scan', { name: h.name }).then(function (r) {
-            var nl = String.fromCharCode(10);
-            var fps = r.keys.map(function (k) { return k.type + ' ' + k.fingerprint; }).join(nl);
-            var fp = window.prompt('The host offers these keys:' + nl + nl + fps + nl + nl + 'Compare with the fingerprint the host administrator gives you. Type the fingerprint you checked (SHA256:...):');
-            if (!fp) return null;
-            var by = window.prompt('Your name:'); if (!by) return null;
-            return api('POST', 'hosts/trust', { name: h.name, fingerprint: fp.trim(), by: by.trim() }).then(drawHosts);
+            var fps = r.keys.map(function (k) { return k.type + ' ' + k.fingerprint; }).join('\n');
+            return ask({ title: 'Check the identity of ' + h.name,
+              intro: 'The server offers these keys:\n\n' + fps + '\n\nCompare them with the fingerprint that the server\'s administrator gives you. Then type the fingerprint you checked.',
+              fields: [{ key: 'fp', label: 'Fingerprint you checked', min: 10, placeholder: 'SHA256:...' }, nameField('Your name')], ok: 'It matches: trust this server',
+              submit: function (v) { me = v.by; return api('POST', 'hosts/trust', { name: h.name, fingerprint: v.fp, by: v.by }).then(drawHosts); } });
           });
         });
       });
-      btn('Place the data mover', function (b) { hostAction(b, 'hosts/mover', { name: h.name, action: 'install' }, function () { banner('ok', 'The data mover is on ' + h.name + '.'); }); });
+      btn('Install the data mover', function (b) { hostAction(b, 'hosts/mover', { name: h.name, action: 'install' }, function () { banner('ok', 'The data mover is installed on ' + h.name + '.'); }); });
       btn('Remove the data mover', function (b) { hostAction(b, 'hosts/mover', { name: h.name, action: 'remove' }, function () { banner('ok', 'Nothing of OpenMove is left on ' + h.name + '.'); }); });
-      btn('Forget the host', function (b) { if (window.confirm('Remove ' + h.name + ' from OpenMove? Nothing is changed on the host.')) hostAction(b, 'hosts/remove', { name: h.name }); });
+      btn('Forget this server', function (b) {
+        ask({ title: 'Forget ' + h.name + '?', intro: 'OpenMove stops using this server. Nothing is changed on the server.', ok: 'Forget it', danger: true })
+          .then(function (v) { if (v) hostAction(b, 'hosts/remove', { name: h.name }); });
+      });
       tb.appendChild(el('tr', {}, [el('td', { text: h.name }), el('td', { text: (h.roles || []).join(', ') }), el('td', { text: h.address ? h.address + ':' + (h.port || 22) : 'this machine' }),
         el('td', { text: (h.user || '') + (h.sudo ? ' (sudo)' : '') }), el('td', { text: h.transport === 'local' ? 'n/a' : h.pinned ? 'checked and pinned' : 'not checked yet' }), acts]));
     });
@@ -1095,18 +1428,18 @@
     (m.volumes || []).forEach(function (r) {
       var act = el('td');
       if (r.reversible) {
-        var b = el('button', { class: 'secondary', text: 'Reverse' });
+        var b = el('button', { class: 'secondary', text: 'Put back' });
         b.addEventListener('click', function () {
-          var by = window.prompt('Reverse ' + r.id + (r.method === 'staged' ? ' (a staged move the other way, with a safety copy).' : ' with a retype back.') + String.fromCharCode(10, 10) + 'Your name:'); if (!by) return;
-          var why = window.prompt('Reason (at least 8 characters):'); if (!why) return;
-          guard(b, function () { return api('POST', 'engine/reverse', { id: r.id, by: by.trim(), reason: why.trim() }).then(drawMove); });
+          ask({ title: 'Put ' + r.id.slice(-12) + ' back', intro: r.method === 'staged' ? 'This is a careful copy the other way, with a safety copy.' : 'This moves the volume back to its first volume type.',
+            fields: [nameField('Your name'), { key: 'why', label: 'Why?', type: 'textarea', min: 8 }], ok: 'Put it back', danger: true,
+            submit: function (v) { me = v.by; return api('POST', 'engine/reverse', { id: r.id, by: v.by, reason: v.why }).then(drawMove); } });
         });
         act.appendChild(b);
       }
       var st = r.stage, prog = st ? ('images ' + st.verified + '/' + st.images + (st.cut ? ', step ' + st.cut : '') + (st.frozen ? ', frozen' : '') + '. ') : '';
       var what = el('td', { text: prog + (r.note || '') });
       if (r.error) what.appendChild(el('div', { class: 'muted', text: 'Last error: ' + r.error }));
-      tb.appendChild(el('tr', {}, [el('td', { text: r.id }), el('td', { text: r.class || '' }), el('td', { text: r.method === 'staged' ? 'staged' : 'retype' }), el('td', { text: r.phase }),
+      tb.appendChild(el('tr', {}, [el('td', { text: r.id }), el('td', { text: r.class || '' }), el('td', { text: r.method === 'staged' ? 'careful copy' : 'storage retype' }), el('td', { text: r.phase }),
         el('td', { text: r.gates.G2 ? 'signed' : '' }), el('td', { text: r.gates.G3 ? 'signed' : '' }), el('td', { text: r.gates.G4 ? 'signed' : '' }),
         what, act]));
     });
@@ -1118,8 +1451,8 @@
   function loadMove() { return api('GET', 'engine').then(drawMove).catch(function () {}); }
   function drawDry(d) {
     var v = $('mv-dry-view'); clear(v);
-    v.appendChild(el('div', { class: 'banner ok', text: 'Dry run: ' + d.counts.ok + ' ready, ' + d.counts.wait + ' waiting, ' + d.counts.blocked + ' blocked. ' + d.note }));
-    var t = el('table', {}, [el('thead', {}, [el('tr', {}, ['Volume', 'Class', 'Result', 'Target type', 'Why or what would be sent'].map(function (h) { return el('th', { text: h }); }))]), el('tbody')]);
+    v.appendChild(el('div', { class: 'banner ok static', text: 'Rehearsal done. Nothing was sent. ' + d.counts.ok + ' ready, ' + d.counts.wait + ' waiting, ' + d.counts.blocked + ' blocked. ' + d.note }));
+    var t = el('table', {}, [el('thead', {}, [el('tr', {}, ['Volume', 'Group', 'Result', 'Move to type', 'Why not, or what would be sent'].map(function (h) { return el('th', { text: h }); }))]), el('tbody')]);
     d.volumes.forEach(function (r) {
       var why = r.error ? r.error : r.checks.filter(function (c) { return !c.ok; }).map(function (c) { return c.detail; }).join('; ');
       var calls = (r.calls || []).map(function (c) { return c.what + '  (undo: ' + c.undo + ')'; }).join(String.fromCharCode(10));
@@ -1132,8 +1465,10 @@
     guard($('mv-dry'), function () { return api('POST', 'engine/dry-run', { type_map: typeMap() }).then(drawDry).then(refreshStatus); });
   });
   $('mv-start').addEventListener('click', function () {
-    var by = window.prompt('Start the real run. Volumes are changed in the cloud.' + String.fromCharCode(10, 10) + 'Your name:'); if (!by || by.trim().length < 3) return;
-    guard($('mv-start'), function () { return api('POST', 'engine/start', { by: by.trim(), type_map: typeMap(), start_at: $('mv-from').value.trim(), stop_at: $('mv-until').value.trim() }).then(function (m) { drawMove(m); banner('ok', 'The run has started. Nothing is sent for a volume until G2 and G3 are signed by a second person.'); }); });
+    ask({ title: 'Start moving', intro: 'This changes volumes in your cloud. For each volume, nothing is sent until a second person has approved it.',
+      fields: [nameField('Your name')], ok: 'Start moving', danger: true,
+      submit: function (v) { me = v.by; return api('POST', 'engine/start', { by: v.by, type_map: typeMap(), start_at: $('mv-from').value.trim(), stop_at: $('mv-until').value.trim() }).then(drawMove); } })
+      .then(function (v) { if (v) banner('ok', 'Started. For each volume, nothing is sent until a second person approves G2 and G3 (see step 6, Progress).'); });
   });
   $('mv-rev-preview').addEventListener('click', function () {
     guard($('mv-rev-preview'), function () {
@@ -1149,9 +1484,9 @@
     });
   });
   $('mv-rev-all').addEventListener('click', function () {
-    var by = window.prompt('Put every cut-over volume of this run back with a retype to its first type. Read the preview first.' + String.fromCharCode(10, 10) + 'Your name:'); if (!by) return;
-    var why = window.prompt('Reason (at least 8 characters):'); if (!why) return;
-    guard($('mv-rev-all'), function () { return api('POST', 'engine/reverse', { all: true, by: by.trim(), reason: why.trim() }).then(drawMove); });
+    ask({ title: 'Put the whole move back', intro: 'Every volume that was switched in this move goes back to its first volume type. Read the preview first.',
+      fields: [nameField('Your name'), { key: 'why', label: 'Why?', type: 'textarea', min: 8 }], ok: 'Put everything back', danger: true,
+      submit: function (v) { me = v.by; return api('POST', 'engine/reverse', { all: true, by: v.by, reason: v.why }).then(drawMove); } });
   });
   $('mv-stop').addEventListener('click', function () { guard($('mv-stop'), function () { return api('POST', 'engine/stop', {}).then(drawMove); }); });
   $('mv-refresh').addEventListener('click', loadMove);
@@ -1159,14 +1494,12 @@
   $('mv-g23').addEventListener('click', function () { signGates(['G2', 'G3'], $('mv-g23')); });
   $('mv-g4').addEventListener('click', function () { signGates(['G4'], $('mv-g4')); });
   $('mv-validate').addEventListener('click', function () {
-    var nl = String.fromCharCode(10, 10);
-    var by = window.prompt('Gate G0: record that the lab tests for this OpenStack release were run and passed. This lifts the read-only state of the release.' + nl + 'Your name:'); if (!by) return;
-    var second = window.prompt('The second person (a different person):'); if (!second) return;
-    var ev = window.prompt('What was tested, on which cloud, with what result (at least 40 characters):'); if (!ev) return;
-    guard($('mv-validate'), function () {
-      return api('POST', 'validation', { by: by.trim(), second: second.trim(), evidence: ev.trim(), passed: true, environment: 'test' })
-        .then(function (r) { banner('ok', 'Recorded the lab validation of ' + r.release + '. Run the pre-flight again.'); return refreshStatus(); });
-    });
+    ask({ title: 'Record gate G0: the lab tests passed',
+      intro: 'You are recording that the lab tests for this OpenStack release were run and passed. This lifts the look-only state of the release. Two different people are needed.',
+      fields: [nameField('Your name'), { key: 'second', label: 'The second person', hint: 'A different person.', min: 3 },
+               { key: 'ev', label: 'What was tested, on which cloud, with what result', type: 'textarea', rows: 4, min: 40 }], ok: 'Record G0',
+      submit: function (v) { me = v.by; return api('POST', 'validation', { by: v.by, second: v.second, evidence: v.ev, passed: true, environment: 'test' }).then(function (r) { refreshStatus(); return r; }); } })
+      .then(function (r) { if (r && r.release) banner('ok', 'Recorded the lab validation of ' + r.release + '. Run the safety checks again.'); });
   });
   // ---- Phase 0 lab tests ----
   function drawPhase0(d) {
@@ -1189,21 +1522,19 @@
       v.appendChild(box);
     });
   }
-  function loadPhase0() { return api('GET', 'phase0').then(drawPhase0).catch(function () { $('p0-count').textContent = '(read the platform first)'; }); }
+  function loadPhase0() { return api('GET', 'phase0').then(drawPhase0).catch(function () { $('p0-count').textContent = '(scan the cloud first)'; }); }
   function recordPhase0(t, btn) {
-    var by = window.prompt('Test ' + t.id + ': ' + t.title + String.fromCharCode(10, 10) + 'Your name:'); if (!by) return;
-    var result = (window.prompt('Result: type pass or fail') || '').trim().toLowerCase(); if (!result) return;
-    var ev = window.prompt('What you did and what you saw (at least 40 characters):'); if (!ev) return;
-    guard(btn, function () { return api('POST', 'phase0/record', { test: t.id, result: result, by: by.trim(), evidence: ev.trim() }).then(drawPhase0); });
+    ask({ title: 'Record the result of ' + t.id, intro: t.title,
+      fields: [nameField('Your name'), { key: 'result', label: 'Result', type: 'select', options: [['pass', 'Passed'], ['fail', 'Failed']] },
+               { key: 'ev', label: 'What you did and what you saw', type: 'textarea', rows: 4, min: 40 }], ok: 'Save the result',
+      submit: function (v) { me = v.by; return api('POST', 'phase0/record', { test: t.id, result: v.result, by: v.by, evidence: v.ev }).then(drawPhase0); } });
   }
   $('p0-box').addEventListener('toggle', function () { if ($('p0-box').open) loadPhase0(); });
   $('p0-g0').addEventListener('click', function () {
-    var by = window.prompt('Gate G0 from the Phase 0 results. Your name:'); if (!by) return;
-    var second = window.prompt('The second person (a different person):'); if (!second) return;
-    guard($('p0-g0'), function () {
-      return api('POST', 'validation', { by: by.trim(), second: second.trim(), from_tests: true, environment: 'test' })
-        .then(function (r) { banner('ok', 'Recorded the lab validation of ' + r.release + ' from the Phase 0 results. Run the pre-flight again.'); return refreshStatus(); });
-    });
+    ask({ title: 'Record gate G0 from the lab test results', intro: 'This uses the results recorded above. Two different people are needed.',
+      fields: [nameField('Your name'), { key: 'second', label: 'The second person', hint: 'A different person.', min: 3 }], ok: 'Record G0',
+      submit: function (v) { me = v.by; return api('POST', 'validation', { by: v.by, second: v.second, from_tests: true, environment: 'test' }).then(function (r) { refreshStatus(); return r; }); } })
+      .then(function (r) { if (r && r.release) banner('ok', 'Recorded the lab validation of ' + r.release + '. Run the safety checks again.'); });
   });
   $('live-table').addEventListener('click', function (e) {
     var tr = e.target.closest ? e.target.closest('tr') : null;
@@ -1240,6 +1571,43 @@
   $('rep-after').addEventListener('click', function () { downloadReport('after', $('rep-after')); });
   $('rep-xlsx').addEventListener('click', function () { downloadReport('volumes_xlsx', $('rep-xlsx')); });
   $('rep-csv').addEventListener('click', function () { downloadReport('volumes_csv', $('rep-csv')); });
+
+  // ---- help, in plain words ----
+  $('help-btn').addEventListener('click', function () {
+    var d = $('help'); clear(d);
+    function list(rows) { var l = el('dl'); rows.forEach(function (r) { l.appendChild(el('dt', { text: r[0] })); l.appendChild(el('dd', { text: r[1] })); }); return l; }
+    var close = el('button', { class: 'primary', type: 'button', text: 'Close' });
+    close.addEventListener('click', function () { d.close(); });
+    d.appendChild(el('h2', { text: 'How OpenMove works' }));
+    d.appendChild(el('p', { text: 'OpenMove moves OpenStack volumes from one storage system to another. It checks everything before it starts, moves the volumes one after another, proves that each one arrived correctly, and keeps a record of who did what. It moves nothing until you say so. Two different people must approve.' }));
+    d.appendChild(el('h3', { text: 'The seven steps' }));
+    d.appendChild(list([
+      ['1. Connect', 'Sign in to your cloud with an administrator account.'],
+      ['2. Scan', 'OpenMove reads your cloud and shows every project, instance and volume. It changes nothing.'],
+      ['3. Safety checks', 'OpenMove checks that the cloud and the storage are ready. Anything it cannot check itself, a person checks and confirms. Two people approve.'],
+      ['4. Choose', 'Tick the volumes to move. A whole project, a whole instance or a single volume.'],
+      ['5. Move', 'Rehearse first. Then start. OpenMove moves the chosen volumes and checks each one.'],
+      ['6. Progress', 'Watch each volume. A second person approves each volume before it is switched.'],
+      ['7. Reports', 'Word and Excel reports for the customer and for your own records.']]));
+    d.appendChild(el('h3', { text: 'How volumes are grouped' }));
+    d.appendChild(list([['Easy', 'No snapshots. The storage system moves it in one step.'], ['Waits for snapshots', 'Its snapshots are about to expire. OpenMove waits, then moves it like an easy one.'],
+      ['Careful copy', 'It has snapshots that must be kept. It is copied with the careful method and needs a helper server.'], ['Instance is off', 'The instance is not running. Start it, then scan again.'],
+      ['Not moved by this tool', 'Encrypted, shared or grouped volumes, for example. They are listed so that a person can plan them.']]));
+    d.appendChild(el('h3', { text: 'Words you will see' }));
+    d.appendChild(list([
+      ['Safety check', 'A test that OpenMove runs before it moves anything.'],
+      ['Confirm', 'A person looks at something OpenMove cannot check, and writes down what they found.'],
+      ['Approve', 'Two different people agree that the checks are met. One person alone cannot start a move.'],
+      ['Rehearse', 'OpenMove lists every call it would make. It sends none of them.'],
+      ['Switch', 'The moment an instance starts to use the new volume.'],
+      ['Wait period', 'After the switch the old volume is kept for some days, so the move can be undone.'],
+      ['Put back', 'Moves a volume back to where it was.'],
+      ['Emergency stop', 'Stops every change at once. Use it when something looks wrong.'],
+      ['Helper server', 'A Linux server that copies volumes with long-lived snapshots. You only need one for those.'],
+      ['History', 'The permanent record of everything that happened. Nobody can edit it.']]));
+    d.appendChild(el('div', { class: 'actions' }, [close]));
+    d.showModal();
+  });
 
   // ---- sortable tables: click a column header; click again to reverse ----
   // Works on every table with a header row, including tables drawn later. The chosen sort is kept when a table is redrawn

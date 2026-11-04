@@ -20,6 +20,7 @@ from . import hosts as hosts_mod
 from . import server_hosts
 from . import __version__, discovery, exports, handling, inventory, lifecycle, paths, phase0, profiles, safety, selection, wizard
 from . import risk as risk_mod
+from . import tree as tree_mod
 from . import audit as audit_mod
 from .checks import gate as gate_mod
 from .checks import run as checks_run
@@ -441,6 +442,18 @@ def api_selection_get(state, body, query):
             "volumes": vols, "running": bool(state.sim and state.sim.running), "released": len(state.released)}
 
 
+def api_tree(state, body, query):
+    """The volumes as a tree: project, instance, attached volumes, and the volumes that are not attached. Read only; it needs only the inventory.
+    Once the pre-flight has run each volume also says whether it will be moved, and why not."""
+    inv = _need(state, "inventory")
+    names = {p["id"]: p["name"] for p in state.extra.get("projects", [])}
+    eligible = selected = None
+    failed = {}
+    if state.checks:
+        eligible, selected, failed = set(selection.eligible_ids(state)), set(selection.selected_ids(state)), _failed_checks(state)
+    return tree_mod.build(inv, state.servers, names, state.roots, eligible, selected, failed)
+
+
 def api_selection_confirm(state, body, query):
     """The operator confirms the selection as it stands. It opens the Move step, and it is void as soon as the selection or the pre-flight run changes."""
     inv = _need(state, "inventory")
@@ -525,7 +538,7 @@ def api_release(state, body, query):
 
 def _engine(state):
     if state.demo:
-        raise ApiError("the engine does not run in demonstration mode; the simulation on the Live tab shows the process", 409)
+        raise ApiError("the engine does not run in demonstration mode; the simulation in step 6, Progress, shows the process", 409)
     _need(state, "checks")
     if state.engine is None:
         from .engine.runner import Engine
@@ -1004,7 +1017,7 @@ def api_risk_clear(state, body, query):
     prev = {"source_backend": c["source_backend"], "target_backend": c["target_backend"]}
     checks_run_again(state, prev)                     # the new pre-flight run needs the gate (and both sign-offs) again
     out = api_risk_get(state, {}, {})
-    out["rerun"] = "The pre-flight was run again. Its gate needs the two sign-offs again."
+    out["rerun"] = "The safety checks were run again. They need the two approvals again."
     return out
 
 
@@ -1024,7 +1037,7 @@ def api_risk_mark(state, body, query):
         risk_mod.mark(state.journal, vid, body.get("by"), body.get("note"), bool(body.get("withdraw")))
     checks_run_again(state, {"source_backend": c["source_backend"], "target_backend": c["target_backend"]})
     out = api_risk_get(state, {}, {})
-    out["rerun"] = "The pre-flight was run again. Its gate needs the two sign-offs again."
+    out["rerun"] = "The safety checks were run again. They need the two approvals again."
     return out
 
 
@@ -1132,6 +1145,7 @@ ROUTES = {
     ("POST", "risk/clear"): api_risk_clear,
     ("POST", "risk/mark"): api_risk_mark,
     ("GET", "selection"): api_selection_get,
+    ("GET", "tree"): api_tree,
     ("POST", "selection"): api_selection_set,
     ("POST", "release"): api_release,
     ("POST", "volume-gate"): api_volume_gate,

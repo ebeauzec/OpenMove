@@ -125,6 +125,29 @@ The simulated migration uses made-up evidence and a virtual clock, but the real 
 
 ## 4. A tour of the screens
 
+**The screens use plain words.** Seven steps replace the nine technical ones. The process, the checks and the signatures have not changed: the server still holds every step closed until the one before it is done. Only the names and the way the work is shown changed.
+
+| On the screen | Technical name (used in the other documents) |
+|---|---|
+| 1. Connect | Connect |
+| 2. Scan | Platform, Inventory and Audit, run together by one button |
+| 3. Safety checks | Pre-flight and the gate; *attest* is *Confirm*; *sign-off* is *Approve* (first and second approver) |
+| 4. Choose | Select |
+| 5. Move | Move; *dry run* is *Rehearse*; *cutover* is *Switch*; *soak* is *Wait period*; *reverse* is *Put back* |
+| 6. Progress | Live |
+| 7. Reports | Reports |
+| History, Helper servers, Support | Journal, Hosts, Diagnostics |
+
+The volume classes keep their letters in the documents. On the screen each has a name: A *Easy*, B *Waits for snapshots*, C *Careful copy*, D *Instance is off*, E *Not moved by this tool*.
+
+**The tree.** Step 2 shows the cloud as a tree: project, instance, the volumes attached to it, and under each project the volumes that are *Not attached*. Every volume shows its size, its snapshots and how it will be handled. Once the safety checks have run, each volume also says *Will be moved*, *Not chosen* or *Held back*, with the reason. Step 4 shows the same tree with a box beside every project, instance and volume. A box on a project or an instance chooses every volume below it that can be moved. A volume that was held back cannot be ticked; the reason is shown instead. Nothing in the tree bypasses a rule: the box sends the same selection request as the table under *Choose from a table, by group, and change the settings*, and the server refuses what the pre-flight did not admit.
+
+**Messages and boxes.** A message is fixed at the top of the window, so it is seen wherever the page is scrolled; a good one fades after nine seconds, a problem stays until it is closed. Every question (confirm a check, approve, release, start, put back, emergency stop) opens one box with its fields. If the server refuses, the reason is shown inside the box and the box stays open. The **Help** button explains the steps and the words.
+
+**What to do next.** A panel at the top of every step says what the step is for and what to do. When the step is done it says so.
+
+The table below describes each step in the technical names.
+
 | Tab | What you do | What OpenMove does |
 |---|---|---|
 | **1. Connect** | Enter the Keystone address, an administrator account, the project, domains, region and interface. Choose whether to verify TLS (on by default) or give a CA file. | Logs in. The password stays in memory and is never written to disk, the journal or a report. |

@@ -14,14 +14,14 @@ ORDER = ("connect", "platform", "inventory", "audit", "preflight", "select", "mo
 
 # what is missing for a step, said to the person, while the step before it is not done
 NEEDS = {
-    "platform": "Connect to the cloud first (step 1).",
-    "inventory": "Detect the platform first (step 2).",
-    "audit": "Read the inventory first (step 3).",
-    "preflight": "Run the audit first (step 4).",
-    "select": "Finish the pre-flight first (step 5): run every check, attest the open items and get two different people to sign the gate.",
-    "move": "Confirm the selection first (step 6).",
-    "reports": "Run the dry run on the Move tab first (step 7).",
-    "live": "Run the dry run on the Move tab first (step 7).",
+    "platform": "Connect to your cloud first (step 1).",
+    "inventory": "Scan the cloud first (step 2).",
+    "audit": "Scan the cloud first (step 2).",
+    "preflight": "Scan the cloud first (step 2).",
+    "select": "Finish the safety checks first (step 3): run them, confirm what needs a person, and get two different people to approve.",
+    "move": "Confirm your choice first (step 4).",
+    "reports": "Rehearse the move first (step 5).",
+    "live": "Rehearse the move first (step 5).",
 }
 
 
@@ -64,7 +64,7 @@ def start_refusal(state, engine, ids=None):
     wanted = [i for i in (ids or movable_now) if i in set(movable_now)]
     if engine.open_volumes() or engine.dry_covers(wanted):
         return None
-    return "run the dry run on the Move tab first: it shows every call before any is sent, for the volumes this run would move"
+    return "run the dry run first (the Rehearse button in step 5, Move): it shows every call before any is sent, for the volumes this run would move"
 
 
 def done(state, gate):

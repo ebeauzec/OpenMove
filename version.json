@@ -1,8 +1,8 @@
 {
-  "version": "0.10.2",
+  "version": "0.11.0",
   "major": 0,
-  "minor": 10,
-  "patch": 2,
+  "minor": 11,
+  "patch": 0,
   "date": "2026-11-04",
-  "notes": "Pre-flight: the Attest button is next to the status"
+  "notes": "A plain-words interface: seven steps, a volume tree, clear dialogs"
 }

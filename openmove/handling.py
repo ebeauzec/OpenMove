@@ -213,7 +213,7 @@ CAUSES = {
     "not_selected": ("Left out of this batch by the operator",
                      "The volume was admitted by the pre-flight, but the operator did not select it for this batch. Nothing was done to it.",
                      SAFE_SRC, NO_TGT,
-                     ["Select it on the Select tab when it should be part of a batch.", "Nothing else is needed: it stays exactly as it is."], "Operator"),
+                     ["Choose it in step 4, Choose, when it should be part of the move.", "Nothing else is needed: it stays exactly as it is."], "Operator"),
     "risky_workload": ("Hosts a workload that may break",
                        "The tool found a known risk of a failed or unsafe migration for what this volume hosts (for example a legacy Windows server, no guest agent, an emulated disk bus). "
                        "It is NOT moved: a volume that may break its workload is excluded until two different people clear it.",

@@ -58,7 +58,7 @@ class Simulation:
             raise RuntimeError("the gate is not approved: " + ((gate or {}).get("message") or "run the pre-flight first"))
         ids = selection.selected_ids(self.state)
         if not ids:
-            raise RuntimeError("no volume is selected: choose volumes on the Select tab (the pre-flight must admit them)")
+            raise RuntimeError("no volume is selected: choose volumes in step 4, Choose (the safety checks must admit them)")
         inv = {v["id"]: v for v in (self.state.inventory or {}).get("volumes", [])}
         seen = {}
         risk = (self.state.checks or {}).get("risk") or {}

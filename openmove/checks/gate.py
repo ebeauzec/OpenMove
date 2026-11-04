@@ -103,17 +103,17 @@ def evaluate(result, att, sign, now=None, max_age_hours=MAX_AGE_HOURS):
     same_person = len(sign) == 2 and len({s["by"].strip().lower() for s in sign.values()}) < 2
 
     if blockers:
-        status, message = "blocked", "%d check(s) failed. Fix them and run the pre-flight again." % len(blockers)
+        status, message = "blocked", "%d check(s) failed. Fix the cause, then run the safety checks again." % len(blockers)
     elif open_items:
-        status, message = "open", "%d check(s) need an attestation or the missing access." % len(open_items)
+        status, message = "open", "%d check(s) need a person to look at them and confirm." % len(open_items)
     elif stale:
-        status, message = "stale", "The pre-flight ran %.0f hours ago (limit %d). Run it again." % (age_h, max_age_hours)
+        status, message = "stale", "The safety checks ran %.0f hours ago (the limit is %d). Run them again." % (age_h, max_age_hours)
     elif missing:
-        status, message = "awaiting_signoff", "Waiting for sign-off as: %s." % ", ".join(missing)
+        status, message = "awaiting_signoff", "Waiting for approval from: %s." % ", ".join({"operator": "the first approver", "reviewer": "the second approver"}[r] for r in missing)
     elif same_person:
-        status, message = "awaiting_signoff", "The operator and the reviewer must be two different people."
+        status, message = "awaiting_signoff", "The first and the second approver must be two different people."
     else:
-        status, message = "approved", "All prerequisites are met and signed off by two people."
+        status, message = "approved", "Everything is met and two different people have approved."
     return {"status": status, "message": message, "blockers": blockers, "open_items": open_items, "attested": attested,
             "signoffs": sign, "admitted": len(result.get("admitted") or []), "age_hours": round(age_h, 1),
             "max_age_hours": max_age_hours, "run_id": result["run_id"]}

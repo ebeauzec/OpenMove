@@ -10,224 +10,293 @@
 </head>
 <body>
 <header>
-  <div class="brand"><span class="logo">OpenMove</span><span class="sub">Cinder volume audit, reporting and migration</span></div>
-  <div class="head-right"><button id="halt-btn" class="halt" title="Stop all changes at once. Needs your name and a reason.">HALT</button><span id="mode" class="chip">not connected</span><span id="ver" class="muted"></span></div>
+  <div class="brand"><span class="logo">OpenMove</span><span class="sub">Moves OpenStack volumes to new storage, safely</span></div>
+  <div class="head-right">
+    <button id="help-btn" class="secondary" title="What this tool does, step by step, in plain words">Help</button>
+    <button id="halt-btn" class="halt" title="Stops every change to the cloud at once. It asks for your name and a reason.">EMERGENCY STOP</button>
+    <span id="mode" class="chip">not connected</span><span id="ver" class="muted"></span>
+  </div>
 </header>
 
-<div id="gprog" class="gprog hidden" title="Overall progress of the migration"><div id="gprog-bar" class="bar"><span id="gprog-fill"></span></div><span id="gprog-text"></span></div>
+<div id="banner" class="banner hidden" role="status" aria-live="polite"></div>
+
+<div id="gprog" class="gprog hidden" title="How far the move has got"><div id="gprog-bar" class="bar"><span id="gprog-fill"></span></div><span id="gprog-text"></span></div>
 
 <div id="halt-banner" class="halt-banner hidden" role="alert"></div>
 
 <div id="demo-banner" class="demo hidden" role="note">
-  <div>DEMONSTRATION MODE: everything on screen is synthetic data from a built-in cloud. No real system is connected or changed.</div>
-  <div class="demo-pick"><label>Scenario <select id="demo-scenario"></select></label> <details class="demo-about"><summary>About this scenario</summary><span id="demo-desc"></span></details></div>
+  <div>DEMONSTRATION: everything on screen is made-up data from a built-in cloud. No real system is connected or changed.</div>
+  <div class="demo-pick"><label>Example <select id="demo-scenario"></select></label> <details class="demo-about"><summary>About this example</summary><span id="demo-desc"></span></details></div>
 </div>
 
 <div id="lab-banner" class="demo hidden" role="note">
-  <div>LAB MODE: connected to the OpenStack lab on this machine (a real Keystone, Nova and Cinder, with two LVM back-ends standing in for the two arrays). Changes are real, but only inside the lab. It is not a customer cloud, and it proves nothing about Queens, SolidFire or FlashArray.</div>
+  <div>TEST LAB: connected to the OpenStack test lab on this computer. Changes are real, but only inside the lab. It is not a customer cloud.</div>
 </div>
 
 <main>
   <nav id="tabs" role="tablist">
     <button role="tab" data-tab="connect" class="active">1. Connect</button>
-    <button role="tab" data-tab="platform">2. Platform</button>
-    <button role="tab" data-tab="inventory">3. Inventory</button>
-    <button role="tab" data-tab="audit">4. Audit</button>
-    <button role="tab" data-tab="preflight">5. Pre-flight</button>
-    <button role="tab" data-tab="select">6. Select</button>
-    <button role="tab" data-tab="move">7. Move</button>
-    <button role="tab" data-tab="reports">8. Reports</button>
-    <button role="tab" data-tab="live">9. Live</button>
-    <button role="tab" data-tab="journal">Journal</button>
-    <button role="tab" data-tab="hosts">Hosts</button>
-    <button role="tab" data-tab="diagnostics">Diagnostics</button>
+    <button role="tab" data-tab="scan">2. Scan</button>
+    <button role="tab" data-tab="preflight">3. Safety checks</button>
+    <button role="tab" data-tab="select">4. Choose</button>
+    <button role="tab" data-tab="move">5. Move</button>
+    <button role="tab" data-tab="live">6. Progress</button>
+    <button role="tab" data-tab="reports">7. Reports</button>
+    <span class="nav-gap"></span>
+    <button role="tab" data-tab="journal" class="adv">History</button>
+    <button role="tab" data-tab="hosts" class="adv">Helper servers</button>
+    <button role="tab" data-tab="diagnostics" class="adv">Support</button>
   </nav>
 
-  <div id="banner" class="banner hidden" role="status"></div>
+  <div id="guide" class="guide" aria-live="polite"></div>
 
   <section id="tab-connect" class="panel">
-    <h2>Connect to the cloud</h2>
-    <p class="muted">Use an administrator account. The password is kept in memory for this session only and is never written to disk, the journal or a report.</p>
+    <h2>Connect to your cloud</h2>
     <form id="connect-form" autocomplete="off">
       <div class="grid">
-        <label>Identity (Keystone) URL<input name="auth_url" required placeholder="https://cloud.example.net:5000"></label>
-        <label>User name<input name="username" required></label>
-        <label>Password<input name="password" type="password" required autocomplete="new-password"></label>
+        <label>Cloud address<input name="auth_url" required placeholder="https://cloud.example.net:5000"><span class="hint">The Identity (Keystone) address of your OpenStack cloud.</span></label>
+        <label>User name<input name="username" required><span class="hint">An administrator account.</span></label>
+        <label>Password<input name="password" type="password" required autocomplete="new-password"><span class="hint">Kept in memory only. Never saved to disk.</span></label>
         <label>Project<input name="project_name" required value="admin"></label>
-        <label>User domain<input name="user_domain" value="Default"></label>
-        <label>Project domain<input name="project_domain" value="Default"></label>
-        <label>Region (optional)<input name="region"></label>
-        <label>Endpoint interface
-          <select name="interface"><option>public</option><option>internal</option><option>admin</option></select></label>
-        <label>CA certificate file (optional)<input name="ca_file" placeholder="path on this machine"></label>
-        <label class="check"><input name="verify" type="checkbox" checked> Verify TLS certificates</label>
       </div>
+      <details class="more">
+        <summary>More options (most people leave these as they are)</summary>
+        <div class="grid">
+          <label>User domain<input name="user_domain" value="Default"></label>
+          <label>Project domain<input name="project_domain" value="Default"></label>
+          <label>Region<input name="region" placeholder="only if your cloud has more than one"></label>
+          <label>Which address type to use
+            <select name="interface"><option>public</option><option>internal</option><option>admin</option></select></label>
+          <label>Certificate file<input name="ca_file" placeholder="only for a private certificate authority"></label>
+          <label class="check"><input name="verify" type="checkbox" checked> Check the security certificate</label>
+        </div>
+      </details>
       <div class="actions"><button class="primary" type="submit">Connect</button>
         <button type="button" id="disconnect" class="secondary">Disconnect</button></div>
     </form>
     <div id="connect-result" class="result"></div>
   </section>
 
-  <section id="tab-platform" class="panel hidden">
-    <h2>Platform</h2>
-    <div class="actions"><button class="primary" id="discover">Detect version and back-ends</button></div>
-    <div id="platform-view"></div>
-  </section>
-
-  <section id="tab-inventory" class="panel hidden">
-    <h2>Volume inventory and classification</h2>
-    <div class="actions inline">
-      <label>Back-end<select id="inv-backend"><option value="">all back-ends</option></select></label>
-      <label>Rotation window (days)<input id="inv-window" type="number" min="1" value="14"></label>
-      <button class="primary" id="inv-run">Read from the cloud</button>
-      <button class="secondary hidden" id="inv-demo-export" title="Demonstration only: adds the provider ids and snapshot history that the Cinder database would give">Load the demonstration database export</button>
+  <section id="tab-scan" class="panel hidden">
+    <h2>Scan your cloud</h2>
+    <div class="actions">
+      <button class="primary big" id="scan-run">Scan the cloud</button>
+      <span id="scan-status" class="muted"></span>
     </div>
-    <details>
-      <summary>No database access? Import the playbook's query results instead</summary>
-      <p class="muted">Paste or load the tab-separated output of query A1 (required), A2 (snapshot churn), A4 (root volumes) and the attached-instances list. They add provider_id and snapshot history, which the API does not show.</p>
-      <div class="grid">
-        <label>A1 inventory<textarea id="imp-a1" rows="3"></textarea><input type="file" data-for="imp-a1"></label>
-        <label>A2 churn<textarea id="imp-a2" rows="3"></textarea><input type="file" data-for="imp-a2"></label>
-        <label>A4 root volumes<textarea id="imp-a4" rows="3"></textarea><input type="file" data-for="imp-a4"></label>
-        <label>Attached instances<textarea id="imp-inst" rows="3"></textarea><input type="file" data-for="imp-inst"></label>
+    <div id="scan-mode"></div>
+    <div id="scan-summary"></div>
+
+    <div id="tree-box" class="hidden">
+      <h3>What is in your cloud</h3>
+      <p class="muted">Open a project to see its instances. Each instance shows the volumes attached to it. Volumes that are not attached to anything are listed under "Not attached".</p>
+      <div class="actions inline">
+        <label>Find<input id="tree-find" placeholder="a name, an id or an instance"></label>
+        <button class="secondary" id="tree-open">Open all</button>
+        <button class="secondary" id="tree-close">Close all</button>
       </div>
-      <div class="actions"><button id="inv-import" class="secondary">Classify the imported data</button></div>
-    </details>
-    <div id="inv-summary"></div>
-    <div class="actions inline" id="inv-filter" hidden>
-      <label>Show class<select id="inv-class"><option value="">all</option></select></label>
-      <label>Search<input id="inv-search" placeholder="id, name, project, host"></label>
+      <div id="tree-legend" class="legend"></div>
+      <div id="tree-view" class="tree"></div>
     </div>
-    <div class="table-wrap"><table id="inv-table" hidden>
-      <thead><tr><th>Volume</th><th>Class</th><th>Reason</th><th>GiB</th><th>Snapshots</th><th>Status</th><th>Back-end</th><th>Attached to</th></tr></thead>
-      <tbody></tbody></table></div>
-    <p id="inv-more" class="muted"></p>
-  </section>
 
-  <section id="tab-audit" class="panel hidden">
-    <h2>Environment audit</h2>
-    <p class="muted">A full, read-only audit of the environment as it is now: platform, capacity, every volume, snapshot, backup and instance, and the findings: what is wrong, stuck, orphaned or close to a limit. Needs an administrator account.</p>
-    <div class="actions"><button class="primary" id="audit-run">Run the audit</button></div>
-    <div id="audit-view"></div>
+    <details class="more" id="scan-opts">
+      <summary>Scan options</summary>
+      <div class="actions inline">
+        <label>Only look at one storage system<select id="inv-backend"><option value="">all storage systems</option></select></label>
+        <label>Snapshots count as short-lived if they expire within (days)<input id="inv-window" type="number" min="1" value="14"></label>
+        <button class="secondary hidden" id="inv-demo-export" title="Demonstration only">Load the demonstration database export</button>
+      </div>
+      <details>
+        <summary>No access to the Cinder database? Load the playbook's query results instead</summary>
+        <p class="muted">Paste or load the tab-separated output of query A1 (required), A2 (snapshot churn), A4 (root volumes) and the list of attached instances. They add details the API does not show.</p>
+        <div class="grid">
+          <label>A1 inventory<textarea id="imp-a1" rows="3"></textarea><input type="file" data-for="imp-a1"></label>
+          <label>A2 churn<textarea id="imp-a2" rows="3"></textarea><input type="file" data-for="imp-a2"></label>
+          <label>A4 root volumes<textarea id="imp-a4" rows="3"></textarea><input type="file" data-for="imp-a4"></label>
+          <label>Attached instances<textarea id="imp-inst" rows="3"></textarea><input type="file" data-for="imp-inst"></label>
+        </div>
+        <div class="actions"><button id="inv-import" class="secondary">Use the loaded data</button></div>
+      </details>
+    </details>
+
+    <details class="more" id="scan-health">
+      <summary>Health check: problems found in the cloud <span id="audit-count" class="muted"></span></summary>
+      <p class="muted">A read-only look at everything that is wrong, stuck, orphaned or close to a limit. It is part of the scan.</p>
+      <div class="actions"><button class="secondary" id="audit-run">Run the health check again</button></div>
+      <div id="audit-view"></div>
+    </details>
+
+    <details class="more" id="scan-platform">
+      <summary>Cloud details: version, storage systems and services</summary>
+      <div class="actions"><button class="secondary" id="discover">Read the cloud details again</button></div>
+      <div id="platform-view"></div>
+    </details>
+
+    <details class="more" id="scan-table">
+      <summary>All volumes as a table</summary>
+      <div id="inv-summary"></div>
+      <div class="actions inline" id="inv-filter" hidden>
+        <label>Show group<select id="inv-class"><option value="">all</option></select></label>
+        <label>Search<input id="inv-search" placeholder="id, name, project, host"></label>
+        <button class="secondary" id="inv-run">Read the volumes again</button>
+      </div>
+      <div class="table-wrap"><table id="inv-table" hidden>
+        <thead><tr><th>Volume</th><th>Group</th><th>Why</th><th>GiB</th><th>Snapshots</th><th>Status</th><th>Storage</th><th>Attached to</th></tr></thead>
+        <tbody></tbody></table></div>
+      <p id="inv-more" class="muted"></p>
+    </details>
   </section>
 
   <section id="tab-preflight" class="panel hidden">
-    <h2>Pre-flight checks and gate</h2>
-    <p class="muted">Every prerequisite is checked before a migration may start. A check that fails blocks the gate and must be fixed. A check that warns or could not be verified needs an attestation: a named person's recorded statement with the evidence. Two different people then sign off. Only an open gate lets a migration start.</p>
+    <h2>Safety checks</h2>
     <div class="actions inline">
-      <label>Source back-end<select id="pf-source"><option value="">choose</option></select></label>
-      <label>Target back-end<select id="pf-target"><option value="">choose</option></select></label>
+      <label>Move volumes from<select id="pf-source"><option value="">choose</option></select></label>
+      <label>Move volumes to<select id="pf-target"><option value="">choose</option></select></label>
       <label>What OpenMove can reach<select id="pf-access">
-        <option value="api">The OpenStack APIs only (classes A and B, moved by Cinder)</option>
-        <option value="full">APIs, hosts and arrays (also class C, the staged method)</option>
+        <option value="api">The OpenStack cloud only</option>
+        <option value="full">The cloud, the helper servers and the storage arrays</option>
       </select></label>
-      <button class="primary" id="pf-run">Run all pre-flight checks</button>
-      <button class="secondary hidden" id="pf-demo-validate">Record lab validation (demo only)</button>
-      <button class="secondary hidden" id="pf-lab-approve" title="Lab only: records the lab validation of the lab release, attests the open items and signs as two lab users. A failed check still blocks.">Lab: validate, attest and sign the gate</button>
-      <button class="secondary hidden" id="pf-demo-approve" title="Demonstration only: attests the open items and signs as two made-up people. A failed check still blocks.">Demo: attest and sign the gate</button>
+      <button class="primary big" id="pf-run">Run the safety checks</button>
     </div>
-    <p class="muted">Needs the platform detected and the inventory read.</p>
+    <p id="pf-stale" class="muted"></p>
     <div id="pf-view"></div>
+    <details class="more" id="pf-shortcuts">
+      <summary>Shortcuts for the test lab and the demonstration</summary>
+      <div class="actions inline">
+        <button class="secondary hidden" id="pf-demo-validate">Record lab validation (demo only)</button>
+        <button class="secondary hidden" id="pf-lab-approve" title="Lab only: records the lab validation, confirms the open items and signs as two lab users. A failed check still blocks.">Lab: validate, confirm and approve</button>
+        <button class="secondary hidden" id="pf-demo-approve" title="Demonstration only: confirms the open items and signs as two made-up people. A failed check still blocks.">Demo: confirm and approve</button>
+      </div>
+    </details>
   </section>
 
   <section id="tab-select" class="panel hidden">
-    <h2>Select what to migrate, and how</h2>
-    <p class="muted">Nothing is all or nothing. Choose volumes one by one, by group (class, project, attachment, size, snapshots, host, instance, workload risk), or any mix. Only volumes the pre-flight admitted can be chosen; a held-back volume shows why. By default every admitted volume is selected except those that needed a risk clearance. The settings below start at their safe defaults and can only be made stricter than the process minimum. Project names appear after you run the audit (tab 4).</p>
-    <div id="sel-summary" class="banner ok"></div>
-    <div class="actions inline"><button class="primary" id="sel-confirm" type="button">Confirm this selection</button> <span id="sel-confirm-note" class="muted"></span></div>
+    <h2>Choose what to move</h2>
+    <div id="sel-summary" class="banner ok static"></div>
     <div class="actions inline">
-      <button class="secondary" id="sel-all">Select all eligible</button>
-      <button class="secondary" id="sel-none">Select none</button>
-      <button class="secondary" id="sel-reset">Back to the default selection</button>
-      <label>Your name (recorded with each change)<input id="sel-by" placeholder="optional"></label>
+      <button class="primary big" id="sel-confirm" type="button">Confirm my choice</button> <span id="sel-confirm-note" class="muted"></span>
     </div>
-    <h3>By group</h3>
-    <div class="actions inline"><label>Group by <select id="sel-kind"></select></label></div>
-    <div class="table-wrap"><table id="sel-groups"><thead><tr><th>Group</th><th>Volumes</th><th>Eligible</th><th>GiB</th><th>Choose</th></tr></thead><tbody></tbody></table></div>
-    <h3>Volume by volume</h3>
-    <div class="actions inline"><label>Filter<input id="sel-filter" placeholder="id, name, project, class, instance"></label><span id="sel-count" class="muted"></span></div>
-    <div class="table-wrap"><table id="sel-table"><thead><tr><th>Chosen</th><th>Volume</th><th>Name</th><th>Class</th><th>Project</th><th>GiB</th><th>Snapshots</th><th>Attached to</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+    <div class="actions inline">
+      <button class="secondary" id="sel-all">Choose everything that can be moved</button>
+      <button class="secondary" id="sel-none">Choose nothing</button>
+      <button class="secondary" id="sel-reset">Go back to the suggested choice</button>
+      <label>Find<input id="sel-find" placeholder="a name, an id or an instance"></label>
+    </div>
+    <div id="sel-legend" class="legend"></div>
+    <div id="sel-tree" class="tree"></div>
     <p id="sel-more" class="muted"></p>
-    <h3>Settings</h3>
-    <div id="sel-options" class="grid"></div>
-    <div class="actions inline"><button class="secondary" id="opt-reset">Reset all settings to the defaults</button><span id="opt-status" class="muted"></span></div>
-    <h3>Workload risk</h3>
-    <p class="muted">Volumes that host something that may break (for example a legacy Windows server, or no guest agent) are <b>not moved</b> until two different people clear them. The check reads hints only (image properties, instance data, names) and cannot see inside a guest: a volume with no hint is not declared safe. Mark any volume the customer knows to be a risk.</p>
+
+    <h3>Volumes that may break if they are moved</h3>
+    <p class="muted">Some volumes carry something that can fail after a move, for example an old Windows server, or a guest with no agent installed. OpenMove does <b>not</b> move these until two different people have checked them. OpenMove can only read hints (image properties, instance data, names). It cannot look inside a guest. A volume with no hint is not proven safe. Mark any volume you know is a risk.</p>
     <div id="risk-cards" class="cards"></div>
     <div class="actions inline">
-      <button class="secondary" id="risk-op">Clear ticked as operator</button>
-      <button class="secondary" id="risk-rv">Clear ticked as reviewer</button>
-      <button class="secondary" id="risk-wd">Withdraw clearance of ticked</button>
-      <button class="secondary" id="risk-mark">Mark ticked volumes in the list above as a risk</button>
-      <button class="secondary" id="risk-unmark">Remove the mark</button>
+      <button class="secondary" id="risk-op">I have checked the ticked volumes (first person)</button>
+      <button class="secondary" id="risk-rv">I have checked the ticked volumes (second person)</button>
+      <button class="secondary" id="risk-wd">Take back my check</button>
     </div>
-    <div class="table-wrap"><table id="risk-table"><thead><tr><th>Tick</th><th>Volume</th><th>Name</th><th>Class</th><th>Risk</th><th>Why</th><th>Cleared by</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="risk-table"><thead><tr><th>Tick</th><th>Volume</th><th>Name</th><th>Group</th><th>Risk</th><th>Why</th><th>Checked by</th></tr></thead><tbody></tbody></table></div>
     <div id="risk-advice"></div>
+
+    <details class="more">
+      <summary>Choose from a table, by group, and change the settings</summary>
+      <h3>By group</h3>
+      <div class="actions inline"><label>Group by <select id="sel-kind"></select></label></div>
+      <div class="table-wrap"><table id="sel-groups"><thead><tr><th>Group</th><th>Volumes</th><th>Can be moved</th><th>GiB</th><th>Choose</th></tr></thead><tbody></tbody></table></div>
+      <h3>Volume by volume</h3>
+      <div class="actions inline"><label>Filter<input id="sel-filter" placeholder="id, name, project, group, instance"></label><span id="sel-count" class="muted"></span></div>
+      <div class="table-wrap"><table id="sel-table"><thead><tr><th>Chosen</th><th>Volume</th><th>Name</th><th>Group</th><th>Project</th><th>GiB</th><th>Snapshots</th><th>Attached to</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+      <h3>Settings</h3>
+      <p class="muted">The settings start at safe values. You can make them stricter. You cannot go below the minimum the process sets.</p>
+      <div id="sel-options" class="grid"></div>
+      <div class="actions inline"><button class="secondary" id="opt-reset">Put all settings back to the safe values</button><span id="opt-status" class="muted"></span></div>
+    </details>
   </section>
 
   <section id="tab-move" class="panel hidden">
-    <h2>Move volumes</h2>
-    <p class="muted">Class A and B volumes are moved by Cinder itself: OpenMove locks the instance, sends one retype with on-demand migration, follows it, checks the result against the before-state and unlocks. It needs only the OpenStack APIs. Class C volumes are copied to the target through the data mover, image by image and checked, and then switched over. Always run the dry run first: it reads the cloud and lists the exact calls, and changes nothing.</p>
-    <div id="mv-note" class="banner warn">A real run needs three things: a recorded lab validation of the OpenStack release (gate G0), an approved pre-flight gate, and no halt. Class C volumes (snapshots that stay) are moved too, by the staged method, once a migration host and a Cinder host are registered and ready on the Hosts tab; until then they are held back.</div>
-    <div class="actions inline">
-      <label>Target volume type<input id="mv-type" placeholder="empty: chosen if only one type fits"></label>
-      <label>Run window opens (UTC)<input id="mv-from" placeholder="optional: 2026-11-07T22:00"></label>
-      <label>Run window closes (UTC)<input id="mv-until" placeholder="optional: 2026-11-08T04:00"></label>
-      <button class="secondary" id="mv-dry">1. Dry run (changes nothing)</button>
-      <button class="primary" id="mv-start">2. Start the run</button>
-      <button class="secondary" id="mv-stop">Stop taking new volumes</button>
-      <button class="secondary" id="mv-refresh">Refresh</button>
-      <button class="secondary" id="mv-validate">Record lab validation (G0)</button>
+    <h2>Move the volumes</h2>
+    <div class="steps3">
+      <div><b>1. Rehearse</b><span>OpenMove lists every call it would make. It sends none of them.</span></div>
+      <div><b>2. Start</b><span>OpenMove moves the volumes you chose, one after another, and checks each one.</span></div>
+      <div><b>3. Second person approves</b><span>For each volume, a different person approves before the switch. See the Progress step.</span></div>
     </div>
-    <details id="p0-box" class="box">
-      <summary><strong>Phase 0: the lab tests</strong> <span id="p0-count" class="muted"></span></summary>
-      <p class="muted">The playbook's lab tests (T1 to T23) and four that OpenMove adds (M1 to M4). OpenMove cannot run them: they need real hosts and people. Do each test, then record its result with what you did and saw. Gate G0 can be recorded from these results once every test of the retype path has passed for this release. Tests of the staged method (class C) are listed but not required while it is not built.</p>
-      <div id="p0-view"></div>
-      <div class="actions inline"><button class="secondary" id="p0-g0">Record gate G0 from these results</button></div>
-    </details>
+    <div id="mv-note" class="banner warn static">Before a real move can start, three things must be true: the lab tests for this OpenStack release are recorded (gate G0), the safety checks are approved, and nobody has pressed the emergency stop. Volumes with long-lived snapshots also need a helper server (see "Helper servers").</div>
     <div class="actions inline">
-      <button class="secondary" id="mv-g23">Sign G2 and G3 (second person)</button>
-      <button class="secondary" id="mv-g4">Sign G4 (second person)</button>
-      <button class="secondary" id="mv-release">Release all for the retype</button>
-      <button class="secondary" id="mv-rev-preview">Preview: put the whole run back</button>
-      <button class="secondary" id="mv-rev-all">Put the whole run back</button>
+      <button class="secondary big" id="mv-dry">1. Rehearse (changes nothing)</button>
+      <button class="primary big" id="mv-start">2. Start moving</button>
+      <button class="secondary" id="mv-stop">Do not start any more volumes</button>
+      <button class="secondary" id="mv-refresh">Refresh</button>
       <span id="mv-status" class="muted"></span>
     </div>
     <div id="mv-dry-view"></div>
     <div id="mv-cards" class="cards"></div>
-    <div class="table-wrap"><table id="mv-table"><thead><tr><th>Volume</th><th>Class</th><th>Method</th><th>Phase</th><th>G2</th><th>G3</th><th>G4</th><th>What is happening</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="mv-table"><thead><tr><th>Volume</th><th>Group</th><th>Method</th><th>Stage</th><th>G2</th><th>G3</th><th>G4</th><th>What is happening</th><th></th></tr></thead><tbody></tbody></table></div>
     <p id="mv-more" class="muted"></p>
+
+    <details class="more">
+      <summary>Options for the move</summary>
+      <div class="actions inline">
+        <label>Move to this volume type<input id="mv-type" placeholder="leave empty if only one type fits"></label>
+        <label>Do not start before (UTC)<input id="mv-from" placeholder="optional: 2026-11-07T22:00"></label>
+        <label>Stop starting new volumes after (UTC)<input id="mv-until" placeholder="optional: 2026-11-08T04:00"></label>
+      </div>
+    </details>
+    <details class="more">
+      <summary>Approvals by the second person</summary>
+      <p class="muted">Each volume needs a second person, who is not the person running the move, to approve three points. G2: the copy is verified. G3: the volume is ready to switch. G4: the switch is verified. You can approve for all volumes that are at that point.</p>
+      <div class="actions inline">
+        <button class="secondary" id="mv-g23">Approve G2 and G3 (second person)</button>
+        <button class="secondary" id="mv-g4">Approve G4 (second person)</button>
+        <button class="secondary" id="mv-release">Release all volumes that are ready to switch</button>
+      </div>
+    </details>
+    <details class="more">
+      <summary>Undo: put volumes back</summary>
+      <p class="muted">Preview first. The preview shows what undoing would do and changes nothing.</p>
+      <div class="actions inline">
+        <button class="secondary" id="mv-rev-preview">Preview: put the whole move back</button>
+        <button class="secondary" id="mv-rev-all">Put the whole move back</button>
+      </div>
+    </details>
+    <details id="p0-box" class="more">
+      <summary>Lab tests for this OpenStack release (gate G0) <span id="p0-count" class="muted"></span></summary>
+      <p class="muted">Before a move on a real cloud, the playbook's lab tests (T1 to T23) and four tests that OpenMove adds (M1 to M4) must pass for this release. OpenMove cannot run them: they need real hosts and people. Do each test, then record the result with what you did and what you saw. Gate G0 can then be recorded from these results.</p>
+      <div id="p0-view"></div>
+      <div class="actions inline">
+        <button class="secondary" id="p0-g0">Record gate G0 from these results</button>
+        <button class="secondary" id="mv-validate">Record gate G0 without the list (type the evidence)</button>
+      </div>
+    </details>
   </section>
 
   <section id="tab-reports" class="panel hidden">
     <h2>Reports</h2>
-    <p class="muted">Word documents built from the same data the tool holds, so a report cannot disagree with what the tool knows. The pre-migration report lists every pre-flight check, the volumes to move and those held back, the gate and the sign-off, and includes the environment audit as a separate part.</p>
     <div class="grid">
-      <label>Customer or system name<input id="rep-customer" placeholder="shown on the title page and in the footer"></label>
+      <label>Customer or system name<input id="rep-customer" placeholder="shown on the first page and in the footer"></label>
       <label>Prepared by<input id="rep-by" placeholder="your name"></label>
-      <label class="check"><input id="rep-audit" type="checkbox" checked> Include the environment audit in the pre-migration report</label>
+      <label class="check"><input id="rep-audit" type="checkbox" checked> Include the health check in the report before the move</label>
     </div>
+    <h3>Before the move</h3>
+    <p class="muted">Every safety check, the volumes to move and the volumes held back, the approval, and the health check.</p>
     <div class="actions">
-      <button class="primary" id="rep-before">Pre-migration report (Word)</button>
-      <button class="secondary" id="rep-audit-only">Environment audit (Word)</button>
-      <button class="secondary" id="rep-unmigrated">Volumes not migrated (Word)</button>
+      <button class="primary" id="rep-before">Report before the move (Word)</button>
+      <button class="secondary" id="rep-audit-only">Health check only (Word)</button>
+      <button class="secondary" id="rep-unmigrated">Volumes not moved (Word)</button>
     </div>
-    <h3>During and after the run</h3>
-    <p class="muted">The update report and the after report compare every volume the run touched with the state recorded before its cutover, and mark each difference as expected (back-end and volume type) or unexpected. The volume list is the same data as a spreadsheet.</p>
+    <h3>During and after the move</h3>
+    <p class="muted">These compare every volume that was moved with how it looked before the switch. Each difference is marked as expected (the storage system and the volume type) or unexpected. The volume list holds the same data as a spreadsheet.</p>
     <div class="actions">
-      <button class="secondary" id="rep-update">Update report (Word)</button>
-      <button class="secondary" id="rep-after">After report (Word)</button>
+      <button class="secondary" id="rep-update">Progress report (Word)</button>
+      <button class="secondary" id="rep-after">Report after the move (Word)</button>
       <button class="secondary" id="rep-xlsx">Volume list (Excel)</button>
       <button class="secondary" id="rep-csv">Volume list (CSV)</button>
     </div>
-    <p id="rep-status" class="muted">The pre-migration report and the not-migrated report need the pre-flight to have run; the audit report needs the audit.</p>
+    <p id="rep-status" class="muted"></p>
   </section>
 
   <section id="tab-live" class="panel hidden">
-    <h2>Live view</h2>
-    <div id="live-note" class="banner warn"></div>
+    <h2>Progress</h2>
+    <div id="live-note" class="banner warn static"></div>
     <div class="actions inline">
-      <button class="primary hidden" id="live-start">Start the simulated migration</button>
+      <button class="primary hidden" id="live-start">Start the simulated move</button>
       <button class="secondary hidden" id="live-stop">Stop the simulation</button>
       <span id="live-status" class="muted"></span>
     </div>
@@ -235,170 +304,182 @@
       <div><div class="k">Overall progress</div><div class="bar big"><span id="live-fill"></span></div><div id="live-pct" class="v"></div></div>
       <div id="live-cards" class="cards"></div>
     </div>
-    <h3>Pipeline: the order every volume follows</h3>
-    <div id="live-pipe" class="pipe"></div>
-    <div class="live-cols">
-      <div>
-        <h3>Safety</h3>
-        <div id="live-safety"></div>
-        <h3>A volume may be cut over only when</h3>
-        <ol id="live-rules" class="rules"></ol>
-      </div>
-      <div>
-        <h3>Event feed</h3>
-        <ul id="live-feed" class="feed"></ul>
-      </div>
-    </div>
     <h3>Volumes</h3>
-    <div class="actions inline"><button class="primary hidden" id="live-release">Release all ready volumes for cutover</button><span id="live-ready" class="muted"></span></div>
+    <div class="actions inline"><button class="primary hidden" id="live-release">Release all volumes that are ready to switch</button><span id="live-ready" class="muted"></span></div>
     <div class="actions inline" id="live-sign">
-      <button class="secondary hidden" id="sign-g23">Sign G2 and G3 (second person)</button>
-      <button class="secondary hidden" id="sign-g4">Sign G4 (second person)</button>
-      <button class="secondary hidden" id="sign-demo">Demo: a made-up second person signs</button>
+      <button class="secondary hidden" id="sign-g23">Approve G2 and G3 (second person)</button>
+      <button class="secondary hidden" id="sign-g4">Approve G4 (second person)</button>
+      <button class="secondary hidden" id="sign-demo">Demo: a made-up second person approves</button>
       <span id="sign-status" class="muted"></span>
     </div>
     <p class="muted">Click a volume to see exactly what is being done to it.</p>
-    <div class="table-wrap"><table id="live-table"><thead><tr><th>Volume</th><th>Name</th><th>Class</th><th>GiB</th><th>Phase</th><th>Progress</th><th>Note</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="live-table"><thead><tr><th>Volume</th><th>Name</th><th>Group</th><th>GiB</th><th>Stage</th><th>Progress</th><th>Note</th></tr></thead><tbody></tbody></table></div>
     <p id="live-more" class="muted"></p>
     <div id="vd" class="vd hidden"></div>
-    <h3>Volumes not migrated</h3>
-    <p class="muted">Every volume that is not migrated, for whatever reason, with why, how and the proposed steps to resolve it. Held-back volumes (classes D and E, failed checks) appear as soon as the pre-flight has run; stopped and rolled-back volumes appear as they happen.</p>
-    <div class="actions"><button class="secondary" id="um-report">Not-migrated report (Word)</button><span id="um-status" class="muted"></span></div>
+
+    <h3>Volumes that were not moved</h3>
+    <p class="muted">Every volume that was not moved, with the reason, what state it was left in, and the steps to fix it. Volumes that were held back appear as soon as the safety checks have run.</p>
+    <div class="actions"><button class="secondary" id="um-report">Volumes not moved (Word)</button><span id="um-status" class="muted"></span></div>
     <div id="um-cards" class="cards"></div>
     <div id="um-causes"></div>
-    <div class="table-wrap"><table id="um-table"><thead><tr><th>Volume</th><th>Name</th><th>Class</th><th>GiB</th><th>Outcome</th><th>Cause</th><th>How it ended</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap"><table id="um-table"><thead><tr><th>Volume</th><th>Name</th><th>Group</th><th>GiB</th><th>Result</th><th>Reason</th><th>How it ended</th></tr></thead><tbody></tbody></table></div>
     <p id="um-more" class="muted"></p>
+
+    <details class="more">
+      <summary>How it works: stages, safety rules and the event feed</summary>
+      <h3>The stages every volume goes through</h3>
+      <div id="live-pipe" class="pipe"></div>
+      <div class="live-cols">
+        <div>
+          <h3>Safety</h3>
+          <div id="live-safety"></div>
+          <h3>A volume is switched only when all of these are true</h3>
+          <ol id="live-rules" class="rules"></ol>
+        </div>
+        <div>
+          <h3>Event feed</h3>
+          <ul id="live-feed" class="feed"></ul>
+        </div>
+      </div>
+    </details>
   </section>
 
   <section id="tab-journal" class="panel hidden">
-    <h2>Journal</h2>
+    <h2>History</h2>
+    <p class="muted">Everything OpenMove did and everything people recorded, in time order. Nothing here can be edited.</p>
     <div class="actions"><button id="journal-refresh" class="secondary">Refresh</button></div>
     <div id="journal-view"></div>
   </section>
   <section id="tab-hosts" class="panel hidden">
-    <h2>Hosts</h2>
-    <p class="muted">Class C volumes (volumes with snapshots that stay) are copied by a small program, the <strong>data mover</strong>, on a Linux <strong>migration host</strong> that sees both back-ends' storage. A <strong>Cinder host</strong> runs the Cinder helper that creates the destination record. One host can do both. OpenMove logs in over SSH with its own key and only to a host whose key you have checked. The one use of a password is the setup of a new host (below); it is not kept. OpenMove places the mover itself and removes it again.</p>
-    <details class="box" open>
-      <summary><strong>OpenMove's public key</strong></summary>
-      <p class="muted">Add this line to <code>~/.ssh/authorized_keys</code> of the login user on each host. It is the only credential OpenMove keeps; a password is used only to set up a new host and is never saved.</p>
+    <h2>Helper servers</h2>
+    <div class="banner static"><b>Do you need this?</b> Only if some volumes have long-lived snapshots (the "Careful copy" group in the scan). Those volumes are copied by a small program, the <strong>data mover</strong>, running on a Linux <strong>migration host</strong>. A <strong>Cinder host</strong> creates the new volume record. One server can do both. If you have no such volumes, you can skip this page.</div>
+    <details class="more" open>
+      <summary><strong>Step 1. OpenMove's public key</strong></summary>
+      <p class="muted">Add this line to <code>~/.ssh/authorized_keys</code> of the login user on each helper server. It is the only credential OpenMove keeps.</p>
       <pre id="hs-key" class="code"></pre>
       <p id="hs-notes" class="muted"></p>
     </details>
-    <details class="box" open id="su-box">
-      <summary><strong>Set up a new host from here</strong></summary>
-      <p class="muted">Prepare a Linux host on the customer network (it must see the arrays' storage network), then give OpenMove its address and the administrator login. OpenMove logs in once with the password, installs its own key, prepares the host (packages, a service account, narrow sudo rights, sshd), sets up the storage paths you describe below (iSCSI initiator, multipath, logins to the arrays), registers the host and checks it. <strong>The password is used for this setup only. It is not saved, not written to the journal or a log, and not left on the host.</strong> After the setup OpenMove uses only its key. The setup can be run again; every step looks first and changes only what differs.</p>
+    <details class="more" open id="su-box">
+      <summary><strong>Step 2. Set up a new helper server from here</strong></summary>
+      <p class="muted">Give OpenMove the server's address and the administrator login. OpenMove logs in once with the password, installs its own key, prepares the server, sets up the storage paths you describe, registers it and checks it. <strong>The password is used for this setup only. It is not saved, not written to the journal or a log, and not left on the server.</strong> You can run the setup again. Every step looks first and changes only what differs.</p>
       <div class="actions inline">
         <label>Name<input id="su-name" placeholder="mover-1"></label>
-        <label>Address<input id="su-address" placeholder="192.0.2.10 or host name"></label>
+        <label>Address<input id="su-address" placeholder="192.0.2.10 or a host name"></label>
         <label>Port<input id="su-port" value="22" size="5"></label>
         <label>Administrator login<input id="su-user" value="root"></label>
         <label>Administrator password<input id="su-password" type="password" autocomplete="off" placeholder="used once, never saved"></label>
         <label><input type="checkbox" id="su-role-mover" checked> migration host</label>
         <label><input type="checkbox" id="su-role-cinder"> Cinder host</label>
       </div>
-      <h4>1. Check the host key</h4>
-      <p class="muted">The password is sent only to a host whose key a person has compared. Read the key, compare the fingerprint with the host's console or its administrator, and type what you checked.</p>
+      <h4>2a. Check the server's identity</h4>
+      <p class="muted">The password goes only to a server whose identity a person has compared. Read the key, compare the fingerprint with the server's console or its administrator, and type what you checked.</p>
       <div class="actions inline">
-        <button class="secondary" id="su-probe">Read the host key</button>
+        <button class="secondary" id="su-probe">Read the server's key</button>
         <label>Fingerprint you checked<input id="su-fp" placeholder="SHA256:..." size="50"></label>
         <label>Your name<input id="su-by" placeholder="who checked it"></label>
       </div>
       <pre id="su-keys" class="code"></pre>
-      <h4>2. Storage paths</h4>
+      <h4>2b. Storage paths</h4>
       <div class="actions inline">
-        <label>Protocol<select id="su-proto"><option value="none">none (the host sees its storage already)</option><option value="iscsi">iSCSI</option><option value="fc">Fibre Channel</option></select></label>
+        <label>How does the server reach the storage?<select id="su-proto"><option value="none">It already sees its storage</option><option value="iscsi">iSCSI</option><option value="fc">Fibre Channel</option></select></label>
       </div>
       <div id="su-storage" class="hidden">
         <div class="actions inline">
           <label>Array portals (one per line, IP or IP:port)<textarea id="su-portals" rows="3" cols="30" placeholder="192.0.2.21&#10;192.0.2.22"></textarea></label>
-          <label>Initiator name (empty: keep the host's)<input id="su-initiator" placeholder="iqn.1994-05.com.example:migration-1" size="40"></label>
+          <label>Initiator name (empty: keep the server's)<input id="su-initiator" placeholder="iqn.1994-05.com.example:migration-1" size="40"></label>
           <label>CHAP user (if the arrays need it)<input id="su-chap-user"></label>
           <label>CHAP secret<input id="su-chap-secret" type="password" autocomplete="off" placeholder="used once, never saved"></label>
-          <label>Path replacement timeout (s)<input id="su-timeo" value="15" size="4"></label>
+          <label>Path replacement timeout (seconds)<input id="su-timeo" value="15" size="4"></label>
           <label><input type="checkbox" id="su-arr-pure"> Pure FlashArray multipath settings</label>
           <label><input type="checkbox" id="su-arr-sf"> SolidFire multipath settings</label>
         </div>
         <details><summary>Extra multipath text</summary>
-          <p class="muted">Added to OpenMove's drop-in file <code>/etc/multipath/conf.d/openmove.conf</code>. The ready-made settings are starting values: check them against the array vendor's current guide.</p>
+          <p class="muted">Added to OpenMove's drop-in file <code>/etc/multipath/conf.d/openmove.conf</code>. The ready-made settings are starting values. Check them against the array vendor's current guide.</p>
           <textarea id="su-mpextra" rows="6" cols="70" placeholder="devices { device { ... } }"></textarea>
         </details>
       </div>
-      <h4>3. Run</h4>
+      <h4>2c. Run</h4>
       <div class="actions inline">
-        <label>Allow only this address to use the key<input id="su-from" placeholder="the address of this machine (recommended)"></label>
+        <label>Allow only this address to use the key<input id="su-from" placeholder="the address of this computer (recommended)"></label>
         <label>Service account<input id="su-service" value="openmove"></label>
         <label>Cinder interpreter (Cinder host)<input id="su-cpython" placeholder="empty: read from the cinder-volume program"></label>
         <button class="secondary" id="su-check">Check only (changes nothing)</button>
-        <button class="primary" id="su-run">Set up the host</button>
+        <button class="primary" id="su-run">Set up the server</button>
         <span id="su-status" class="muted"></span>
       </div>
       <div id="su-result"></div>
     </details>
-    <details class="box">
-      <summary><strong>Prepare a host (script)</strong></summary>
-      <p class="muted">The same preparation by hand, when the administrator password is not given to OpenMove: a new Linux host needs a service account, OpenMove's key, a few packages and sudo rights. This script does it and can be run again. It changes nothing in OpenStack or on any storage. Copy it to the host and run the command as an administrator.</p>
+    <details class="more">
+      <summary><strong>Prepare a server by hand (script)</strong></summary>
+      <p class="muted">The same preparation, for when you do not want to give OpenMove the administrator password. The script creates a service account, installs OpenMove's key and a few packages, and sets sudo rights. It can be run again. It changes nothing in OpenStack or on any storage. Copy it to the server and run the command as an administrator.</p>
       <div class="actions inline">
         <label>Role<select id="hs-sc-role"><option value="both">migration host and Cinder host</option><option value="mover">migration host</option><option value="cinder">Cinder host</option></select></label>
         <label>Service account<input id="hs-sc-user" value="openmove"></label>
-        <label>Allow only this address<input id="hs-sc-from" placeholder="the address of this machine (recommended)"></label>
-        <button class="secondary" id="hs-sc-show">Show command</button>
+        <label>Allow only this address<input id="hs-sc-from" placeholder="the address of this computer (recommended)"></label>
+        <button class="secondary" id="hs-sc-show">Show the command</button>
         <button class="secondary" id="hs-sc-download">Download prepare_host.sh</button>
       </div>
       <pre id="hs-sc-cmd" class="code"></pre>
     </details>
-    <h3>Add or change a host</h3>
-    <div class="actions inline">
-      <label>Name<input id="hs-name" placeholder="mover-1"></label>
-      <label>Address<input id="hs-address" placeholder="192.0.2.10 or host name"></label>
-      <label>Port<input id="hs-port" value="22" size="5"></label>
-      <label>Login user<input id="hs-user" value="root"></label>
-      <label>Cinder Python<input id="hs-python" placeholder="empty: python3 (the interpreter Cinder uses)"></label>
-      <label>Cinder user<input id="hs-cuser" placeholder="optional: the user that reads cinder.conf"></label>
-      <label><input type="checkbox" id="hs-role-mover" checked> migration host</label>
-      <label><input type="checkbox" id="hs-role-cinder" checked> Cinder host</label>
-      <label><input type="checkbox" id="hs-sudo"> use sudo (passwordless)</label>
-      <button class="primary" id="hs-save">Save host</button>
-    </div>
-    <div class="table-wrap"><table id="hs-table"><thead><tr><th>Name</th><th>Roles</th><th>Address</th><th>Login</th><th>Host key</th><th></th></tr></thead><tbody></tbody></table></div>
-    <h3>Readiness</h3>
-    <p class="muted">Checks the key login, Python, rights, tools, that the host sees both back-ends' storage, and that the Cinder helper runs. It needs the source and target back-end chosen in the pre-flight. Press it again after a fix.</p>
+    <details class="more">
+      <summary><strong>Add or change a server by hand</strong></summary>
+      <div class="actions inline">
+        <label>Name<input id="hs-name" placeholder="mover-1"></label>
+        <label>Address<input id="hs-address" placeholder="192.0.2.10 or a host name"></label>
+        <label>Port<input id="hs-port" value="22" size="5"></label>
+        <label>Login user<input id="hs-user" value="root"></label>
+        <label>Cinder Python<input id="hs-python" placeholder="empty: python3 (the one Cinder uses)"></label>
+        <label>Cinder user<input id="hs-cuser" placeholder="optional: the user that reads cinder.conf"></label>
+        <label><input type="checkbox" id="hs-role-mover" checked> migration host</label>
+        <label><input type="checkbox" id="hs-role-cinder" checked> Cinder host</label>
+        <label><input type="checkbox" id="hs-sudo"> use sudo (without a password)</label>
+        <button class="primary" id="hs-save">Save the server</button>
+      </div>
+    </details>
+    <h3>Your servers</h3>
+    <div class="table-wrap"><table id="hs-table"><thead><tr><th>Name</th><th>Roles</th><th>Address</th><th>Login</th><th>Identity</th><th></th></tr></thead><tbody></tbody></table></div>
+    <h3>Are they ready?</h3>
+    <p class="muted">Checks the key login, Python, rights and tools, that each server sees both storage systems, and that the Cinder helper runs. It needs the "from" and "to" storage systems chosen in the safety checks. Press it again after a fix.</p>
     <div class="actions inline">
       <label><input type="checkbox" id="hs-bench"> also measure copy speed (reads 64 MiB)</label>
-      <button class="secondary" id="hs-check">Check the hosts</button>
+      <button class="secondary" id="hs-check">Check the servers</button>
       <span id="hs-status" class="muted"></span>
     </div>
     <div class="table-wrap"><table id="hs-checks"><thead><tr><th>Check</th><th>Result</th><th>What was seen</th><th>What to do</th></tr></thead><tbody></tbody></table></div>
   </section>
 
   <section id="tab-diagnostics" class="panel hidden">
-    <h2>Diagnostics</h2>
-    <p class="muted">If anything goes wrong, a <strong>support bundle</strong> holds everything needed to find the fault without access to this site: the journal, every step with its intent and result, every call to the cloud and to the hosts with the complete output, the log, and what each host reports about itself. OpenMove also writes one by itself when it halts or meets an unexpected error.</p>
+    <h2>Support</h2>
+    <p class="muted">If something goes wrong, a <strong>support bundle</strong> holds everything needed to find the fault without access to this site: the history, every step with its result, every call to the cloud and to the servers, the log, and what each server reports about itself. OpenMove also writes one by itself when it stops or meets an unexpected error. Send the bundle to whoever supports you.</p>
     <div class="actions inline">
-      <label>Redaction in the bundle
-        <select id="dg-level"><option value="standard">standard</option><option value="strict">strict</option><option value="none">none</option></select></label>
-      <label><input type="checkbox" id="dg-remote" checked> also collect from the registered hosts</label>
-      <button class="primary" id="dg-bundle">Create a support bundle</button>
-      <button class="secondary" id="dg-refresh">Refresh</button>
+      <button class="primary big" id="dg-bundle">Create a support bundle</button>
+      <button class="secondary" id="dg-refresh">Refresh the list</button>
     </div>
     <p id="dg-text" class="muted"></p>
     <div class="table-wrap"><table id="dg-bundles"><thead><tr><th>Bundle</th><th>Created</th><th>Size</th><th></th></tr></thead><tbody></tbody></table></div>
-    <h3>Redaction of the log</h3>
-    <p class="muted">The log and the call trace are written to the data folder as they happen. Choose whether they are written redacted. The bundle is redacted separately, when it is made.</p>
-    <div class="actions inline">
-      <label>Log redaction
-        <select id="dg-log-level"><option value="none">none</option><option value="standard">standard</option><option value="strict">strict</option></select></label>
-      <button class="secondary" id="dg-log-save">Save</button>
-    </div>
-    <h3>Decode a token</h3>
-    <p class="muted">A redacted bundle uses tokens such as <code>ip-3</code> or <code>uuid-0007</code>. The map from token to value stays on this site. Use this when the people who read the bundle ask what a token stands for.</p>
-    <div class="actions inline">
-      <label>Token<input id="dg-token" placeholder="uuid-0007"></label>
-      <button class="secondary" id="dg-decode">Decode</button>
-      <span id="dg-decoded" class="muted"></span>
-    </div>
-    <h3>Files</h3>
-    <div class="table-wrap"><table id="dg-logs"><thead><tr><th>Log file</th><th>Size</th></tr></thead><tbody></tbody></table></div>
     <p id="dg-folder" class="muted"></p>
+    <details class="more">
+      <summary>Options: how much is hidden in the bundle, and the log</summary>
+      <div class="actions inline">
+        <label>What the bundle hides
+          <select id="dg-level"><option value="standard">standard (addresses and ids)</option><option value="strict">strict (everything that could identify you)</option><option value="none">nothing</option></select></label>
+        <label><input type="checkbox" id="dg-remote" checked> also collect from the helper servers</label>
+      </div>
+      <div class="actions inline">
+        <label>What the log hides
+          <select id="dg-log-level"><option value="none">nothing</option><option value="standard">standard</option><option value="strict">strict</option></select></label>
+        <button class="secondary" id="dg-log-save">Save</button>
+      </div>
+      <h3>Decode a token</h3>
+      <p class="muted">A hidden bundle uses tokens such as <code>ip-3</code> or <code>uuid-0007</code>. The list that says what each token means stays on this computer. Use this when the people who read the bundle ask what a token stands for.</p>
+      <div class="actions inline">
+        <label>Token<input id="dg-token" placeholder="uuid-0007"></label>
+        <button class="secondary" id="dg-decode">Decode</button>
+        <span id="dg-decoded" class="muted"></span>
+      </div>
+      <h3>Log files</h3>
+      <div class="table-wrap"><table id="dg-logs"><thead><tr><th>Log file</th><th>Size</th></tr></thead><tbody></tbody></table></div>
+    </details>
   </section>
 
   <div id="wiz" class="wiz" aria-label="Steps">
@@ -407,6 +488,9 @@
     <button id="wiz-next" class="primary" type="button">Next</button>
   </div>
 </main>
+
+<dialog id="ask" class="ask"></dialog>
+<dialog id="help" class="ask help"></dialog>
 
 <footer>Copyright &copy; 2026 Eugene Beauzec and Obi1 - FZCO. All Rights Reserved. OpenStack&reg; is a trademark of the OpenInfra Foundation; OpenMove is not affiliated with it.</footer>
 <script src="/app.js"></script>
