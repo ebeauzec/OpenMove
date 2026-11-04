@@ -26,6 +26,7 @@ Every step is written against these. A step that cannot meet them stops and leav
 3. **Cutover.** The source record is frozen (`migration_status` `migrating`). For an attached volume, Nova's volume swap runs a hypervisor block copy under the running instance and calls Cinder's migration completion. For a detached volume, a final clone is copied and the completion is called directly.
 4. **Completion.** Cinder swaps the two records. The original UUID keeps its identity, gains the destination as its name id, takes the target volume type, keeps its attachments, and its snapshot rows resolve by name to the staged snapshots. The old record is deleted on the source back-end.
 5. **Field sync.** Until completion, fields a tenant can still change (name, description, bootable, metadata) are copied from the tenant's record to the destination record, so a tenant edit is not overwritten by the swap.
+6. **Pair check.** The swap writes the fields of the destination record over the tenant's record, so a size, owner or volume type that a tenant changed after the destination record was made would be written back. Cinder allows an extend, a transfer and a retype until the freeze. The source is therefore compared with what was staged at every sync tick, right before the freeze and again before the switch. A larger source before the freeze grows the staging volume; a different volume type gives the volume up; a change after the last recheck rolls back with nothing frozen. The destination record is made after the freeze from the frozen source, so the record itself cannot disagree with it.
 
 Nothing in Cinder or Nova is patched. Everything from the cutover on is the standard retype code path.
 
@@ -43,7 +44,7 @@ Nothing in Cinder or Nova is patched. Everything from the cutover on is the stan
 
 | Phase | Content |
 |---|---|
-| 0 | Lab validation of the full procedure (21 tests, T1 to T21). Gate G0. |
+| 0 | Lab validation of the full procedure (23 tests, T1 to T23). Gate G0. |
 | 1 | Discovery and triage: inventory, snapshot churn, attachments, classification, batch plan, `provider_id` repair. |
 | 2 | Preparation: target back-end and volume types, reference volume, compute connectivity, migration host, database backup, migration account, clone QoS, decisions. Gate G1. |
 | 3 | Class A: standard retype or migrate, with evidence. |
@@ -114,7 +115,7 @@ The check catalogue. Each check is a record with an ID, what it looked at, the e
 
 | ID | Check |
 |---|---|
-| S1 | Staging volume byte size equals the source size. |
+| S1 | Staging volume byte size equals the source size. A source extended during the copy grows the staging volume to match (before the freeze only). |
 | S2 | Each clone's size equals its snapshot's size; sizes never shrink along the chain. |
 | S3 | Every image compares identical to the staging volume, and the tail beyond a smaller image reads as zero. |
 | S4 | Target snapshot IDs equal the Cinder snapshot IDs (gate G2). |
@@ -141,7 +142,7 @@ The check catalogue. Each check is a record with an ID, what it looked at, the e
 | X3 | Snapshot chain on the array matches Cinder; a snapshot the tenant deleted after the freeze is expected and is destroyed; anything else fails the gate. |
 | X4 | Instance health: disk source on the new device, no block job, no guest I/O errors, all multipath paths active, persistent domain definition points at the new device. |
 | X5 | Create-from-snapshot test as admin succeeds on the target. |
-| X6 | Tenant-visible fields and snapshot list identical to the before capture. |
+| X6 | Fixed fields (id, creation time, snapshot origin, source volume, availability zone, multi-attach flag) identical to the before capture. Size, project, user and the snapshot list identical to the capture taken at the end of the freeze, because a tenant may extend, transfer or snapshot the volume until then. |
 | X7 | Safety snapshot taken on the target volume. |
 | X8 | After the soak period: source volume gone, source clones removed, quota counters reconciled. |
 

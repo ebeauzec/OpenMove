@@ -276,6 +276,97 @@ class Verification(StagedCase):
         self.assertGreaterEqual(before, 1)
 
 
+class PairChecks(StagedCase):
+    """Playbook v1.4 (items 1 and 2, T23): a tenant can extend, transfer or retype the volume, or snapshot it, until the freeze."""
+
+    def tenant_extends(self, gib=2):
+        self.vol["size"] = gib
+        self.mover.lv[SRC_VG]["volume-%s" % self.vid]["bytes"] = gib * 1024 ** 3
+
+    def run_to_cut_step(self, step):
+        self.engine.start(ids=[self.vid], thread=False)
+        self.drive("recheck", sign=True)
+        for _ in range(200):
+            if self.engine.sctx(self.vid).get("cut") == step:
+                return
+            self.engine.tick()
+            self.try_sign()
+            self.now += timedelta(seconds=320) if not self.gates_signed() else timedelta(0)
+        self.fail("the cutover never reached %s: %s" % (step, self.note()))
+
+    def test_a_volume_extended_during_the_sync_gets_a_larger_staging_volume_and_the_move_completes(self):
+        self.engine.start(ids=[self.vid], thread=False)
+        self.drive("recheck", sign=False)
+        self.tenant_extends(2)
+        self.drive("done", soak=True)
+        self.assertEqual(self.phase(), "done")
+        self.assertEqual(self.vol["size"], 2)
+        live = "volume-%s" % self.vol["os-vol-mig-status-attr:name_id"]
+        self.assertEqual(self.mover.lv[DST_VG][live]["bytes"], 2 * 1024 ** 3)
+        self.assertIn("lv.extend", [v for v, _ in self.mover.calls])
+        self.assertEqual(len(self.snap_tokens(DST_VG, live)), len(self.sids))           # the earlier images are kept
+        self.assertEqual(self.open_steps(), [])
+
+    def test_an_extend_is_never_a_shrink_and_the_mover_refuses_to_make_a_volume_smaller(self):
+        from openmove.connectors.ssh import SshError
+        self.engine.start(ids=[self.vid], thread=False)
+        self.drive("recheck", sign=False)
+        name = self.engine.sctx(self.vid)["stage"]["name"]
+        with self.assertRaises(SshError):
+            self.fab.adapter.stage_extend(DST_VG, name, 1)
+
+    def test_a_volume_extended_between_the_last_recheck_and_the_freeze_is_rolled_back_with_nothing_frozen(self):
+        self.run_to_cut_step("reconcile")
+        self.tenant_extends(2)
+        self.drive("done")
+        self.assertEqual(self.phase(), "done")
+        self.assertIn("extended after the last recheck", L.current(self.journal, self.vid)["result"])
+        self.assertNotIn("freeze", [v for v, _ in self.fab.helper.calls])
+        self.assertEqual([n for n in self.names(DST_VG)], [])
+        self.assertEqual(self.vol["size"], 2)
+        self.assertEqual(self.open_steps(), [])
+        if self.srv:
+            self.assertFalse(next(s for s in self.cloud.servers if s["id"] == self.srv)["locked"])
+
+    def test_a_volume_whose_type_was_changed_during_the_sync_is_given_up_before_anything_changes(self):
+        self.engine.start(ids=[self.vid], thread=False)
+        self.drive("recheck", sign=False)
+        self.vol["volume_type"] = "fast-2"
+        self.drive("aborted", sign=False)
+        self.assertIn("volume type was changed", L.current(self.journal, self.vid)["reason"])
+        self.assertEqual(self.cloud.posts, [])
+        self.assertEqual([n for n in self.names(DST_VG)], [])
+
+    def test_a_transfer_before_the_freeze_does_not_fail_the_post_check(self):
+        self.run_to_cut_step("reconcile")
+        self.vol["os-vol-tenant-attr:tenant_id"] = "other-project"
+        self.vol["user_id"] = "other-user"
+        self.drive("done", soak=True)
+        self.assertEqual(self.phase(), "done")
+        self.assertFalse(safety.halted(self.journal))
+        post = next(e for e in L.history(self.journal, self.vid) if e["phase"] == "postcheck")
+        self.assertTrue(post["ok"], [c for c in post["checks"] if not c["ok"]])
+        self.assertEqual(self.vol["os-vol-tenant-attr:tenant_id"], "other-project")
+
+    def test_a_transfer_after_the_freeze_capture_fails_the_post_check(self):
+        self.run_to_cut_step("sync_fields")
+        self.vol["os-vol-tenant-attr:tenant_id"] = "other-project"
+        self.drive(("postcheck", "done", "soak"), g4=False, sign=True)
+        post = next(e for e in L.history(self.journal, self.vid) if e["phase"] == "postcheck")
+        self.assertFalse(post["ok"])
+        self.assertIn("Same project", [c["name"] for c in post["checks"] if not c["ok"]])
+
+    def test_the_freeze_capture_is_kept_for_the_post_check(self):
+        self.whole_move()
+        frozen = self.engine.ev.load(self.vid, "freeze.json")
+        self.assertEqual(frozen["volume"]["id"], self.vid)
+        self.assertEqual(len(frozen["snapshots"]), len(self.sids))
+
+
+class PairChecksDetached(PairChecks):
+    attached = False
+
+
 class Rollbacks(StagedCase):
     def to_cutover_ready(self):
         self.engine.start(ids=[self.vid], thread=False)

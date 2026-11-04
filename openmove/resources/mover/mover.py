@@ -140,6 +140,20 @@ def v_lv_snapshot(a):
     return {"lv": lv_find(vg, name), "existed": False}
 
 
+def v_lv_extend(a):
+    """Grow a staging volume that OpenMove made (a tenant extended the source volume while it was being copied). Never shrinks."""
+    vg, name, size = name_ok(a["vg"], "volume group"), name_ok(a["name"], "name"), int(a["bytes"])
+    have = lv_ours(vg, name)
+    if have["bytes"] == size:
+        return {"lv": have, "existed": True}
+    if size < have["bytes"]:
+        raise MoverError("%s/%s has %d bytes; it is never made smaller (asked for %d)" % (vg, name, have["bytes"], size))
+    rc, out, err = run(["lvextend", "-L", "%db" % size, "%s/%s" % (vg, name)])
+    if rc != 0:
+        raise MoverError("lvextend failed: %s" % err.strip())
+    return {"lv": lv_find(vg, name), "existed": False}
+
+
 def v_lv_rename(a):
     vg, old, new = name_ok(a["vg"], "volume group"), name_ok(a["old"], "name"), name_ok(a["new"], "new name")
     if lv_find(vg, new):
@@ -569,7 +583,7 @@ def v_vg_free(a):
     return {"vg": vg, "bytes": int(float(size)), "free_bytes": int(float(free))}
 
 
-VERBS = {"probe": v_probe, "lv.list": v_lv_list, "lv.create": v_lv_create, "lv.snapshot": v_lv_snapshot, "lv.rename": v_lv_rename,
+VERBS = {"probe": v_probe, "lv.list": v_lv_list, "lv.create": v_lv_create, "lv.snapshot": v_lv_snapshot, "lv.rename": v_lv_rename, "lv.extend": v_lv_extend,
          "lv.remove": v_lv_remove, "lv.remove_source_snapshots": v_lv_remove_source_snapshots, "job.start": v_job_start,
          "job.status": v_job_status, "job.cancel": v_job_cancel, "cleanup": v_cleanup, "diag": v_diag, "bench": v_bench, "vg.free": v_vg_free}
 

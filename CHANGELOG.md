@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.2 (2026-11-04)
+
+### Changed
+- Playbook v1.4 reviewed against the engine (docs/PLAYBOOK_TRACE.md, section 'What changed in v1.4'). The staged engine now compares the source with what was staged at every sync tick, right before the freeze and before the switch: a volume extended during the copy grows the staging volume (new mover verb lv.extend, only on volumes OpenMove made, never smaller); a changed volume type gives the volume up; a size change after the last recheck rolls back with nothing frozen. The post-check compares size, project, user and the snapshot list with a capture taken at the end of the freeze (freeze.json) and the fixed fields with the capture before the cutover, so a tenant transfer or snapshot before the freeze no longer fails it. New Phase 0 test T23. The rollback clone text says it is a point in time. Safety row 54.
+
 ## 0.9.1 (2026-11-03)
 
 ### Added

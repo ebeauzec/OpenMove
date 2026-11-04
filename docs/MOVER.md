@@ -113,6 +113,7 @@ OpenMove sends the file once (its SHA-256 is checked on the host) to its own fol
 | `probe` | Python, user, tools present, free space, volume groups | nothing |
 | `lv.list` | Logical volumes (name, size, origin, tags, path) | nothing |
 | `lv.create`, `lv.snapshot`, `lv.rename` | Create the staging volume, snapshot it under the driver's name, rename it to the destination record's name | the staging volumes OpenMove makes |
+| `lv.extend` | Grow a staging volume OpenMove made, to the new size of the source (a tenant extended it during the copy). Idempotent. Never makes a volume smaller | only what carries the tag `openmove` |
 | `lv.remove` | Remove one volume OpenMove made, with the snapshots OpenMove made of it. A snapshot it did not make stops the removal | only what carries the tag `openmove` |
 | `lv.remove_source_snapshots` | After sign-off: remove named snapshots of one named origin | the only removal of something OpenMove did not create |
 | `vg.free` | Size and free space of a volume group | nothing |
@@ -210,6 +211,6 @@ Each failure is recorded in full: in the journal, in `logs/openmove.log`, and as
 
 ## 9. What this does not prove
 
-The staged method is proven against two LVM back-ends in the OpenStack lab and against the fake fabric (`tests/test_staged.py`, 42 tests for the order, every rollback, every failure injected, the reverse and the diagnostics). It is **not** proven on SolidFire, FlashArray, Queens or any customer cloud: those adapters and that proof need the real systems (`COVERAGE.md`). Tests T1 to T22 of the playbook are still done by people in a lab (`phase0`), and the recorded results are the gate G0 for a release.
+The staged method is proven against two LVM back-ends in the OpenStack lab and against the fake fabric (`tests/test_staged.py`, 42 tests for the order, every rollback, every failure injected, the reverse and the diagnostics). It is **not** proven on SolidFire, FlashArray, Queens or any customer cloud: those adapters and that proof need the real systems (`COVERAGE.md`). Tests T1 to T23 of the playbook are still done by people in a lab (`phase0`), and the recorded results are the gate G0 for a release.
 
 **Known limit: a volume that was rolled back is finished.** After R1 or R2 the volume ends in `done` (result "rolled back") and the lifecycle accepts nothing more for it (`lifecycle.enter`: "nothing more can be done with it"). Everything is back as it was, and the journal keeps the reason. To try the volume again after the cause is fixed, start it in a new run with a new journal (the lab driver does this with `--home=NAME`). A retry inside the same journal is a decision for the owner: it would let a person start a volume again without the old record being kept apart.

@@ -135,7 +135,7 @@ A volume that hosts something that may break (a legacy Windows server, no guest 
 | Reverse (per volume) | Puts a volume back with a retype back to its original type, locking its instance first. Needs a name and a reason |
 | Preview: put the whole run back | Reads the cloud and lists, for every cut-over volume, the calls a reverse would make and their undo. Changes nothing |
 | Put the whole run back | Reverses every cut-over volume of the run, each journaled and checked on its own. Needs a name and a reason |
-| Phase 0: the lab tests | The playbook's tests T1 to T22 and OpenMove's M1 to M4 as guided procedures. Per test: Record the result (pass or fail, your name, what you did and saw, at least 40 characters). The newest result counts |
+| Phase 0: the lab tests | The playbook's tests T1 to T23 and OpenMove's M1 to M4 as guided procedures. Per test: Record the result (pass or fail, your name, what you did and saw, at least 40 characters). The newest result counts |
 | Record gate G0 from these results | Two different people. Refused unless every test of the retype path has passed for this release. Tests of the staged method are listed but not required |
 | HALT (always visible) | Stops all changes at once. Needs a name and a reason. Resume needs a name and a reason |
 

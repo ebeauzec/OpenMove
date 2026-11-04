@@ -1,8 +1,8 @@
 {
-  "version": "0.9.1",
+  "version": "0.9.2",
   "major": 0,
   "minor": 9,
-  "patch": 1,
-  "date": "2026-11-03",
-  "notes": "Storage paths proven on a real virtual machine; lab VM scripts"
+  "patch": 2,
+  "date": "2026-11-04",
+  "notes": "Playbook v1.4: size, owner and type checks before the freeze"
 }

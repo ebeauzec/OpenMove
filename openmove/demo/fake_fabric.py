@@ -96,6 +96,17 @@ class FakeMover:
             raise SshError("%s/%s was not created by OpenMove (no 'openmove' tag): it is not touched" % (vg, origin))
         return {"lv": copy.deepcopy(self.add(vg, name, size, self.content[(vg, origin)], origin=origin)), "existed": False}
 
+    def v_lv_extend(self, a):
+        vg, name, size = a["vg"], a["name"], int(a["bytes"])
+        r = self.lv[vg].get(name)
+        if r is None or "openmove" not in r["tags"]:
+            raise SshError("%s/%s was not created by OpenMove (no 'openmove' tag): it is not touched" % (vg, name))
+        if size < r["bytes"]:
+            raise SshError("%s/%s has %d bytes; it is never made smaller (asked for %d)" % (vg, name, r["bytes"], size))
+        existed = size == r["bytes"]
+        r["bytes"] = size
+        return {"lv": copy.deepcopy(r), "existed": existed}
+
     def v_lv_rename(self, a):
         vg, old, new = a["vg"], a["old"], a["new"]
         if new in self.lv[vg]:

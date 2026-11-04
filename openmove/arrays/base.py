@@ -66,6 +66,10 @@ class Adapter:
     def stage_snapshot(self, backend, stage_name, snapshot_id, size_bytes):
         raise NotImplementedError
 
+    def stage_extend(self, backend, stage_name, size_bytes):
+        """Grow the staging volume to size_bytes (the tenant extended the source). Idempotent; never shrinks. Returns {'bytes', ...}."""
+        raise NotImplementedError
+
     def stage_rename(self, backend, stage_name, dest_id):
         """Give the staging volume the name the target driver derives for the destination record. Returns the new name."""
         raise NotImplementedError

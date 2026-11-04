@@ -37,6 +37,7 @@ GIB = 1024 ** 3
 CUT = ("lock", "rollback_clone", "reconcile", "freeze", "record", "verify_record", "sync_fields", "switch", "wait")
 SWITCH_TIMEOUT = timedelta(hours=6)       # a swap or completion that has not reported success by then halts for a person
 MAX_TRIES = 3                             # a mover job that died is started again this many times before the volume is given up
+FROZEN_FIELDS = ("os-vol-tenant-attr:tenant_id", "user_id")      # fields a tenant may change until the freeze (a transfer); compared with the capture at the end of the freeze
 FIELDS_EQUAL = ("project_id", "user_id", "display_name", "display_description", "size", "bootable", "created_at", "snapshot_id", "source_volid",
                 "availability_zone", "encryption_key_id", "multiattach")
 FINAL = ("available", "in-use")
@@ -88,7 +89,7 @@ class StagedMixin:
         for sid in sids:
             if not (servers.get(sid) or {}).get("locked"):
                 calls.append({"step": "lock", "what": "POST /servers/%s/action {\"lock\": null}" % sid, "undo": "unlock the instance"})
-        calls += [{"step": "rollback_clone", "what": "make a full copy of the source on %s for rollback (R2)" % be[0], "undo": "remove it"},
+        calls += [{"step": "rollback_clone", "what": "make a full copy of the source on %s for rollback (R2). It is a point in time: writes made after it was taken are not in it" % be[0], "undo": "remove it"},
                   {"step": "freeze", "what": "Cinder helper: set the volume to %s and migration_status migrating" % ("retyping/in-use" if sids else "maintenance/available"),
                    "undo": "unfreeze: restore the recorded status, previous_status and migration_status"},
                   {"step": "record_create", "what": "Cinder helper: create the destination record on %s with the target type" % be[1], "undo": "delete the destination record"},
@@ -257,7 +258,7 @@ class StagedMixin:
         leg = {"kind": "forward", "src": sp["source_backend"], "dst": sp["target_backend"], "dtype": sp["target_type"], "dtype_id": dtype_id, "dest_host": dest_host,
                "stype": sp["source_type"]}
         chain = [{"id": s["id"], "bytes": s["size"] * GIB, "state": "todo", "tries": 0} for s in sorted(snaps, key=lambda x: (x.get("created_at") or "", x["id"]))]
-        self.sset(vid, leg=leg, size_bytes=vol["size"] * GIB, chain=chain, gen=0, src_name_id=name_id_of(vol), dropped=[])
+        self.sset(vid, leg=leg, size_bytes=vol["size"] * GIB, chain=chain, gen=0, src_name_id=name_id_of(vol), dropped=[], pair_type=vol.get("volume_type"))
         L.enter(self.state.journal, vid, "validate", {"room_ok": True, "snapshots_now": len(snaps)}, now=self.clock(), rules=self.rules())
         self.snote(vid, "validated: %d snapshot(s) to rebuild on %s" % (len(chain), sp["target_backend"]))
 
@@ -416,6 +417,8 @@ class StagedMixin:
         ph, j = self.phase(vid), self.state.journal
         sp = dict(self.spec(vid, acts), staged=True)
         vol, snaps, servers = self.read_all(acts, vid)
+        if not self.align_size(vid, acts, ctx, vol):
+            return
         checks = plan.validate(vol, snaps, servers, sp)
         bad = [c["detail"] for c in checks if not c["ok"]]
         chain_ids = [c["id"] for c in ctx["chain"]]
@@ -461,6 +464,33 @@ class StagedMixin:
         unmet = [c["detail"] for c in L.readiness(j, vid, self._gate(), now, self.rules()) if not c["ok"] and not c.get("pending")]
         self.snote(vid, "recheck %s: %d snapshot(s), fingerprint %s%s" % ("passed" if ev["reconciled"] else "restarted (a snapshot was deleted)", len(snaps),
                                                                         ev["source_fingerprint"], ". Waiting for: " + "; ".join(unmet) if unmet else ""))
+
+    def align_size(self, vid, acts, ctx, vol):
+        """Playbook 5.4.1 and 5.8.3a (v1.4): a tenant can extend the volume, or change its type, until the freeze. Nothing is frozen yet, so the
+        run can follow. A larger source: grow the staging volume to match (the final copy and its compare cover the new region). A different
+        type: give the volume up (R1), because the way back would restore the wrong type. A smaller source: nothing explains it. Returns True
+        when the staging volume and the source agree."""
+        want, have = int(vol.get("size") or 0) * GIB, int(ctx["size_bytes"])
+        kind = ctx.get("pair_type")
+        if kind is not None and vol.get("volume_type") != kind:
+            self.s_abort(vid, "the volume type was changed from %s to %s after staging began: the way back would restore the wrong type. Start again" % (kind, vol.get("volume_type")))
+            return False
+        if want == have:
+            return True
+        if want < have:
+            self.s_abort(vid, "the source is %d bytes now and was %d bytes when staging began: a volume cannot shrink and nothing in the method explains it" % (want, have))
+            return False
+        stage, leg, fab = ctx.get("stage"), ctx["leg"], self.fabric()
+        if stage:
+            res = acts.op(vid, "stage_extend", {"on": leg["dst"], "volume": stage["name"], "from": have, "to": want}, {"undo": "none: the staging volume is removed or rebuilt on rollback"},
+                          lambda: fab.adapter.stage_extend(leg["dst"], stage["name"], want))
+            if res["bytes"] != want:
+                self.s_abort(vid, "the staging volume has %d bytes after the extend, the source %d (S1)" % (res["bytes"], want))
+                return False
+            self.sset(vid, stage=dict(stage, bytes=res["bytes"]))
+        self.sset(vid, size_bytes=want)
+        self.snote(vid, "the volume was extended during the copy (%d GiB to %d GiB): the staging volume was extended to match" % (have // GIB, want // GIB))
+        return False                     # the next tick records the new size in the rechecks
 
     def s_before_cutover(self, vid, acts, sp, vol, snaps, servers):
         j, gate = self.state.journal, self._gate()
@@ -572,6 +602,14 @@ class StagedMixin:
                 self.sset(vid, cut="stage_more")
                 return False
             return self.cut_failed(vid, "a tenant snapshot appeared before the freeze: %s" % ", ".join(new), rev) or False
+        vol = acts.volume(vid)
+        now_b, was_b = int(vol.get("size") or 0) * GIB, int(ctx["size_bytes"])
+        if now_b != was_b:
+            return self.cut_failed(vid, "the volume was %s after the last recheck (%d GiB, staged as %d GiB). Nothing is frozen yet. Start the volume again" % (
+                "extended" if now_b > was_b else "changed", now_b // GIB, was_b // GIB), rev) or False
+        if ctx.get("pair_type") is not None and not rev and vol.get("volume_type") != ctx["pair_type"]:
+            return self.cut_failed(vid, "the volume type was changed from %s to %s after staging began. Nothing is frozen yet. Start the volume again" % (
+                ctx["pair_type"], vol.get("volume_type")), rev) or False
         return True
 
     def cut_freeze(self, vid, acts, ctx, rev):
@@ -596,6 +634,10 @@ class StagedMixin:
         missing = [s["id"][:8] for s in snaps if s["id"] not in chain_ids]
         if missing:
             return self.cut_failed(vid, "a tenant snapshot raced the freeze (C7): %s" % ", ".join(missing), rev) or False
+        name = "freeze-reverse.json" if rev else "freeze.json"
+        if not self.ev.load(vid, name):
+            # Until the freeze a tenant may extend, transfer or snapshot the volume. The post-check compares those fields with this capture.
+            self.ev.save(vid, name, {"volume": vol, "snapshots": snaps, "at": self.clock().strftime("%Y-%m-%dT%H:%M:%SZ")})
         return True
 
     def cut_record(self, vid, acts, ctx, rev):
@@ -648,6 +690,9 @@ class StagedMixin:
     def cut_switch(self, vid, acts, ctx, rev):
         fab, leg = self.fabric(), ctx["leg"]
         vol, servers = self.read_cut(vid, acts)
+        if not ctx.get("swap_sent") and not ctx.get("completion_sent") and int(vol.get("size") or 0) * GIB != int(ctx["size_bytes"]):
+            return self.cut_failed(vid, "the volume is %s GiB now and %d GiB on the target: it changed after the freeze (the freeze blocks this, so someone changed it by hand)" % (
+                vol.get("size"), int(ctx["size_bytes"]) // GIB), rev) or False
         sids = plan.attached_servers(vol)
         if sids:
             if ctx.get("swap_sent"):
@@ -700,6 +745,11 @@ class StagedMixin:
         leg, fab = ctx["leg"], self.fabric()
         before = self.ev.load(vid, "before.json") or {}
         bvol = before.get("volume") or {}
+        # Two baselines (playbook 5.10.5, v1.4). The fixed fields are compared with the capture taken before the cutover. A tenant may extend,
+        # transfer or snapshot the volume until the freeze, so size, project, user and the snapshot list are compared with the capture taken
+        # at the end of the freeze.
+        frozen = self.ev.load(vid, "freeze-reverse.json" if rev else "freeze.json") or {}
+        fvol = frozen.get("volume") or bvol
         servers = {s: acts.server(s) for s in plan.attached_servers(vol)}
         snaps = acts.snapshots(vid)
         key = lambda x: sorted((a.get("server_id"), a.get("device")) for a in (x.get("attachments") or []))
@@ -710,12 +760,13 @@ class StagedMixin:
         add("X1 On the %s back-end with the %s type" % ("original" if rev else "target", "original" if rev else "target"), True,
             "%s, type %s, migration_status %s" % (plan.backend_of(vol.get("os-vol-host-attr:host")), vol.get("volume_type"), vol.get("os-vol-mig-status-attr:migstat")))
         add("Same status as before", vol.get("status") == bvol.get("status"), "%s now, %s before" % (vol.get("status"), bvol.get("status")))
-        add("Same size", vol.get("size") == bvol.get("size"), "%s GiB now, %s before" % (vol.get("size"), bvol.get("size")))
+        add("Same size", vol.get("size") == fvol.get("size"), "%s GiB now, %s at the freeze" % (vol.get("size"), fvol.get("size")))
         add("Same attachments", key(vol) == key(bvol), "%d now, %d before" % (len(key(vol)), len(key(bvol))))
         add("Same bootable flag", vol.get("bootable") == bvol.get("bootable"), "%s now, %s before" % (vol.get("bootable"), bvol.get("bootable")))
         from .runner import IDENTITY_FIELDS
         for label, field in IDENTITY_FIELDS:
-            add("Same %s" % label, vol.get(field) == bvol.get(field), "%s now, %s before" % (vol.get(field), bvol.get(field)))
+            base, when = (fvol, "at the freeze") if field in FROZEN_FIELDS else (bvol, "before")
+            add("Same %s" % label, vol.get(field) == base.get(field), "%s now, %s %s" % (vol.get(field), base.get(field), when))
         for sid, s in servers.items():
             add("Instance %s is running" % sid, (s or {}).get("status") == "ACTIVE", (s or {}).get("status") or "unreadable")
         try:
@@ -728,11 +779,15 @@ class StagedMixin:
                 else "Cinder has snapshot(s) the array lacks: %s" % ", ".join(x[:8] for x in lacking))
         except Exception as exc:
             add("X3 The snapshot chain on the array matches Cinder", False, "could not read the array: %s" % exc)
-        was = {s["id"] for s in (before.get("snapshots") or [])}
+        was = {s["id"] for s in (frozen.get("snapshots") or before.get("snapshots") or [])}
         if not rev:
-            gone = sorted(was - {s["id"] for s in snaps})
+            now_ids = {s["id"] for s in snaps}
+            gone = sorted(was - now_ids)
+            made = sorted(now_ids - was)
             deleted_by_tenant = set(ctx.get("dropped", []))
-            add("X6 The snapshot list is as before", not (set(gone) - deleted_by_tenant), "%d before, %d now%s" % (len(was), len(snaps), "; tenant deletions: %d" % len(gone) if gone else ""))
+            # A snapshot made after the switch is the tenant's and is not a failure: it is reported, not counted.
+            add("X6 The snapshot list is as at the freeze", not (set(gone) - deleted_by_tenant), "%d at the freeze, %d now%s%s" % (
+                len(was), len(snaps), "; tenant deletions: %d" % len(gone) if gone else "", "; made since the freeze: %d" % len(made) if made else ""))
         ok = all(c["ok"] for c in checks)
         self.ev.save(vid, "after-reverse.json" if rev else "after.json", {"volume": vol, "servers": servers, "snapshots": snaps, "checks": checks})
         if rev:

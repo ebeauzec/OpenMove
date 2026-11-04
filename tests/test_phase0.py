@@ -26,8 +26,8 @@ class PhaseZeroTests(unittest.TestCase):
 
     def test_the_catalogue_has_the_playbook_tests_and_ours(self):
         ids = [t["id"] for t in phase0.tests()]
-        self.assertEqual(ids[:22], ["T%d" % i for i in range(1, 23)])
-        self.assertEqual(ids[22:], ["M1", "M2", "M3", "M4"])
+        self.assertEqual(ids[:23], ["T%d" % i for i in range(1, 24)])
+        self.assertEqual(ids[23:], ["M1", "M2", "M3", "M4"])
         for t in phase0.tests():
             self.assertTrue(t["scope"] in ("retype", "staged") and t["title"] and t["proves"] and t["pass"] and t["how"], t["id"])
         self.assertIn("T22", self.required())                          # the lock test of playbook v1.3 is needed for the retype path

@@ -58,7 +58,7 @@ CHECKS = [
     ("V10", "volume", "Drift: volumes created since the previous inventory are found", "api"),
     ("V11", "volume", "Workload risk: a volume hosting something that may break (for example a legacy Windows guest) is not moved until two people clear it", "api"),
 
-    ("S1", "staging", "Staging volume byte size equals the source size", "tgt_array"),
+    ("S1", "staging", "Staging volume byte size equals the source size (a source extended during the copy extends the staging volume)", "tgt_array"),
     ("S2", "staging", "Each clone's size equals its snapshot's size; sizes never shrink along the chain", "src_array"),
     ("S3", "staging", "Every image compares identical to the staging volume", "migration_host"),
     ("S4", "staging", "Target snapshot IDs equal the Cinder snapshot IDs (gate G2)", "tgt_array"),
@@ -77,7 +77,7 @@ CHECKS = [
     ("X3", "post", "Snapshot chain on the array matches Cinder", "tgt_array"),
     ("X4", "post", "Instance health: disk source on the new device, no block job, all multipath paths active", "compute_host"),
     ("X5", "post", "Create-from-snapshot test as admin succeeds on the target", "api"),
-    ("X6", "post", "Tenant-visible fields and snapshot list identical to the before capture", "api"),
+    ("X6", "post", "Fixed fields identical to the before capture; size, project, user and snapshot list identical to the capture at the end of the freeze", "api"),
     ("X7", "post", "Safety snapshot taken on the target volume", "tgt_array"),
     ("X8", "post", "After the soak period: source volume gone, source clones removed, quota counters reconciled", "api,src_array"),
 ]

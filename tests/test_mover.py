@@ -133,6 +133,7 @@ class RuleTests(MoverCase):
     def test_unsafe_names_and_job_ids_are_refused(self):
         self.assertIn("not a safe name", self.refused("lv.create", {"vg": "vg0", "name": "../etc", "bytes": 10}))
         self.assertIn("not a safe name", self.refused("lv.remove", {"vg": "vg0 -f", "name": "x"}))
+        self.assertIn("not a safe name", self.refused("lv.extend", {"vg": "vg0", "name": "../etc", "bytes": 10}))
         self.assertIn("not a job id", self.refused("job.status", {"job": "../../x"}))
 
     def test_an_unknown_verb_and_a_job_that_does_not_exist_are_refused_with_a_reason(self):

@@ -99,6 +99,11 @@ class LvmAdapter(Adapter):
         lv = res["lv"]
         return {"path": lv["path"], "bytes": lv["bytes"], "name": lv["name"], "vg": lv["vg"], "existed": res["existed"]}
 
+    def stage_extend(self, backend, stage_name, size_bytes):
+        res = self.mover.mover("lv.extend", {"vg": self.vg_of(backend), "name": stage_name, "bytes": int(size_bytes)})
+        lv = res["lv"]
+        return {"path": lv["path"], "bytes": lv["bytes"], "name": lv["name"], "vg": lv["vg"], "existed": res["existed"]}
+
     def stage_rename(self, backend, stage_name, dest_id):
         res = self.mover.mover("lv.rename", {"vg": self.vg_of(backend), "old": stage_name, "new": self.volume_lv(dest_id)})
         lv = res["lv"]

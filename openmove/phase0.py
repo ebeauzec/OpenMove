@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Eugene Beauzec and Obi1 - FZCO. All Rights Reserved.
 # Proprietary software; see LICENSE.
-"""Phase 0 as guided procedures: the playbook's lab tests (T1 to T22) and the tests OpenMove adds (M1 to M4), with a recorded result for each.
+"""Phase 0 as guided procedures: the playbook's lab tests (T1 to T23) and the tests OpenMove adds (M1 to M4), with a recorded result for each.
 
 OpenMove cannot run these tests: they need real hosts, arrays and people. It lists each test (what it proves, what passing looks like, how to
 do it), records the result a named person gives with their evidence, and refuses to record gate G0 from the tests until every test the

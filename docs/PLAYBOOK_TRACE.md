@@ -1,6 +1,6 @@
-# Playbook v1.2 and v1.3: what OpenMove covers, step by step
+# Playbook v1.2 to v1.4: what OpenMove covers, step by step
 
-The question: does OpenMove contain every step of the owner's playbook (runbook v1.2, and v1.3 which added the second review round)? **No.** This page shows, for each phase and step, what exists today. It does not round up. The step numbers are the same in both versions; the changes in v1.3 are listed in their own section below.
+The question: does OpenMove contain every step of the owner's playbook (runbook v1.2, v1.3 which added the second review round, and v1.4 which added the third)? **No.** This page shows, for each phase and step, what exists today. It does not round up. The step numbers are the same in both versions; the changes in v1.3 and v1.4 are listed in their own sections below.
 
 The playbook is the authority. `MIGRATION_METHOD.md` is the working summary. This page is the audit of the tool against it.
 
@@ -20,7 +20,7 @@ The playbook is the authority. `MIGRATION_METHOD.md` is the working summary. Thi
 |---|---|
 | Method, classes A to E, check catalogue, gates, rollback rules, failure modes (documents) | written |
 | Discovery, inventory, classification, pre-flight checks, reports, the rules that order a migration, the safety layer, the gated GUI wizard | **built** (mock cloud and demo; the read paths and the gates also run against the lab) |
-| Phase 0: the lab tests T1 to T22 as guided, recorded procedures | **built** as a guide and a record (a person runs each test); gate G0 can be recorded from the results |
+| Phase 0: the lab tests T1 to T23 as guided, recorded procedures | **built** as a guide and a record (a person runs each test); gate G0 can be recorded from the results |
 | Phase 3 (retype of class A and B) and rollback R3 as actions that change the cloud | **built, lab-proven** (`openmove/engine`): detached, attached and boot volumes, the way back, and the failures listed in `LAB.md`. Never run on a customer cloud. |
 | Phase 4 (class B) as the engine's wait for snapshots to rotate away | **built** against the mock cloud; the lab has no rotating snapshots yet |
 | Phase 5 (class C) and the rollbacks R1, R2 as actions that change the cloud | **Built** (`engine/staged.py`), run against the real lab on LVM back-ends. **Not built**: the SolidFire and FlashArray adapters; nothing has run on those arrays or on Queens. |
@@ -31,7 +31,7 @@ The playbook is the authority. `MIGRATION_METHOD.md` is the working summary. Thi
 
 | Playbook | OpenMove | Status |
 |---|---|---|
-| Tests T1 to T22 (T22 is new in v1.3: the instance lock is read and respected) | **Guided procedures** on the Move step (`phase0.py`, `resources/phase0_tests.json`): each test with what it proves, what passing looks like and how to do it, plus four OpenMove adds (M1 to M4). A person runs a test and records the result with a name and evidence. Tests of the staged method are listed, not required. A validation can be recorded by two different people (`POST /api/validation`) and check P16 blocks every changing step until it is; with `from_tests` it is refused unless every test of the retype path has passed. OpenMove cannot run the tests itself: they need real hosts and people. T22, T8, M1, M2, M3 and M4 were run in the lab (see "What the lab showed") | **Built** as guide and record; the tests are still run by people |
+| Tests T1 to T23 (T22 is new in v1.3: the instance lock is read and respected; T23 is new in v1.4: a change between staging and the swap) | **Guided procedures** on the Move step (`phase0.py`, `resources/phase0_tests.json`): each test with what it proves, what passing looks like and how to do it, plus four OpenMove adds (M1 to M4). A person runs a test and records the result with a name and evidence. Tests of the staged method are listed, not required. A validation can be recorded by two different people (`POST /api/validation`) and check P16 blocks every changing step until it is; with `from_tests` it is refused unless every test of the retype path has passed. OpenMove cannot run the tests itself: they need real hosts and people. T22, T8, M1, M2, M3 and M4 were run in the lab (see "What the lab showed") | **Built** as guide and record; the tests are still run by people |
 | Gate G0, second person signs | The pre-flight gate takes two sign-offs. G0 itself is the P16 check. | **Check only** |
 
 ## Phase 1: discovery and triage
@@ -159,6 +159,19 @@ The second review round (v1.2 to v1.3) accepted the 13 answers of the first roun
 | `pure_connected` column order; `user_friendly_names no`; `70_cleanup.sh` bypassed the dry run; the unfreeze restored `NULL`; `MODE=migrate` on a detached volume needs `--lock-volume` | Scripts and host settings of the staged method. The host settings are items for the migration host check (P8) | **Not applicable** to the retype path |
 | The compare costs two or three times the I/O | Staged method only | **Not applicable** |
 | Keep OpenMove out of the critical path | A scoping choice. The playbook, its scripts and Phase 0 do not depend on OpenMove | **Owner decision** |
+
+## What changed in v1.4
+
+The third review round (v1.3 to v1.4) confirmed all nine script items of v1.3 and the R3.5 correction, and raised three new items. The playbook's author checked them against the scripts and the Queens source: two hold in part, one is accepted. The sources are the v1.4 runbook and its script bundle; the playbook is the authority. What each item means for OpenMove:
+
+| v1.4 item | In OpenMove | Status |
+|---|---|---|
+| 1. The tenant compare false-fails when a tenant snapshots the volume before the freeze; the before capture must be kept once, and size, owner and snapshots compared with a second capture taken at the end of the freeze (Steps 5.1.3 and 5.10.5, Appendix E) | The engine saves the before capture once (`before.json`, when the cutover starts) and a second capture at the end of the freeze (`freeze.json`, `freeze-reverse.json` for a reverse). The post-check compares the fixed fields (id, creation time, snapshot origin, source volume, availability zone, multi-attach flag) with the first and size, project, user and the snapshot list with the second. A snapshot made after the switch is reported, not counted as a failure, so it does not halt the run | **Built**, `test_staged` (PairChecks) |
+| 2. Nothing checks SRC, the staging volume and NEW between script 10 and the swap: extend, transfer and retype are allowed until the freeze, and the swap writes the old size, owner and type back (Step 5.8.3a, Steps 5.4.1, T23) | OpenMove makes the destination record after the freeze, from the frozen source, so the record cannot disagree with the source the way the playbook's script 30 record can. What it did lack was a check between the last recheck and the freeze. Now: the size and the volume type are compared with what was staged at every sync tick; a larger source grows the staging volume (`lv.extend`); a different type gives the volume up (R1); a change after the last recheck rolls back (R2) with nothing frozen; the size is compared again before the switch. A transfer is tolerated, because the record takes the owner from the frozen source and the post-check uses the freeze capture | **Built**; not proven on a FlashArray: the Purity extend form (`purevol setattr --size`) is for T23, and only the LVM adapter exists |
+| 3. R3.4: the safety copy is a point in time; writes after it are not in it | The dry run and the reverse preview say that the rollback clone and the safety copy are a point in time: writes made after it was taken are not in it | **Recorded** |
+| New Phase 0 test T23 (a change between staging and the swap) | Listed as a guided procedure for the staged method | **Built** as a guide and record |
+
+Not taken over, because the tool is built differently: the bundle's shell checks (`verify_src_new`, `size_action`, `sf_size_matches`, `capture_before`, `tenant_compare`). Their intent is carried by the engine checks above; the shell scripts are the playbook's own tool and stay in the bundle.
 
 ## What the lab showed (real Cinder and Nova, not the mock)
 
