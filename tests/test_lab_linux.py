@@ -247,6 +247,58 @@ class DeployTests(LinuxBase):
         self.assertFalse(self.calls)
 
 
+class GuestStartTests(unittest.TestCase):
+    """After a restart a start request can be lost (Nova keeps the task "powering-on", Horizon says "starting"): lab.py up must notice and start the guest again."""
+
+    def make_cloud(self, lose_first):
+        outer = self
+
+        class Cloud:
+            def __init__(self, cfg):
+                outer.log = []
+                outer.servers = {"a": {"id": "a", "name": "lab-srv-1", "status": "SHUTOFF", "OS-EXT-STS:task_state": "powering-on", "OS-EXT-STS:power_state": 4, "updated": "2020-01-01T00:00:00Z"},
+                                 "b": {"id": "b", "name": "lab-srv-off-1", "status": "SHUTOFF", "OS-EXT-STS:task_state": None, "OS-EXT-STS:power_state": 4, "updated": "2020-01-01T00:00:00Z"}}
+
+            def call(self, method, service, path, body=None, soft=False):
+                if path.startswith("/os-services"):
+                    return {"services": [{"state": "up", "status": "enabled"}]}
+                if path.startswith("/servers/detail"):
+                    return {"servers": [dict(v) for v in outer.servers.values()]}
+                if path.startswith("/servers/") and body is not None or (body is None and path.endswith("/action")):
+                    sid = path.split("/")[2]
+                    outer.log.append((sid, sorted(body)[0] if body else "os-start"))
+                    sv = outer.servers[sid]
+                    if body and "os-resetState" in body:
+                        sv["OS-EXT-STS:task_state"] = None
+                        sv["status"] = "ACTIVE"
+                    elif not sv["OS-EXT-STS:task_state"]:
+                        sv["status"], sv["OS-EXT-STS:power_state"] = "ACTIVE", 1
+                    return {}
+                if path.startswith("/servers/"):
+                    return {"server": dict(outer.servers[path.split("/")[2]])}
+                raise AssertionError(path)
+        return Cloud
+
+    def test_a_guest_stuck_in_a_task_is_reset_and_started_again(self):
+        import io
+        import sys
+        from contextlib import redirect_stdout
+        tool = load_tool()
+        sys.path.insert(0, str(ROOT / "tools" / "lab"))
+        import seed
+        os.environ["OPENMOVE_LAB_DIR"] = tempfile.mkdtemp()
+        self.addCleanup(os.environ.pop, "OPENMOVE_LAB_DIR", None)
+        (Path(os.environ["OPENMOVE_LAB_DIR"]) / "lab-secret.json").write_text(json.dumps({"password": "unused-test-value"}), encoding="utf-8")
+        (Path(os.environ["OPENMOVE_LAB_DIR"]) / "lab.json").write_text(json.dumps({"auth_url": "http://127.0.0.1:1/identity"}), encoding="utf-8")
+        with mock.patch.object(seed, "Cloud", self.make_cloud(True)), mock.patch.object(tool.time, "sleep", lambda s: None), redirect_stdout(io.StringIO()) as out:
+            rc = tool.ensure_guests()
+        self.assertEqual(rc, 0, out.getvalue())
+        self.assertEqual(self.log[0][0], "a")
+        self.assertEqual([k for sid, k in self.log if sid == "a"][:2], ["os-resetState", "reboot"])
+        self.assertNotIn("b", [sid for sid, k in self.log])                 # a guest that the catalogue keeps stopped is left alone
+        self.assertEqual(self.servers["a"]["status"], "ACTIVE")
+
+
 class ScriptTests(unittest.TestCase):
     def test_the_scripts_have_unix_line_endings_and_the_copyright_notice(self):
         for name in SCRIPTS:

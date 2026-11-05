@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.15.2 (2026-11-05)
+
+### Fixed
+- After a lab restart a start request could be lost: Nova kept 11 guests in the task powering-on (Horizon: starting) while libvirt had them shut off. lab.py up now notices a stale task, resets it and starts the guest again (three rounds). In the test lab the safety checks page now shows the lab's own validate, confirm and approve button where the failed lab validation is, instead of only in a closed section at the bottom.
+
+### Fixed (detail)
+- Found on the lab: after the lab was started again, 11 guests stayed in the task `powering-on` for ever (Horizon: "starting") and libvirt never saw a start. The request had gone to nova-compute before it was consuming messages; Nova reported the service "up" already. `ensure_guests` (`tools/lab/lab.py`) now reads the task: a task older than two minutes, or still there after a round of two minutes, is reset (`os-resetState` to active) and the guest is hard-rebooted, in up to three rounds, and the command says which guests did not start. Done by hand on the 11 guests: all running after about 50 seconds.
+- The safety checks page in the test lab: a card with **Test lab: validate, confirm and approve** appears under the three lines, whenever the gate is not approved. The button was only in the closed "Shortcuts" section at the bottom, so a failed "Lab validation (gate G0)" (the journal was new, so no validation was recorded) had no visible way forward. It is the same button and the same rules: any other failed check still blocks.
+- Test: `tests/test_lab_linux.py` has a guest-start test with a fake cloud (lost start, reset, start again; the guests the catalogue keeps stopped are left alone).
+
+### Not done, and not proven
+- The retry was proven on the 11 stuck guests by the same reset and reboot, not by a new restart of the lab. The new card was not looked at in a browser against the lab (syntax checked only).
+
 ## 0.15.1 (2026-11-05)
 
 ### Fixed

@@ -977,6 +977,13 @@
     line(!g.open_items.length, g.open_items.length ? plural(g.open_items.length, 'check') + ' need a person to look and confirm.' : 'Every check that needs a person has been confirmed.');
     line(g.status === 'approved', g.status === 'approved' ? 'Two different people have approved.' : 'Two different people must approve (below).');
     v.appendChild(todo);
+    if (lastStatus && lastStatus.lab && g.status !== 'approved') {         // the test lab has its own approval; it used to sit in a closed section at the bottom of the page
+      var lb = el('button', { class: 'primary', type: 'button', text: 'Test lab: validate, confirm and approve' });
+      lb.addEventListener('click', function () { $('pf-lab-approve').click(); });
+      v.appendChild(el('div', { class: 'todo-card' }, [el('span', { class: 'atype atype-approval', text: 'Test lab shortcut' }),
+        el('div', { class: 'todo-title', text: 'This is the test lab: one press does the approval of the lab.' }),
+        el('div', { class: 'todo-text', text: 'It records the lab validation of this OpenStack release (the check "Lab validation (gate G0)"), confirms the items that need a person, and approves as two lab users. Any other failed check still blocks it. It is not a customer approval.' }), lb]));
+    }
     v.appendChild(el('p', { class: 'muted', text: c.admitted.length + ' of ' + plural(c.volumes_total, 'volume') + ' can be moved. ' + (c.access === 'full'
       ? 'OpenMove can reach the cloud, the helper servers and the arrays, so volumes with long-lived snapshots can be moved too.'
       : 'OpenMove can reach the OpenStack cloud only.' + (c.no_mover && c.no_mover.length ? ' ' + plural(c.no_mover.length, 'volume') + ' with long-lived snapshots stay behind: they need a helper server (see "Helper servers").' : '')) }));

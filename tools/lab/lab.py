@@ -124,19 +124,49 @@ def ensure_guests():
             print("the compute service is not up after 5 minutes: the lab guests were not started")
             return 1
         print("the compute service is up")
+        # A start request sent while nova-compute was only just starting can be lost: Nova then keeps the guest in the task "powering-on" for ever (Horizon: "starting")
+        # and libvirt never sees a start. So: send the start, give it two minutes, and when a guest is still not running, reset its stale task and start it again (three rounds).
+        for attempt in (1, 2, 3):
+            servers = c.call("GET", "compute", "/servers/detail?all_tenants=1")["servers"]
+            want = [s for s in servers if s["name"].startswith("lab-srv-") and not s["name"].startswith(("lab-srv-off-", "lab-srv-paused-", "lab-srv-susp-"))]
+            todo = [s for s in want if s.get("OS-EXT-STS:power_state") != 1 or s["status"] != "ACTIVE"]
+            if not todo:
+                print("lab guests running: %d of %d%s" % (len(want), len(want), "" if attempt == 1 else " (after %d round%s)" % (attempt - 1, "" if attempt == 2 else "s")))
+                return 0
+            print("starting %d lab guest%s (round %d)" % (len(todo), "" if len(todo) == 1 else "s", attempt))
+            for s in todo:
+                path = "/servers/%s/action" % s["id"]
+                if s.get("OS-EXT-STS:task_state") and (attempt > 1 or _stale(s)):          # a task that is old, or still there after a round: the request was lost
+                    c.call("POST", "compute", path, {"os-resetState": {"state": "active"}}, soft=True)
+                    c.call("POST", "compute", path, {"reboot": {"type": "HARD"}}, soft=True)
+                    continue
+                act = {"os-start": None} if s["status"] == "SHUTOFF" and not s.get("OS-EXT-STS:task_state") else {"reboot": {"type": "HARD"}}
+                c.call("POST", "compute", path, act, soft=True)
+            for _ in range(24):                                              # two minutes
+                time.sleep(5)
+                if all(_running(c, s["id"]) == "yes" for s in todo):
+                    break
         servers = c.call("GET", "compute", "/servers/detail?all_tenants=1")["servers"]
-        want = [s for s in servers if s["name"].startswith("lab-srv-") and not s["name"].startswith(("lab-srv-off-", "lab-srv-paused-", "lab-srv-susp-"))]
-        todo = [s for s in want if s.get("OS-EXT-STS:power_state") != 1 or s["status"] != "ACTIVE"]
-        for s in todo:
-            act = {"os-start": None} if s["status"] == "SHUTOFF" else {"reboot": {"type": "HARD"}}
-            c.call("POST", "compute", "/servers/%s/action" % s["id"], act, soft=True)
-        for s in todo:
-            c.wait("server " + s["name"], lambda i=s["id"]: _running(c, i), ("yes",), (), 300)
-        print("lab guests running: %d of %d (%d started now)" % (len(want), len(want), len(todo)))
+        left = [s["name"] for s in servers if s["name"].startswith("lab-srv-") and not s["name"].startswith(("lab-srv-off-", "lab-srv-paused-", "lab-srv-susp-"))
+                and (s.get("OS-EXT-STS:power_state") != 1 or s["status"] != "ACTIVE")]
+        if left:
+            print("these lab guests did not start after three rounds: %s" % ", ".join(sorted(left)))
+            return 1
+        print("lab guests running")
         return 0
     except (Exception, SystemExit) as exc:
         print("could not check the lab guests: %s" % exc)
         return 1
+
+
+def _stale(s, seconds=120):
+    """A task older than this is a request that was lost (the compute service restarted before it took the message)."""
+    from datetime import datetime, timezone
+    try:
+        age = (datetime.now(timezone.utc) - datetime.strptime(s["updated"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)).total_seconds()
+    except (KeyError, ValueError, TypeError):
+        return False
+    return age > seconds
 
 
 def _running(c, sid):

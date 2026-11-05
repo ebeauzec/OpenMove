@@ -1,8 +1,8 @@
 {
-  "version": "0.15.1",
+  "version": "0.15.2",
   "major": 0,
   "minor": 15,
-  "patch": 1,
+  "patch": 2,
   "date": "2026-11-05",
-  "notes": "Cinder's version document (HTTP 300) is read, so the release is detected exactly"
+  "notes": "Lab: guests whose start was lost are started again; the safety checks page shows the lab approval"
 }
