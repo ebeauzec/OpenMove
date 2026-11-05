@@ -297,51 +297,76 @@
   <section id="tab-live" class="panel hidden">
     <h2>Progress</h2>
     <div id="live-now" class="livenow hidden" aria-live="polite"></div>
-    <details id="stage-help" class="stagehelp">
-      <summary>What do the stages and the approvals mean?</summary>
-      <h4>The stages of a volume</h4>
-      <dl>
-        <dt>Waiting to start</dt><dd>The volume is chosen but has no free place yet. At most the number set under "Volumes at once" are worked on together; the next one starts the moment a place is free.</dd>
-        <dt>Being copied and checked</dt><dd>OpenMove prepares the volume on the new storage, copies the data and compares it with the original, more than once. The original is not changed.</dd>
-        <dt>Being switched</dt><dd>The short moment when the volume is pointed at the new storage. It starts only after the approvals below and your release.</dd>
-        <dt>Switched, being verified</dt><dd>The volume now lives on the new storage. A second person confirms it works (the third approval).</dd>
-        <dt>In the safety period</dt><dd>The volume works on the new storage and the old copy is kept for a number of days (7 by default) so that you can go back. Nothing is needed from you. It does not take one of the places.</dd>
-        <dt>Finished</dt><dd>The safety period is over. The volume is done.</dd>
-        <dt>Stopped or put back</dt><dd>Something was wrong, or a person stopped it. The volume is back where it was, with its data intact.</dd>
-      </dl>
-      <h4>The three approvals by a second person</h4>
-      <dl>
-        <dt>1. The copy is correct (also called G2)</dt><dd>The copy on the new storage was built and compared with the original: every image, every snapshot, in the right order.</dd>
-        <dt>2. Ready to switch (also called G3)</dt><dd>The new record exists, the original is frozen, a way back is prepared, and the server using the volume is locked. After this approval, the next step is the switch.</dd>
-        <dt>3. The switch worked (also called G4)</dt><dd>After the switch, the volume was checked on the new storage and works.</dd>
-      </dl>
-      <p>The first two approvals are given together (the button "Approve before switching"), then you press "Release" to allow the switch. The third is the button "Approve the result". The person who started the move cannot approve: another person must.</p>
-    </details>
     <div id="live-note" class="banner warn static"></div>
     <div class="actions inline">
       <button class="primary hidden" id="live-start">Start the simulated move</button>
       <button class="secondary hidden" id="live-stop">Stop the simulation</button>
       <span id="live-status" class="muted"></span>
     </div>
-    <div class="live-top">
-      <div><div class="k">Overall progress</div><div class="bar big"><span id="live-fill"></span></div><div id="live-pct" class="v"></div></div>
-      <div id="live-cards" class="cards"></div>
+
+    <h3>Where every volume stands</h3>
+    <p class="muted" id="live-total"></p>
+    <div class="gtiles" id="live-tiles"></div>
+    <p class="muted small">Every volume is in exactly one of these five places. Click a place to list only its volumes; click it again to list all.</p>
+
+    <h3>What you need to do</h3>
+    <div id="todo-none" class="todo-none">Nothing. No volume is waiting for a person. OpenMove carries on by itself.</div>
+    <div id="todo-g23" class="todo-card hidden">
+      <span class="atype atype-approval">Approval by a second person</span>
+      <div class="todo-title" id="todo-g23-t"></div>
+      <div class="todo-text">They are copied and checked. A second person must look at them and approve before they can be switched. Open the volumes first if you want to see what was checked.</div>
+      <button class="primary" id="sign-g23">Approve before switching</button>
     </div>
-    <h3>Volumes</h3>
-    <div class="actions inline"><button class="primary hidden" id="live-release">Release all volumes that are ready to switch</button><span id="live-ready" class="muted"></span></div>
+    <div id="todo-release" class="todo-card hidden">
+      <span class="atype atype-release">Release by you</span>
+      <div class="todo-title" id="todo-release-t"></div>
+      <div class="todo-text">They are approved. Nothing is switched until you release them. After the release OpenMove switches them by itself. </div>
+      <button class="primary" id="live-release">Release all volumes that are ready to switch</button>
+    </div>
+    <div id="todo-g4" class="todo-card hidden">
+      <span class="atype atype-approval">Approval by a second person</span>
+      <div class="todo-title" id="todo-g4-t"></div>
+      <div class="todo-text">They now live on the new storage. A second person must confirm that they work there. Then the safety period starts.</div>
+      <button class="primary" id="sign-g4">Approve the result</button>
+    </div>
+    <div id="todo-decide" class="todo-card hidden">
+      <span class="atype atype-decision">Your decision</span>
+      <div class="todo-title" id="todo-decide-t"></div>
+      <div class="todo-text">Each one is where it was, with its data intact. Read the reason on its line. Then fix the cause and move it again, or leave it where it is.</div>
+      <button class="secondary" id="todo-decide-go">Show these volumes</button>
+    </div>
     <div class="actions inline" id="live-sign">
-      <button class="secondary hidden" id="sign-g23">Approve before switching</button>
-      <button class="secondary hidden" id="sign-g4">Approve the result</button>
       <button class="secondary hidden" id="sign-demo">Demo: a made-up second person approves</button>
       <span id="sign-status" class="muted"></span>
     </div>
-    <p class="muted">Click a volume to see exactly what is being done to it.</p>
-    <div class="table-wrap"><table id="live-table"><thead><tr><th>Volume</th><th>Name</th><th>Group</th><th>GiB</th><th>Stage</th><th>Progress</th><th>Note</th></tr></thead><tbody></tbody></table></div>
+
+    <h3>Every volume</h3>
+    <p class="muted">One line per volume: where it is, what happens next, and what, if anything, you have to do. Click a volume to see exactly what is being done to it.</p>
+    <div id="live-filter" class="muted"></div>
+    <div class="table-wrap"><table id="live-table"><thead><tr><th>Volume</th><th>Where it is</th><th>What happens next</th><th>What you must do</th></tr></thead><tbody></tbody></table></div>
     <p id="live-more" class="muted"></p>
+    <details id="stage-help" class="stagehelp">
+      <summary>What do the words on this page mean?</summary>
+      <h4>The five places</h4>
+      <dl>
+        <dt>Needs you</dt><dd>A person has to do something before the volume can go on. The page says what, and which kind of action it is: an approval by a second person, a release by you, or a decision by you.</dd>
+        <dt>Not moved</dt><dd>The volume was stopped or put back. It is where it was, with its data intact. Its line says why. This is a decision for you.</dd>
+        <dt>Being moved</dt><dd>OpenMove is working on it: copying, checking, switching or verifying. Nothing to do.</dd>
+        <dt>Waiting to start</dt><dd>The volume is chosen but has no free place yet. At most the number set under "Volumes at once" are worked on together; the next one starts by itself.</dd>
+        <dt>Moved</dt><dd>The volume is on the new storage. The old copy is kept for the safety period (7 days by default) so that you can go back; then it is released. Nothing to do.</dd>
+      </dl>
+      <h4>The three approvals</h4>
+      <dl>
+        <dt>Before switching (G2 and G3)</dt><dd>A second person confirms that the copy is correct (every image, every snapshot, in order) and that the volume is ready to switch: the new record exists, the original is frozen, a way back is prepared, the server using the volume is locked.</dd>
+        <dt>The release</dt><dd>You say that the switch may happen. Nothing is switched before this.</dd>
+        <dt>The result (G4)</dt><dd>After the switch a second person confirms that the volume works on the new storage.</dd>
+      </dl>
+      <p>The person who started the move cannot approve: another person must.</p>
+    </details>
     <div id="vd" class="vd hidden"></div>
 
-    <h3>Volumes that were not moved</h3>
-    <p class="muted">Every volume that was not moved, with the reason, what state it was left in, and the steps to fix it. Volumes that were held back appear as soon as the safety checks have run.</p>
+    <h3>Volumes left out of this move</h3>
+    <p class="muted">Volumes that were never part of the move, or were held back by the safety checks: the reason, what state they are in, and the steps to fix it. Volumes that were stopped during the move are in the list above, in "Not moved".</p>
     <div class="actions"><button class="secondary" id="um-report">Volumes not moved (Word)</button><span id="um-status" class="muted"></span></div>
     <div id="um-cards" class="cards"></div>
     <div id="um-causes"></div>

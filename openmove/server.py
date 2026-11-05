@@ -767,6 +767,78 @@ STAGE_OF = {"queued": "queued", "precheck": "copy", "validate": "copy", "sync": 
             "soak": "soak", "done": "done", "aborted": "stopped", "rollback": "stopped"}
 
 
+# Every volume of a move is in exactly ONE of these groups, in this order of urgency. The group says where the volume is; the action says what a person has to do, if anything.
+GROUPS = (("you", "Needs you"), ("stopped", "Not moved"), ("moving", "Being moved"), ("queued", "Waiting to start"), ("moved", "Moved"))
+# The kinds of action, so that a person knows at a glance WHAT is asked: an approval (by a second person), a release (by you), a decision (by you).
+ACTIONS = {"g23": {"type": "approval", "type_text": "Approval by a second person", "cta": "Approve before switching", "do": "g23"},
+           "release": {"type": "release", "type_text": "Release by you", "cta": "Release for the switch", "do": "release"},
+           "g4": {"type": "approval", "type_text": "Approval by a second person", "cta": "Approve the result", "do": "g4"},
+           "decide": {"type": "decision", "type_text": "Your decision", "cta": "Open it", "do": "open"}}
+WORKING = {"precheck": "being checked before the copy", "validate": "being checked", "sync": "being copied", "recheck": "being checked again", "cutover": "being switched now",
+           "postcheck": "being verified", "copy": "being copied"}
+
+
+def _wait_kind(state, r, mine):
+    """What a volume waits for from a person: 'g23' (second person: the copy is right and it is ready to switch), 'release' (you), 'g4' (second person: the result), or None."""
+    ph, gs = r["phase"], r.get("gates") or {}
+    if mine:
+        if ph in ("validate", "recheck"):
+            if not (gs.get("G2") and gs.get("G3")):
+                return "g23"
+            if r["id"] not in state.released:
+                return "release"
+        elif ph == "postcheck" and not gs.get("G4"):
+            return "g4"
+        return None
+    if r.get("g4wait"):
+        return "g4"
+    if r.get("ready"):
+        return "g23" if gs and not (gs.get("G2") and gs.get("G3")) else "release"
+    return None
+
+
+def _volume_state(state, r, mine, who=""):
+    """One answer per volume, the same on every page: {group, label, next, action}. group is one of GROUPS; label is two or three words; next says what happens now
+    and next in one sentence; action is None (nothing for a person to do) or the kind of action and who must do it."""
+    ph, other = r["phase"], (" %s started the move and cannot approve." % who if who else " The person who started the move cannot approve.")
+    kind = _wait_kind(state, r, mine)
+    if kind == "g23":
+        return {"group": "you", "label": "Waiting for approval", "action": dict(ACTIONS["g23"], who="a second person"),
+                "next": "Copied and checked. A second person must approve it before it can be switched." + other}
+    if kind == "release":
+        return {"group": "you", "label": "Waiting for your release", "action": dict(ACTIONS["release"], who="you"),
+                "next": "Approved. Nothing is switched until you release it."}
+    if kind == "g4":
+        return {"group": "you", "label": "Waiting for approval", "action": dict(ACTIONS["g4"], who="a second person"),
+                "next": "Switched. A second person must confirm that it works on the new storage." + other}
+    reason = plain_note(r)
+    if ph in ("aborted", "rollback") or r.get("failed"):
+        put_back = ph == "rollback"
+        return {"group": "stopped", "label": "Put back" if put_back else "Not moved", "action": dict(ACTIONS["decide"], who="you"),
+                "next": (reason + " " if reason else "") + ("It is back on the old storage with its data intact." if put_back else
+                                                           "It was stopped before the switch: it is where it was, with its data intact.") + " Decide: fix the cause and move it again, or leave it."}
+    if ph == "queued":
+        return {"group": "queued", "label": "Waiting", "action": None, "next": "Waiting for a free place. OpenMove starts it by itself. Nothing to do."}
+    if ph == "soak":
+        return {"group": "moved", "label": "Moved", "action": None,
+                "next": "On the new storage. The old copy is kept for the safety period and then released. Nothing to do."}
+    if ph == "done":
+        return {"group": "moved", "label": "Moved", "action": None, "next": "Finished. Nothing to do."}
+    return {"group": "moving", "label": "Being moved", "action": None, "next": "OpenMove is working on it: %s. Nothing to do." % WORKING.get(ph, ph)}
+
+
+def plain_note(r):
+    n = (r.get("error") or r.get("note") or "").strip()
+    return n + "." if n and n[-1] not in ".!?" else n
+
+
+def _group_counts(states):
+    out = {k: 0 for k, _ in GROUPS}
+    for st in states:
+        out[st["group"]] += 1
+    return out
+
+
 def _engine_rows(state):
     if state.demo or state.engine is None:
         return []
@@ -816,8 +888,10 @@ def _board(state, rows, waiting):
         if counts.get("soak"):
             bits.append("%d in the safety period" % counts["soak"])
         level, name, detail = "ok", "Moving", "%s. No action required." % (", ".join(bits) or "Working")
+    groups = _group_counts([_volume_state(state, r, True, _operator(state)) for r in rows])
     return {"level": level, "state": name, "detail": detail, "total": total, "switched": switched, "active": active, "failed": failed, "percent": min(100.0, pct),
-            "stages": [{"id": k, "label": label, "count": counts[k]} for k, label in STAGES if counts.get(k)], "actions": waiting}
+            "stages": [{"id": k, "label": label, "count": counts[k]} for k, label in STAGES if counts.get(k)], "actions": waiting,
+            "groups": [{"id": k, "label": label, "count": groups[k]} for k, label in GROUPS]}
 
 
 def _waits(state, rows):
@@ -937,10 +1011,23 @@ def api_live(state, body, query):
         if mine:                                       # what each volume waits for, read from the engine and the gates
             rows[-1]["note"] = mine[vid]["note"] or rows[-1]["note"]
             rows[-1]["gates"] = {k: (s or {}).get("by") for k, s in lifecycle.gates_of(state.journal, vid, g).items()}
+    who = _operator(state)
+    for r in rows:
+        r["state"] = _volume_state(state, r, bool(mine), who)
+        if mine and r["id"] in mine:
+            r["failed"] = bool(mine[r["id"]].get("failed"))
+    order = {k: i for i, (k, _) in enumerate(GROUPS)}
+    groups = _group_counts([r["state"] for r in rows])
+    todo = {}
+    for r in rows:
+        a = r["state"]["action"]
+        if a:
+            t = todo.setdefault(a["do"], dict(a, count=0))
+            t["count"] += 1
     total = len(mine) if mine else (len(admitted) or len(st))
     done = sum(r["progress"] for r in rows)
     active = [r for r in rows if r["phase"] not in ("soak", "done", "aborted", "rollback") and not (mine and r["phase"] == "queued")]
-    rows.sort(key=lambda r: (r["phase"] in ("soak", "done", "aborted", "rollback"), -r["progress"], r["id"]))
+    rows.sort(key=lambda r: (order[r["state"]["group"]], -r["progress"], r["id"]))
     unresolved = state.journal.unresolved_steps()
     need_g23 = wait23 if mine else sum(1 for r in rows if r["ready"] and r["gates"] and not (r["gates"]["G2"] and r["gates"]["G3"]))
     events = [{"id": e["id"], "ts": e["ts"], "kind": e["kind"], "line": _event_line(e)} for e in state.journal.events(None, None, 40)
@@ -949,6 +1036,7 @@ def api_live(state, body, query):
             "engine": "not built" if not state.demo else "simulated, demonstration only",
             "simulation": {"status": sim.status, "running": sim.running, "throughput_mb_s": round(sim.throughput),
                            "rate_cap_mb_s": opts["rate_cap_mb_s"], "virtual_time": sim.vnow.strftime("%Y-%m-%d %H:%M"), "ticks": sim.ticks} if sim else None,
+            "groups": [{"id": k, "label": label, "count": groups[k]} for k, label in GROUPS], "todo": list(todo.values()), "operator": who,
             "total": total, "started": len(st), "active": len(active), "counts": counts, "ready": held if mine else len(ready), "need_g23": need_g23, "need_g4": wait4 if mine else len(g4wait), "auto_sign": state.auto_sign, "options": opts,
             "by_class": {k: sum(1 for v in admitted if inv.get(v, {}).get("class") == k) for k in "ABC"} if admitted else {},
             "overall": min(100.0, round(done / total, 1)) if total else 0, "volumes": rows[:150], "volumes_more": max(0, len(rows) - 150),

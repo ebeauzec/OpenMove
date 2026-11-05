@@ -152,12 +152,14 @@ def main(argv):
         shot(base, token, "07-move", "move", 1300, only)
         shot(base, token, "09-reports", "reports", 900, only)
         state.options = {"hold_before_cutover": False, "stop_after_failures": 0}
-        state.auto_sign = "Demo reviewer (synthetic)"
-        sim = Simulation(state, lambda: S._gate(state), tick=0)
+        state.auto_sign = None                                  # no second person yet: the page shows what waits for one, and what was not moved
+        sim = Simulation(state, lambda: S._gate(state), tick=0.05)
         state.sim = sim
         sim.start()
-        sim._thread.join(timeout=120)
+        time.sleep(3)
         shot(base, token, "08-progress", "live", 1500, only)
+        state.auto_sign = "Demo reviewer (synthetic)"           # the rest of the run, for the History page
+        sim._thread.join(timeout=120)
         shot(base, token, "10-history", "journal", 1100, only)
         shot(base, token, "11-helper-servers", "hosts", 2200, only)
         shot(base, token, "12-helper-servers-configure", "hosts:mover-1", 3200, only)

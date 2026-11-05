@@ -398,8 +398,14 @@
     var bar = el('div', { class: 'tb-bar', role: 'progressbar', 'aria-valuenow': String(Math.round(b.percent)), 'aria-valuemin': '0', 'aria-valuemax': '100' }, [el('span', {})]);
     bar.firstChild.style.width = b.percent + '%';
     pr.appendChild(bar);
-    pr.appendChild(el('div', { class: 'tb-nums', text: b.total ? Math.round(b.percent) + '%   ' + b.switched + ' of ' + b.total + ' volumes switched' + (b.failed ? '   ' + b.failed + ' failed' : '') : 'No volume has been started' }));
-    if (b.stages.length) pr.appendChild(el('div', { class: 'tb-stages', text: b.stages.map(function (x) { return x.count + ' ' + x.label; }).join('  |  ') }));
+    var movedN = 0; (b.groups || []).forEach(function (g) { if (g.id === 'moved') movedN = g.count; });
+    pr.appendChild(el('div', { class: 'tb-nums', text: b.total ? Math.round(b.percent) + '%   ' + (b.groups ? movedN : b.switched) + ' of ' + b.total + ' volumes moved' : 'No volume has been started' }));
+    if (b.groups && b.total) pr.appendChild(el('div', { class: 'tb-groups' }, b.groups.filter(function (g) { return g.count; }).map(function (g) {
+      var c = el('button', { type: 'button', class: 'gchip gchip-' + g.id, text: g.count + ' ' + g.label.toLowerCase(), title: 'Show these volumes on the Progress page' });
+      c.addEventListener('click', function () { liveFilter = g.id; showTab('live', true); if (lastLive) renderLive(lastLive); });
+      return c;
+    })));
+    else if (b.stages.length) pr.appendChild(el('div', { class: 'tb-stages', text: b.stages.map(function (x) { return x.count + ' ' + x.label; }).join('  |  ') }));
     var ac = el('div', { class: 'tb-actions' + (list.length ? ' has' : '') });
     var head = el('div', { class: 'tb-label', text: 'Open actions' });
     if (list.length) head.appendChild(el('span', { class: 'tb-count', text: String(list.length) }));
@@ -1053,12 +1059,7 @@
     $('live-start').classList.toggle('hidden', !lastStatus.demo || (sim && sim.running));
     $('live-stop').classList.toggle('hidden', !(sim && sim.running));
     $('live-status').textContent = sim ? 'Simulation: ' + sim.status + '  |  virtual time ' + sim.virtual_time : '';
-    $('live-fill').style.width = l.overall + '%'; $('live-pct').textContent = l.overall.toFixed(1) + '%  (' + l.started + ' of ' + l.total + ' volumes started)';
-    var cards = $('live-cards'); clear(cards);
-    var fin = (l.counts.soak || 0) + (l.counts.done || 0);
-    [['Volumes admitted', l.total], ['In flight', l.active], ['Past cutover', fin + (l.counts.postcheck || 0) + (l.counts.cutover || 0)],
-     ['Stopped (source untouched)', l.counts.aborted || 0], ['Rolled back', l.counts.rollback || 0], ['Copy rate (synthetic)', sim ? sim.throughput_mb_s + ' of ' + sim.rate_cap_mb_s + ' MB/s cap' : '-']]
-      .forEach(function (c) { cards.appendChild(card(c[0], c[1])); });
+    drawGroups(l);
     var pipe = $('live-pipe'); clear(pipe);
     PHASES.forEach(function (p) {
       var n = l.counts[p[0]] || 0;
@@ -1076,36 +1077,67 @@
       feed.appendChild(el('li', { class: e.kind }, [el('span', { class: 't', text: e.ts.slice(11, 19) }), document.createTextNode(e.line)]));
     });
     var tb = $('live-table').tBodies[0]; clear(tb);
+    var shown = 0;
     l.volumes.forEach(function (v) {
-      var pc = el('td'); pc.appendChild(bar(v.progress, (v.phase === 'aborted' || v.phase === 'rollback') ? 'bad' : (v.phase === 'recheck' ? 'warn' : ''))); pc.appendChild(el('span', { class: 'muted', text: Math.round(v.progress) + '%' }));
-      tb.appendChild(el('tr', { 'data-id': v.id, class: 'clickrow' }, [el('td', { class: 'mono', text: v.id.slice(-12) }), el('td', { text: v.name || '-' }), el('td', { text: v['class'] || '-' }), el('td', { text: v.size == null ? '-' : String(v.size) }),
-        el('td', {}, [el('span', { class: 'ph ph-' + v.phase, text: STAGE_NAME[v.phase] || v.phase, title: PHASE_HELP[v.phase] || '' })]), pc, el('td', { text: plain(v.note) })]));
+      var s = v.state || { group: 'moving', label: STAGE_NAME[v.phase] || v.phase, next: plain(v.note), action: null };
+      if (liveFilter && s.group !== liveFilter) return;
+      shown++;
+      var where = el('td', {}, [el('span', { class: 'gchip gchip-' + s.group, text: s.label, title: PHASE_HELP[v.phase] || '' })]);
+      if (s.group === 'moving') { where.appendChild(bar(v.progress, v.phase === 'recheck' ? 'warn' : '')); }
+      var act = s.action ? el('td', {}, [el('span', { class: 'atype atype-' + s.action.type, text: s.action.type_text })]) : el('td', {}, [el('span', { class: 'atype atype-none', text: 'Nothing to do' })]);
+      tb.appendChild(el('tr', { 'data-id': v.id, class: 'clickrow grow-' + s.group }, [
+        el('td', {}, [el('div', { class: 'vname', text: v.name || 'Unnamed volume' }), el('div', { class: 'mono muted small', text: v.id.slice(-12) + (v.size == null ? '' : '  ' + v.size + ' GiB') })]),
+        where, el('td', { text: plain(s.next) }), act]));
     });
+    var lf = $('live-filter'); clear(lf);
+    if (liveFilter) {
+      var gl = ''; (l.groups || []).forEach(function (g) { if (g.id === liveFilter) gl = g.label; });
+      lf.appendChild(document.createTextNode('Showing only "' + gl + '" (' + shown + '). '));
+      var all = el('button', { type: 'button', class: 'secondary', text: 'Show all volumes' });
+      all.addEventListener('click', function () { liveFilter = ''; if (lastLive) renderLive(lastLive); });
+      lf.appendChild(all);
+    }
     $('live-more').textContent = l.volumes_more ? 'and ' + l.volumes_more + ' more' : '';
     if (currentTab === 'live') { loadUnmigrated(); if (vdId) loadVolume(vdId); }
-    $('live-release').classList.toggle('hidden', !l.ready);
-    $('sign-g23').classList.toggle('hidden', !l.need_g23);
-    $('sign-g4').classList.toggle('hidden', !l.need_g4);
     $('sign-demo').classList.toggle('hidden', !(lastStatus && lastStatus.demo));
     $('sign-demo').textContent = l.auto_sign ? 'Demo: stop the made-up second person approving' : 'Demo: a made-up second person approves';
-    $('sign-status').textContent = (l.need_g23 ? l.need_g23 + ' volume(s) wait for your approval before the switch. ' : '') + (l.need_g4 ? l.need_g4 + ' volume(s) wait for your approval of the result. ' : '') +
-      (l.need_g23 || l.need_g4 ? 'The signer must not be the operator of the run.' : '');
+    drawTodo(l);
     drawLiveNow(l);
-    $('live-ready').textContent = l.ready ? l.ready + ' volume(s) are copied and checked, and wait for your release. You can change this in step 4, Choose.' : '';
   }
+  // ---- the five places, and what a person has to do ----
+  var liveFilter = '';
+  var GROUP_SHORT = { you: 'a person must act', stopped: 'left where it was', moving: 'OpenMove is working', queued: 'starts by itself', moved: 'on the new storage' };
+  function drawGroups(l) {
+    var box = $('live-tiles'); clear(box);
+    (l.groups || []).forEach(function (g) {
+      var t = el('button', { type: 'button', class: 'gt gt-' + g.id + (liveFilter === g.id ? ' on' : '') + (g.count ? '' : ' zero'), 'aria-pressed': liveFilter === g.id ? 'true' : 'false',
+        title: 'Show only the volumes that are in this place' }, [el('span', { class: 'gt-n', text: String(g.count) }), el('span', { class: 'gt-l', text: g.label }), el('span', { class: 'gt-h', text: GROUP_SHORT[g.id] })]);
+      t.addEventListener('click', function () { liveFilter = liveFilter === g.id ? '' : g.id; if (lastLive) renderLive(lastLive); });
+      box.appendChild(t);
+    });
+    $('live-total').textContent = l.total ? 'This move has ' + l.total + ' volume' + (l.total === 1 ? '' : 's') + '.' : 'No volume has been started yet.';
+  }
+  function drawTodo(l) {
+    var by = {}; (l.todo || []).forEach(function (t) { by[t.do] = t.count; });
+    var who = l.operator ? l.operator + ' started the move and cannot approve it.' : 'The person who started the move cannot approve.';
+    function card(id, n, title) { $('todo-' + id).classList.toggle('hidden', !n); if (n) $('todo-' + id + '-t').textContent = title(n); }
+    function vols(n) { return n + ' volume' + (n === 1 ? '' : 's'); }
+    card('g23', by.g23, function (n) { return vols(n) + (n === 1 ? ' waits' : ' wait') + ' for a second person to approve. ' + who; });
+    card('release', by.release, function (n) { return vols(n) + (n === 1 ? ' waits' : ' wait') + ' for your release.'; });
+    card('g4', by.g4, function (n) { return vols(n) + (n === 1 ? ' is' : ' are') + ' switched and wait for a second person to approve the result. ' + who; });
+    card('decide', by.open, function (n) { return vols(n) + (n === 1 ? ' was' : ' were') + ' not moved. It is for you to decide what happens to ' + (n === 1 ? 'it.' : 'them.'); });
+    $('todo-none').classList.toggle('hidden', !!(l.todo || []).length);
+  }
+  $('todo-decide-go').addEventListener('click', function () { liveFilter = 'stopped'; if (lastLive) renderLive(lastLive); });
   // One plain sentence about what is going on, so a person who comes back to the screen knows at once whether anything needs them.
   function drawLiveNow(l) {
     var box = $('live-now'); clear(box);
     var rows = [], kind = 'ok', eng = (lastStatus.recovery || {}).engine || null;
     function say(k, t) { rows.push(t); if (k === 'bad' || (k === 'warn' && kind !== 'bad')) kind = k; }
     if (l.halted) say('bad', 'Everything is stopped: ' + l.halted.by + ' pressed the emergency stop (' + l.halted.reason + '). Nothing moves until someone allows changes again.');
-    if (l.need_g23) say('warn', l.need_g23 + ' volume' + (l.need_g23 === 1 ? ' needs' : 's need') + ' a second person to approve it (the copy is correct and it is ready to switch) before it can be switched. Until then it keeps being checked. Press "Approve before switching" below. The second person must not be the one who started the move.');
-    if (l.need_g4) say('warn', l.need_g4 + ' volume' + (l.need_g4 === 1 ? ' is' : 's are') + ' switched over and waiting for a second person to approve the result. Press "Approve the result" below.');
-    if (l.ready && !l.need_g23) say('warn', l.ready + ' volume' + (l.ready === 1 ? ' is' : 's are') + ' copied and checked, and waiting for your release. Use the button "Release all volumes that are ready to switch".');
     if (eng && eng.trouble) say('warn', 'The move hit a problem and is trying again by itself: ' + eng.trouble);
     if (eng && eng.gaps && eng.gaps.length) say('ok', 'The computer paused for ' + eng.gaps[eng.gaps.length - 1] + ' s (sleep or a stall). OpenMove looked at every volume again; nothing was lost.');
     if (eng && eng.revived) say('ok', 'The program that watches the move was started again ' + eng.revived + ' time' + (eng.revived === 1 ? '' : 's') + ' by its guardian. Nothing was lost.');
-    if (!rows.length && l.active) say('ok', l.active + ' volume' + (l.active === 1 ? ' is' : 's are') + ' being worked on. No action required.');
     box.className = 'livenow ' + kind + (rows.length ? '' : ' hidden');
     rows.forEach(function (t) { box.appendChild(el('p', { text: t })); });
   }

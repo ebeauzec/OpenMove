@@ -1,8 +1,8 @@
 {
-  "version": "0.14.0",
+  "version": "0.14.1",
   "major": 0,
   "minor": 14,
-  "patch": 0,
+  "patch": 1,
   "date": "2026-11-05",
-  "notes": "The lab on a Linux host"
+  "notes": "Progress page: one place, one next step and one kind of action for every volume"
 }

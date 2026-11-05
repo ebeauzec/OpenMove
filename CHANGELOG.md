@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.14.1 (2026-11-05)
+
+### Changed
+- The Progress page now answers, for every volume: where it is (needs you, not moved, being moved, waiting to start, moved), what happens next in one sentence, and what a person must do, with the kind of action named (approval by a second person, release by you, your decision). Five tiles count the places, one card per kind of action carries its button, and the board shows the same places.
+
+### Changed (detail)
+- `/api/live` gives every volume a `state` (`group`, `label`, `next`, `action`), and the page a `groups` list, a `todo` list and the `operator`; `/api/status` carries `groups` on the board. One shared function (`_volume_state`) decides the place, so the board, the tiles and the table cannot disagree. The kinds of action are `approval`, `release` and `decision`.
+- The Progress page: five tiles (Needs you, Not moved, Being moved, Waiting to start, Moved) that also filter the list; "What you need to do" with one card per kind of action and its button; "Every volume" with one line each (place, what happens next, what you must do); the old stage and approval help is rewritten around the five places. Volumes stopped during the move are now in the list above; the lower list is "Volumes left out of this move".
+- The board at the top of every page shows the five places as small buttons and counts volumes moved, not volumes switched.
+- Tests: `tests/test_progress_state.py` (9). The Progress screenshot now shows a move that waits for a second person.
+
+### Not done, and not proven
+- Checked in the demonstration and by unit tests. Not seen with the real engine on the lab (the lab was stopped at the owner's request). The Move step and the other steps are unchanged.
+
 ## 0.14.0 (2026-11-05)
 
 ### Added

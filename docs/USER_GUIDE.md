@@ -275,12 +275,12 @@ Your browser saves the file; OpenMove keeps no copy. Reports built in demonstrat
 
 The Live tab shows what is happening, refreshed about once a second:
 
-* **Overall progress**, and the same bar under the header on every tab.
-* **The pipeline**: how many volumes are in each phase of the fixed order. Hover over a phase for its meaning.
-* **Safety**: the gate, the halt, unresolved steps in the journal, and the seven conditions that must hold before a cutover.
-* **The event feed**: the newest journal events. Refusals are highlighted with their reasons.
-* **Volumes**: every volume with its class, phase, progress and note. Click a row for the detail panel.
-* **Volumes not migrated**: each volume that stopped, was rolled back or held back, with the cause, how it ended and the proposed steps to resolve it. *Volumes not migrated (Word)* on the Reports tab builds the same as a report.
+* **Where every volume stands**: five tiles, and every volume is in exactly one of them. *Needs you* (a person must act), *Not moved* (stopped or put back, where it was, data intact), *Being moved* (OpenMove is working), *Waiting to start*, *Moved* (on the new storage). Click a tile to list only those volumes.
+* **What you need to do**: one card for each kind of action that waits: **Approval by a second person**, **Release by you** or **Your decision**, with the number of volumes and the button that does it. When nothing waits it says so.
+* **Every volume**: one line each: the place it is in, one sentence on what happens next, and what you must do (a label, or *Nothing to do*). Click a row for the detail panel.
+* The same five places, as small buttons, are on the board at the top of every page.
+* **How it works** (closed): the pipeline, the gate, the halt, unresolved steps in the journal, the conditions that must hold before a cutover, and the event feed with every refusal.
+* **Volumes left out of this move**: volumes that were never part of it or were held back, with the cause, how it ended and the proposed steps to resolve it. *Volumes not migrated (Word)* on the Reports tab builds the same as a report.
 
 On a real cloud the tab shows the volumes the engine has taken, with the real phases. In demonstration mode it can run a simulated migration (section 3); the real engine is on the Move tab.
 
@@ -354,7 +354,7 @@ Everything OpenMove reads about a customer's cloud stays on the machine it runs 
 | The top of every page shows Status, Progress and Open actions. | Status says in a few words how the move is (green: moving or finished; amber: waiting for a person or trying again; red: stopped; grey: no move running). Progress is the bar and the count of volumes switched. Open actions lists what only a person can do, and each item has its own button (approve as first or second approver, approve before switching, release, approve the result); the button opens the same dialog as the one further down the page. The tab that holds the work shows a number. Nothing waits for you when it says "No action required". |
 | A bar at the top says "OpenMove is not answering". | OpenMove stopped or the computer slept. Your work is saved. The page carries on by itself when OpenMove is back; start `OpenMove-Lab.bat` or `OpenMove.bat` if it stays like this for more than a minute. |
 | "OpenMove is already running with this data folder". | Another OpenMove holds the same data folder. Use that one (the address is in its window) or close it first. Two programs on one journal would each move the same volumes. |
-| The Progress page says volumes wait for a second person. | The copy is finished and checked; G2 and G3 (or G4) need a person who is not the operator. Use the Approve button on the page. It is not stuck. |
+| The Progress page says volumes wait for a second person. (Look at the amber card *Approval by a second person*.) | The copy is finished and checked; G2 and G3 (or G4) need a person who is not the operator. Use the Approve button on the page. It is not stuck. |
 
 ## 13. Words used in the screens
 

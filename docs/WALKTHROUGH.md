@@ -276,14 +276,26 @@ A detached volume has no instance, so there is no lock. Cinder itself marks it `
 
 **Purpose.** Watch the move, and give the approvals.
 
-**What it shows.**
+**What it shows.** One answer for every volume: where it is, what happens next, and whether a person has to do something.
 
-* The **board** at the top: Status (one line), Progress (volumes finished, being copied, waiting, in their safety period, stopped) and **Open actions**, each with its button.
-* How many volumes are copying and how many are waiting, so it is clear whether the move is limited by the copy places or by volumes waiting for a person.
-* A table of volumes with their stage and a bar. Click a volume to see exactly what is being done to it and what it is waiting for.
-* **What do the stages and the approvals mean?** A short explanation of every stage and of the three approvals by a second person: the copy is correct, ready to switch, the switch worked.
-* The **Safety** panel (the conditions every switch must meet) and the event feed with every refusal.
-* **Volumes that were not moved**, with the reason, the state they were left in and the steps to fix them; the same list is a Word report.
+* **Where every volume stands.** Five tiles count the volumes of the move. Every volume is in exactly one of them. Click a tile to list only its volumes; click it again to list all.
+
+| Place | Meaning | What you do |
+|---|---|---|
+| **Needs you** (amber) | A person has to act before the volume can go on. | The page says what, and which kind of action it is (below). |
+| **Not moved** (red) | The volume was stopped or put back. It is where it was, with its data intact. The line says why. | **Your decision**: fix the cause and move it again, or leave it. |
+| **Being moved** (blue) | OpenMove is working on it: copying, checking, switching or verifying. | Nothing. |
+| **Waiting to start** (grey) | Chosen, but no free place yet. | Nothing. It starts by itself. |
+| **Moved** (green) | On the new storage. The old copy is kept for the safety period and then released. | Nothing. |
+
+Three kinds of action exist, and every action on the page carries its kind as a label: **Approval by a second person** (the copy is right and ready to switch, or the switch worked), **Release by you** (you say that the switch may happen) and **Your decision** (a volume was not moved).
+
+* **What you need to do.** One card for each kind of action that is waiting, with the number of volumes, the label of the kind, and the button that does it (**Approve before switching**, **Release all volumes that are ready to switch**, **Approve the result**, **Show these volumes** for the decisions). When nothing waits, the page says so: *Nothing. No volume is waiting for a person.*
+* **Every volume**: one line each, with the volume, the place it is in, one sentence about what happens next, and what you must do (a label, or *Nothing to do*). The volumes that need a person come first, then the ones that were not moved, then the rest. Click a volume to see exactly what is being done to it.
+* The **board** at the top of every page shows the same five places as small buttons next to the percentage, and the **Open actions** with their buttons.
+* **What do the words on this page mean?** The five places and the three approvals, in plain words.
+* The **Safety** panel and the event feed (under "How it works") with every refusal.
+* **Volumes left out of this move**: volumes that were never part of it or were held back by the safety checks, with the reason and the steps to fix them; the same list is a Word report.
 
 In the demonstration this view shows a simulated move (made-up evidence and a virtual clock). With a real move it follows the real engine.
 
