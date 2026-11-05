@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.16.1 (2026-11-05)
+
+### Changed
+- Long lists of volumes (the tree on Choose and Scan, the tables on Progress, Choose, Scan and Move) now scroll inside their own box with a fixed header row. The step bar, the Choose controls (confirm, choose buttons, search) and the Progress actions (What you need to do, with its buttons) stay pinned under the board while you scroll. Checked in the demonstration at a wide and a narrow width; the step bar is not pinned on narrow screens.
+
 ## 0.16.0 (2026-11-05)
 
 ### Added

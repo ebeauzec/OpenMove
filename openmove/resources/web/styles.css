@@ -320,3 +320,16 @@ button.gchip { cursor: pointer; }
 .fail-title { font-weight: 700; color: var(--bad); } .fail-why { margin: 2px 0; } .fail-fix { font-weight: 600; } .fail-state, .fail-detail { color: var(--muted); font-size: .85rem; margin-top: 2px; }
 .causes { margin: 6px 0 10px 1.2rem; padding: 0; } .causes li { margin: 4px 0; }
 .gchip-completed { background: var(--ok); color: #fff; }
+
+
+/* long lists scroll in their own box, so the controls above them stay on screen */
+:root { --tb-h: 0px; --wiz-h: 0px; }
+.wiz { position: sticky; top: var(--tb-h); z-index: 52; }
+.pin { position: sticky; top: calc(var(--tb-h) + var(--wiz-h)); z-index: 50; background: var(--surface); max-height: 42vh; overflow: auto;
+       margin: 0 -8px 8px; padding: 4px 8px 6px; border-bottom: 2px solid var(--border); box-shadow: 0 3px 5px -3px rgba(0,0,0,.25); }
+.pin > :first-child { margin-top: 0; }
+.scrollbox { max-height: calc(100vh - var(--tb-h) - var(--wiz-h) - 230px); min-height: 220px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; padding: 0 6px; }
+.scrollbox thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; box-shadow: 0 1px 0 var(--border); }
+.scrollbox table { margin: 0; }
+@media (max-height: 560px) { .pin, .wiz { position: static; max-height: none; } .scrollbox { max-height: 70vh; } }
+@media (max-width: 800px) { .wiz { position: static; } .pin { max-height: 36vh; } }

@@ -1,8 +1,8 @@
 {
-  "version": "0.16.0",
+  "version": "0.16.1",
   "major": 0,
   "minor": 16,
-  "patch": 0,
+  "patch": 1,
   "date": "2026-11-05",
-  "notes": "One approval for every volume: an option with a warning lets the two approvers sign once for all"
+  "notes": "Controls stay in view: long volume lists scroll in their own box"
 }

@@ -102,6 +102,16 @@
       (fields.length ? inputs[fields[0].key] : ok).focus();
     });
   }
+  // the board and the step bar stay at the top; their heights tell the pinned controls and the list boxes where to start and how tall to be
+  function syncStick() {
+    var root = document.documentElement.style, tb = $('topboard'), wz = $('wiz');
+    root.setProperty('--tb-h', (tb && !tb.classList.contains('hidden') ? tb.offsetHeight : 0) + 'px');
+    root.setProperty('--wiz-h', (wz && getComputedStyle(wz).position === 'sticky' ? wz.offsetHeight + 12 : 0) + 'px');       // a step bar that is not pinned takes no room
+  }
+  try {
+    if (window.ResizeObserver) { var ro = new ResizeObserver(syncStick); ['topboard', 'wiz'].forEach(function (i) { if ($(i)) ro.observe($(i)); }); }
+    window.addEventListener('resize', syncStick); syncStick();
+  } catch (e) { /* the page works without it */ }
   function nameField(label, hint, prefill) { return { key: 'by', label: label || 'Your name', hint: hint, min: 3, value: prefill === false ? '' : me }; }
 
   var currentTab = 'connect';

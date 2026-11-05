@@ -104,7 +104,7 @@
         <button class="secondary" id="tree-close">Close all</button>
       </div>
       <div id="tree-legend" class="legend"></div>
-      <div id="tree-view" class="tree"></div>
+      <div id="tree-view" class="tree scrollbox"></div>
     </div>
 
     <details class="more" id="scan-opts">
@@ -148,7 +148,7 @@
         <label>Search<input id="inv-search" placeholder="id, name, project, host"></label>
         <button class="secondary" id="inv-run">Read the volumes again</button>
       </div>
-      <div class="table-wrap"><table id="inv-table" hidden>
+      <div class="table-wrap scrollbox"><table id="inv-table" hidden>
         <thead><tr><th>Volume</th><th>Group</th><th>Why</th><th>GiB</th><th>Snapshots</th><th>Status</th><th>Storage</th><th>Attached to</th></tr></thead>
         <tbody></tbody></table></div>
       <p id="inv-more" class="muted"></p>
@@ -181,18 +181,20 @@
 
   <section id="tab-select" class="panel hidden">
     <h2>Choose what to move</h2>
-    <div id="sel-summary" class="banner ok static"></div>
-    <div class="actions inline">
-      <button class="primary big" id="sel-confirm" type="button">Confirm my choice</button> <span id="sel-confirm-note" class="muted"></span>
-    </div>
-    <div class="actions inline">
-      <button class="secondary" id="sel-all">Choose everything that can be moved</button>
-      <button class="secondary" id="sel-none">Choose nothing</button>
-      <button class="secondary" id="sel-reset">Go back to the suggested choice</button>
-      <label>Find<input id="sel-find" placeholder="a name, an id or an instance"></label>
+    <div class="pin">
+      <div id="sel-summary" class="banner ok static"></div>
+      <div class="actions inline">
+        <button class="primary big" id="sel-confirm" type="button">Confirm my choice</button> <span id="sel-confirm-note" class="muted"></span>
+      </div>
+      <div class="actions inline">
+        <button class="secondary" id="sel-all">Choose everything that can be moved</button>
+        <button class="secondary" id="sel-none">Choose nothing</button>
+        <button class="secondary" id="sel-reset">Go back to the suggested choice</button>
+        <label>Find<input id="sel-find" placeholder="a name, an id or an instance"></label>
+      </div>
     </div>
     <div id="sel-legend" class="legend"></div>
-    <div id="sel-tree" class="tree"></div>
+    <div id="sel-tree" class="tree scrollbox"></div>
     <p id="sel-more" class="muted"></p>
 
     <h3>Volumes that may break if they are moved</h3>
@@ -203,7 +205,7 @@
       <button class="secondary" id="risk-rv">I have checked the ticked volumes (second person)</button>
       <button class="secondary" id="risk-wd">Take back my check</button>
     </div>
-    <div class="table-wrap"><table id="risk-table"><thead><tr><th>Tick</th><th>Volume</th><th>Name</th><th>Group</th><th>Risk</th><th>Why</th><th>Checked by</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap scrollbox"><table id="risk-table"><thead><tr><th>Tick</th><th>Volume</th><th>Name</th><th>Group</th><th>Risk</th><th>Why</th><th>Checked by</th></tr></thead><tbody></tbody></table></div>
     <div id="risk-advice"></div>
 
     <details class="more">
@@ -213,7 +215,7 @@
       <div class="table-wrap"><table id="sel-groups"><thead><tr><th>Group</th><th>Volumes</th><th>Can be moved</th><th>GiB</th><th>Choose</th></tr></thead><tbody></tbody></table></div>
       <h3>Volume by volume</h3>
       <div class="actions inline"><label>Filter<input id="sel-filter" placeholder="id, name, project, group, instance"></label><span id="sel-count" class="muted"></span></div>
-      <div class="table-wrap"><table id="sel-table"><thead><tr><th>Chosen</th><th>Volume</th><th>Name</th><th>Group</th><th>Project</th><th>GiB</th><th>Snapshots</th><th>Attached to</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+      <div class="table-wrap scrollbox"><table id="sel-table"><thead><tr><th>Chosen</th><th>Volume</th><th>Name</th><th>Group</th><th>Project</th><th>GiB</th><th>Snapshots</th><th>Attached to</th><th>Status</th></tr></thead><tbody></tbody></table></div>
       <h3>Settings</h3>
       <p class="muted">The settings start at safe values. You can make them stricter. You cannot go below the minimum the process sets.</p>
       <div id="sel-options" class="grid"></div>
@@ -258,7 +260,7 @@
       <summary>Technical detail: every volume the move has touched</summary>
       <div class="actions inline"><button class="secondary" id="mv-refresh">Refresh</button></div>
       <div id="mv-cards" class="cards"></div>
-      <div class="table-wrap"><table id="mv-table"><thead><tr><th>Volume</th><th>Group</th><th>Method</th><th>Stage</th><th>Copy checked</th><th>Ready to switch</th><th>Switch checked</th><th>What is happening</th><th></th></tr></thead><tbody></tbody></table></div>
+      <div class="table-wrap scrollbox"><table id="mv-table"><thead><tr><th>Volume</th><th>Group</th><th>Method</th><th>Stage</th><th>Copy checked</th><th>Ready to switch</th><th>Switch checked</th><th>What is happening</th><th></th></tr></thead><tbody></tbody></table></div>
       <p id="mv-more" class="muted"></p>
     </details>
 
@@ -329,6 +331,7 @@
     <div class="gtiles" id="live-tiles"></div>
     <p class="muted small">Every volume is in exactly one of these five places. Click a place to list only its volumes; click it again to list all.</p>
 
+    <div class="pin">
     <h3>What you need to do</h3>
     <div id="todo-none" class="todo-none">Nothing. No volume is waiting for a person. OpenMove carries on by itself.</div>
     <div id="todo-g23" class="todo-card hidden">
@@ -360,11 +363,12 @@
       <button class="secondary hidden" id="sign-demo">Demo: a made-up second person approves</button>
       <span id="sign-status" class="muted"></span>
     </div>
+    </div>
 
     <h3>Every volume</h3>
     <p class="muted">One line per volume: where it is, what happens next, and what, if anything, you have to do. Click a volume to see exactly what is being done to it.</p>
     <div id="live-filter" class="muted"></div>
-    <div class="table-wrap"><table id="live-table"><thead><tr><th>Volume</th><th>Where it is</th><th>What happens next</th><th>What you must do</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap scrollbox"><table id="live-table"><thead><tr><th>Volume</th><th>Where it is</th><th>What happens next</th><th>What you must do</th></tr></thead><tbody></tbody></table></div>
     <p id="live-more" class="muted"></p>
     <details id="stage-help" class="stagehelp">
       <summary>What do the words on this page mean?</summary>
@@ -391,7 +395,7 @@
     <div class="actions"><button class="secondary" id="um-report">Volumes not moved (Word)</button><span id="um-status" class="muted"></span></div>
     <div id="um-cards" class="cards"></div>
     <div id="um-causes"></div>
-    <div class="table-wrap"><table id="um-table"><thead><tr><th>Volume</th><th>Name</th><th>Group</th><th>GiB</th><th>Result</th><th>Reason</th><th>How it ended</th></tr></thead><tbody></tbody></table></div>
+    <div class="table-wrap scrollbox"><table id="um-table"><thead><tr><th>Volume</th><th>Name</th><th>Group</th><th>GiB</th><th>Result</th><th>Reason</th><th>How it ended</th></tr></thead><tbody></tbody></table></div>
     <p id="um-more" class="muted"></p>
 
     <details class="more">
