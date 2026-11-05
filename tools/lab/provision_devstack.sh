@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Eugene Beauzec and Obi1 - FZCO. All Rights Reserved.
 # Proprietary software; see LICENSE.
 #
-# Builds the OpenMove lab inside a disposable Ubuntu 24.04 WSL distro: a real single-node OpenStack (DevStack) with
+# Builds the OpenMove lab inside a disposable Ubuntu 24.04 machine (a WSL distro on Windows, or the lab virtual machine on a Linux host): a real single-node OpenStack (DevStack) with
 #   * Keystone, Glance, Nova (KVM), Neutron, Placement, Cinder
 #   * two Cinder LVM back-ends that stand in for the two arrays:  sf-sim (the "source") and pure-sim (the "target"),
 #     each with a volume type of the same name.
@@ -32,9 +32,11 @@ iscsi_target_mod
 target_core_iblock
 tcm_loop
 openvswitch
-kvm_amd
 EOF
+# the KVM module of this CPU (the WSL lab and a Linux host differ); Nova uses KVM when /dev/kvm exists afterwards, and plain QEMU otherwise
+if grep -qw svm /proc/cpuinfo; then echo kvm_amd >> /etc/modules-load.d/openmove-lab.conf; elif grep -qw vmx /proc/cpuinfo; then echo kvm_intel >> /etc/modules-load.d/openmove-lab.conf; fi
 for m in $(cat /etc/modules-load.d/openmove-lab.conf); do modprobe "$m" || echo "note: $m not loaded"; done
+if [ -e /dev/kvm ]; then VIRT_TYPE=kvm; else VIRT_TYPE=qemu; echo "note: no /dev/kvm here: the lab's guests run on plain QEMU (slow, but they run)"; fi
 
 su - stack -c "test -d /opt/stack/devstack || git clone --depth 1 -b $BRANCH https://opendev.org/openstack/devstack /opt/stack/devstack"
 cat > /opt/stack/devstack/local.conf <<EOF
@@ -51,8 +53,8 @@ GIT_DEPTH=1
 CINDER_ENABLED_BACKENDS=lvm:sf-sim,lvm:pure-sim
 VOLUME_BACKING_FILE_SIZE=60G
 CINDER_LVM_TYPE=default
-# the lab VM has KVM (AMD); fall back to qemu if it is not usable
-LIBVIRT_TYPE=kvm
+# KVM when the machine has it, plain QEMU when it has not (decided above)
+LIBVIRT_TYPE=$VIRT_TYPE
 
 # Horizon (the OpenStack dashboard) stays on: OpenMove-Lab.bat opens it next to OpenMove
 disable_service tempest

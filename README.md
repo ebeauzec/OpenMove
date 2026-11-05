@@ -69,6 +69,7 @@ flowchart LR
 | macOS, Linux | `./openmove.sh` or `./openmove.sh --demo` |
 | From source | `python -m openmove` or `python -m openmove --demo` |
 | The lab (Windows, lab installed) | `OpenMove-Lab.bat`; stop it with `OpenMove-Lab-Stop.bat` ([LAB](docs/LAB.md)) |
+| The lab (Linux host) | `./openmove-lab.sh deploy` builds it from nothing; `./openmove-lab.sh` starts it and OpenMove; `./openmove-lab.sh down` stops it ([LAB](docs/LAB.md), "The lab on a Linux host") |
 | Build the standalone program | `python -m pip install pyinstaller`, then `python tools/build/build_exe.py`; the result is in `dist/` |
 
 OpenMove starts a web server that only this machine can reach, prints a link with a one-time access token and opens it in your browser. Installation details are in [INSTALL](docs/INSTALL.md); the full tour of the screens is in [USER_GUIDE](docs/USER_GUIDE.md).
@@ -211,7 +212,7 @@ The settings (concurrency, soak days, hold before cutover, stop after failures, 
 | `openmove/resources/mover/` | The data mover and the Cinder helper that OpenMove places on hosts. |
 | `openmove/hosts.py`, `diag.py`, `redact.py` | Host registry and readiness, diagnostics, redaction. |
 | `OpenMove.bat`, `OpenMove-Demo.bat`, `openmove.sh` | Launchers. |
-| `OpenMove-Lab.bat`, `OpenMove-Lab-Stop.bat` | Start OpenMove against the lab; stop the lab gracefully. |
+| `OpenMove-Lab.bat`, `OpenMove-Lab-Stop.bat`, `openmove-lab.sh` | Start OpenMove against the lab; stop the lab gracefully (`openmove-lab.sh` is the Linux host's version and also builds the lab). |
 | `tests/` | Automated tests, a mock OpenStack cloud and a fake migration host. |
 | `docs/` | Specification, design and operating documents ([index](docs/README.md)). |
 | `tools/` | Repository tooling, including the sensitive-data guard; `tools/dev/` (release, screenshots), `tools/lab/` (the lab), `tools/build/` (the standalone program). |

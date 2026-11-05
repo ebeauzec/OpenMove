@@ -2,7 +2,8 @@
 # Proprietary software; see LICENSE.
 """The lab's hosts, set up without a terminal (docs/LAB.md, docs/MOVER.md).
 
-Class C needs a migration host and a Cinder host. In the lab both are WSL 2 distros on this machine:
+Class C needs a migration host and a Cinder host. In the lab both are WSL 2 distros on this machine (on a Linux host the same two machines exist as the lab
+virtual machine and a separate root file system inside it: docs/LAB.md, "The lab on a Linux host"):
 
   lab-cinder  the DevStack distro itself (it runs cinder-volume, so the Cinder helper runs there, with DevStack's own Python)  sshd on 2201
   lab-mover   a second, separate distro that holds only the data mover: the demonstration of a migration host as its own instance   sshd on 2202
@@ -16,13 +17,15 @@ distro itself instead of being compared by a person; the journal says so) and ru
 Lab only. Nothing here is used with a customer cloud, where a person registers the hosts, compares the fingerprints and adds the key.
 """
 import os
+import shlex
 import shutil
 import subprocess
 import time
+from pathlib import Path
 
 from .. import hosts as hosts_mod
 from ..connectors import ssh
-from . import LabError, lab_dir, load_config
+from . import LabError, backend, lab_dir, lab_key, linux_target, load_config
 
 MOVER_DISTRO = "openmove-mover"
 FRESH_DISTRO = "openmove-fresh"
@@ -72,6 +75,19 @@ echo "sshd ready on $PORT"
 """
 
 
+LINUX_KEY = r"""#!/bin/bash
+# Lab only: OpenMove's key may log in to root of the lab machine (its sshd already listens on the port; labvm.sh made it so).
+set -e
+PORT="$1"; KEY="$2"
+mkdir -p /root/.ssh; chmod 700 /root/.ssh; touch /root/.ssh/authorized_keys
+grep -qF "$KEY" /root/.ssh/authorized_keys || echo "$KEY" >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+ss -ltn | grep -q ":$PORT " || { echo "sshd is not listening on $PORT"; exit 1; }
+vgscan --mknodes >/dev/null 2>&1 || true
+echo "sshd ready on $PORT"
+"""
+
+
 FRESH = r"""#!/bin/bash
 # Lab only: a bare host as a customer would hand it over for a host setup: sshd on PORT that accepts the root password, and nothing of OpenMove's.
 set -e
@@ -104,19 +120,66 @@ def local(argv, stdin=None, timeout=60):
     return ssh.run_local(argv, stdin, timeout, cwd=neutral_dir())
 
 
+MOVER_MARK = "mover.made"
+LINUX_DIR = Path(__file__).resolve().parents[2] / "tools" / "lab" / "linux"
+SSH_OPTS = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=15"]
+# the migration host on a Linux host is a root file system inside the lab machine: its commands are run in its mount namespace and root
+MOVER_ENTER = 'exec nsenter -t "$(systemctl show -p MainPID --value openmove-mover)" -m -r -- bash -s -- "$@"'
+
+
+def labvm(*args, check=True):
+    """Run tools/lab/linux/labvm.sh (the host side of the lab on a Linux host); it asks for sudo itself when it needs root. Output goes to the terminal."""
+    env = dict(os.environ, OPENMOVE_LAB_DIR=str(lab_dir()))
+    try:
+        env["LAB_PASSWORD"] = load_config()["password"]
+    except LabError:
+        pass
+    rc = subprocess.run(["bash", str(LINUX_DIR / "labvm.sh")] + list(args), env=env).returncode
+    if check and rc != 0:
+        raise LabError("labvm.sh %s failed (exit code %d)" % (" ".join(args), rc))
+    return rc
+
+
+def linux_run(machine, script, args=(), timeout=600):
+    ip, port = linux_target(machine)
+    if machine == "openmove-mover":
+        ip, port = linux_target("openmove-lab")
+        remote = ["bash", "-c", MOVER_ENTER, "x"] + list(args)
+    else:
+        remote = ["bash", "-s", "--"] + list(args)
+    argv = [shutil.which("ssh") or "ssh", "-i", str(lab_key()), "-p", str(port)] + SSH_OPTS + ["root@" + ip] + [shlex.quote(a) for a in remote]
+    rc, out, err = local(argv, script.encode("utf-8"), timeout)
+    return rc, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+
+
 def run(distro, script, args=(), timeout=600):
     """Run a bash script as root in a distro (script on standard input). Returns (rc, out, err) as text."""
+    if backend() == "linux":
+        return linux_run(distro, script, args, timeout)
     rc, out, err = local([wsl_exe(), "-d", distro, "-u", "root", "--", "bash", "-s", "--"] + list(args), script.encode("utf-8"), timeout)
     return rc, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
 def distros():
+    if backend() == "linux":
+        vm = lab_dir() / "vm"
+        found = {"openmove-" + n for n in ("lab", "fresh", "vmhost") if (vm / n / "disk.img").exists()}
+        if (vm / "lab" / MOVER_MARK).exists():       # the migration host lives inside the lab machine's disk; the mark goes with it when that is destroyed
+            found.add("openmove-mover")
+        return found
     rc, out, err = local([wsl_exe(), "-l", "-q"], None, 30)
     return {x.strip() for x in out.decode("utf-16-le", "ignore").replace("\x00", "").splitlines() if x.strip()}
 
 
 def keep_running(distro):
-    """WSL stops a distro when no session is open; one detached sleep keeps it up until the lab is stopped."""
+    """WSL stops a distro when no session is open; one detached sleep keeps it up until the lab is stopped. On a Linux host: start the virtual machine if it is stopped."""
+    if backend() == "linux":
+        machine = "lab" if distro in ("openmove-lab", "openmove-mover") else distro.replace("openmove-", "")
+        if labvm("status", machine, check=False) == 0:
+            return False
+        labvm("start", machine)
+        labvm("wait", machine, "300")
+        return True
     rc, out, err = run(distro, "pgrep -f 'sleep infinity' >/dev/null && echo yes || echo no", timeout=60)
     if out.strip() == "yes":
         return False
@@ -128,6 +191,8 @@ def keep_running(distro):
 
 
 def address(distro):
+    if backend() == "linux":
+        return linux_target(distro)[0]
     rc, out, err = run(distro, "hostname -I | awk '{print $1}'", timeout=60)
     ip = out.strip()
     if rc != 0 or not ip:
@@ -136,9 +201,22 @@ def address(distro):
 
 
 def ensure_distro(name, subfolder):
-    """A distro made from the same image as the lab's, when it is missing. Returns true when it was made."""
+    """A distro made from the same image as the lab's, when it is missing. Returns true when it was made.
+    On a Linux host: the bare machines are built (labvm.sh) and the migration host is made inside the lab machine (mover_chroot.sh)."""
     if name in distros():
         return False
+    if backend() == "linux":
+        if name == "openmove-mover":
+            keep_running("openmove-lab")
+            rc, out, err = linux_run("openmove-lab", (LINUX_DIR / "mover_chroot.sh").read_text(encoding="utf-8").replace("\r\n", "\n"), ["create"], timeout=1800)
+            if rc != 0:
+                raise LabError("could not make the migration host: %s" % (out + err).strip()[-800:])
+            (lab_dir() / "vm" / "lab" / MOVER_MARK).write_text("made by OpenMove\n", encoding="utf-8")
+            return True
+        if name in ("openmove-fresh", "openmove-vmhost"):
+            labvm("build", name.replace("openmove-", ""))
+            return True
+        raise LabError("%s is not a lab machine" % name)
     folder = lab_dir()
     image = next(iter(sorted(folder.glob("ubuntu-*.wsl"))), None)
     if image is None:
@@ -164,6 +242,8 @@ def ensure_fresh_host():
     cfg = load_config()
     made = ensure_distro(FRESH_DISTRO, "fresh")
     keep_running(FRESH_DISTRO)
+    if backend() == "linux":                         # the machine was built bare: sshd on 22 with the root password login
+        return {"address": address(FRESH_DISTRO), "port": linux_target(FRESH_DISTRO)[1], "user": "root", "made": made}
     rc, out, err = run(FRESH_DISTRO, FRESH, [cfg["password"], str(FRESH_PORT)], timeout=900)
     if rc != 0:
         raise LabError("could not prepare the bare host %s: %s" % (FRESH_DISTRO, (out + err).strip()))
@@ -180,18 +260,24 @@ def prepare(state, journal_note=True):
         done.append("made the distro %s from the lab's image" % MOVER_DISTRO)
     for distro in (lab_distro, MOVER_DISTRO):
         if keep_running(distro):
-            done.append("kept %s running" % distro)
+            done.append(("started %s" if backend() == "linux" else "kept %s running") % distro)
     ssh.ensure_key(home)
     pub = ssh.public_key(home)
     ports = {"lab-cinder": (lab_distro, HOSTS["lab-cinder"]["port"]), "lab-mover": (MOVER_DISTRO, HOSTS["lab-mover"]["port"])}
     for name, (distro, port) in ports.items():
-        rc, out, err = run(distro, SETUP, [str(port), pub], timeout=900)
+        if backend() == "linux":
+            if name == "lab-mover":
+                rc, out, err = run(lab_distro, (LINUX_DIR / "mover_chroot.sh").read_text(encoding="utf-8").replace("\r\n", "\n"), ["key", pub], timeout=300)
+            else:
+                rc, out, err = run(lab_distro, LINUX_KEY, [str(port), pub], timeout=300)
+        else:
+            rc, out, err = run(distro, SETUP, [str(port), pub], timeout=900)
         if rc != 0:
             raise LabError("could not prepare %s (%s): %s" % (name, distro, (out + err).strip()))
         done.append("%s: %s" % (name, out.strip().splitlines()[-1] if out.strip() else "ready"))
     ip = address(lab_distro)
     for name, (distro, port) in ports.items():
-        spec = {"name": name, "roles": HOSTS[name]["roles"], "address": ip, "port": port, "user": "root", "notes": "OpenMove lab: a WSL 2 distro on this machine"}
+        spec = {"name": name, "roles": HOSTS[name]["roles"], "address": ip, "port": port, "user": "root", "notes": "OpenMove lab: " + ("a virtual machine on this host" if backend() == "linux" else "a WSL 2 distro on this machine")}
         if name == "lab-cinder":
             spec["python"] = CINDER_PYTHON
             spec["log_paths"] = ["/var/log/cinder/cinder-volume.log"]

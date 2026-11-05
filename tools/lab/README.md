@@ -1,6 +1,6 @@
 # Setting up the OpenMove lab
 
-Read `docs/LAB.md` first: it says what the lab is for. This page is the one-time setup on Windows with WSL 2.
+Read `docs/LAB.md` first: it says what the lab is for. This page is the one-time setup on Windows with WSL 2. **On a Linux host there is nothing to set up by hand:** `python3 tools/lab/lab.py deploy --install-prereqs` builds the whole lab (KVM virtual machines; `docs/LAB.md`, "The lab on a Linux host"), with `tools/lab/linux/labvm.sh` (the machines), `tools/lab/linux/mover_chroot.sh` (the migration host) and the same `provision_devstack.sh`.
 
 Needs: WSL 2, about 20 GB of free disk space, 8 GB of memory or more, and hardware virtualisation (for KVM). Nothing is installed on Windows itself; everything lives in one disposable WSL distro.
 

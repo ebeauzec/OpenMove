@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.14.0 (2026-11-05)
+
+### Added
+- The lab (DevStack, the migration host, the guests and volumes) can be deployed on a Linux host as KVM virtual machines: python tools/lab/lab.py deploy, ./openmove-lab.sh. Written and the host side tried only inside WSL; DevStack, the migration-host chroot and seeding on a Linux host were never run.
+
+### Added (detail)
+- `tools/lab/linux/labvm.sh`: the host side (prerequisite check, the bridge `omlab0` `192.168.221.0/24` with NAT, bare machines built by `debootstrap` and `mke2fs -d` without mounting, started with a direct kernel boot under QEMU/KVM, stopped gracefully, destroyed). `tools/lab/linux/mover_chroot.sh`: the migration host as a chroot with its own root file system and `sshd` on 2202 inside the lab machine. `lab.py` commands `deploy`, `shell`, `destroy`, `prereqs`, `net`; `openmove-lab.sh` (the Linux version of `OpenMove-Lab.bat`).
+- `openmove/lab`: `backend()` chooses `wsl` (Windows) or `linux` (override `OPENMOVE_LAB_BACKEND`); on a Linux host the lab machines are reached over ssh with a lab-only key, the migration host through `nsenter`. `tests/test_lab_linux.py`.
+
+### Changed
+- `provision_devstack.sh` no longer assumes an AMD CPU: it loads `kvm_amd` or `kvm_intel` and uses plain QEMU when there is no `/dev/kvm`.
+
+### Not done, and not proven
+- Written without a Linux host. The host side was tried inside a WSL distro (bridge, NAT, building and booting two bare machines with their own kernel, ssh, the Python backend); there a firewall with a drop policy (Docker) blocked the machines until the lab added its accept rules to that chain, which it now does. Not run at all: the lab machine with its extras, DevStack inside it, the migration-host chroot (LVM without udev, `nsenter`), `seed` and `more` there, `vm-up` between the two machines, distributions other than Debian and Ubuntu, `ufw` and `firewalld`, nested virtualisation on real hardware. docs/LAB.md, "The lab on a Linux host", lists them.
+
 ## 0.13.0 (2026-11-05)
 
 ### Added

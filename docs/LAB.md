@@ -1,6 +1,6 @@
 # The OpenMove lab: a real OpenStack on this machine
 
-The demonstration (`OpenMove-Demo.bat`) shows the screens with a **mock** cloud and a **simulated** migration. The lab (`OpenMove-Lab.bat`) is different: a real Keystone, Nova and Cinder run in a disposable WSL 2 distro on this machine (DevStack), and the real engine moves real volumes in it with Cinder's retype.
+The demonstration (`OpenMove-Demo.bat`) shows the screens with a **mock** cloud and a **simulated** migration. The lab (`OpenMove-Lab.bat`) is different: a real Keystone, Nova and Cinder run in a disposable WSL 2 distro on this machine (DevStack), and the real engine moves real volumes in it with Cinder's retype. On a Linux host the lab is KVM virtual machines instead, built by one command (`./openmove-lab.sh deploy`): see "The lab on a Linux host". Everything below holds for both; the commands are written for Windows, and `./openmove-lab.sh` takes the same words.
 
 ## What the lab proves, and what it does not
 
@@ -186,6 +186,103 @@ Not exercised: a power cut on the Cinder or compute host, a lock that Nova refus
 ## Setting the lab up the first time
 
 See `tools/lab/README.md`. In short: an Ubuntu 24.04 WSL image is imported as the distro `openmove-lab`, and `tools/lab/provision_devstack.sh` installs DevStack with two LVM back-ends. It takes about 40 minutes and several gigabytes of downloads (Ubuntu packages, Python wheels, OpenStack source from opendev.org).
+
+## The lab on a Linux host
+
+The lab runs on Windows with WSL 2. It also runs on a Linux host, with nothing changed in OpenMove: the same DevStack, the same two Cinder back-ends (`sf-sim` and `pure-sim`), the same migration host, the same guests and volumes. Only the machines under them change: KVM virtual machines take the place of the WSL distros. The tool picks the way by the operating system (`OPENMOVE_LAB_BACKEND=wsl` or `linux` forces one).
+
+### What the host needs
+
+- x86-64 Linux with KVM (`/dev/kvm`) and `sudo`. Nested virtualisation is better for the lab's own guests (`kvm_intel` or `kvm_amd` with `nested=1`); without it the guests run on plain QEMU, which works but is slow.
+- 16 GB of memory or more (the lab machine takes 12 GB: `LAB_MEM`), 6 CPUs (`LAB_CPUS`) and about 100 GB of free disk space. The lab disk is a sparse file of 300 GB (`LAB_DISK`) because the `more` set grows the two volume-group backing files to 220 and 260 GiB, sparse.
+- Internet access to the Ubuntu archive, opendev.org and PyPI.
+- Packages: `qemu-system-x86`, `qemu-utils`, `debootstrap`, `e2fsprogs`, `iproute2`, `nftables` (or `iptables`), `openssh-client`, `python3`. On Debian and Ubuntu, `python3 tools/lab/lab.py deploy --install-prereqs` installs them. On other systems install them by hand. `bash tools/lab/linux/labvm.sh prereqs` checks.
+
+### The machines
+
+All four are on one private bridge, `omlab0`, `192.168.221.0/24` (`LAB_SUBNET`, `LAB_BRIDGE`). The host is `.1` and gives the machines NAT to the outside (an `nft` table `openmove_lab`, or `iptables` rules; Docker's `DOCKER-USER` chain is opened for the bridge). Each machine has its own kernel and its own disk file in `$OPENMOVE_LAB_DIR/vm/<name>/` (default `~/.openmove-lab`).
+
+| Machine | Address | Ssh port | What it is |
+|---|---|---|---|
+| `openmove-lab` | `192.168.221.10` | 22 and 2201 | Ubuntu 24.04 with DevStack: Keystone, Nova, Cinder with the two LVM back-ends, Horizon, the lab guests |
+| `openmove-mover` | `192.168.221.10` | 2202 | The migration host: its **own root file system inside the lab machine** (a chroot made by `debootstrap`, started by the unit `openmove-mover`), on the same kernel, so it sees the same logical volumes, as the second distro does under WSL |
+| `openmove-fresh` | `192.168.221.12` | 22 | A bare host with `sshd` and the root password login, to try **Set up a new helper server from here** |
+| `openmove-vmhost` | `192.168.221.13` | 22 | A bare host that is the real virtual machine for the storage paths (`lab.py vm-up`: iSCSI with two portals and multipath) |
+
+How the Linux lab maps to the WSL lab:
+
+| WSL lab | Linux host |
+|---|---|
+| The distro `openmove-lab` (`wsl --import`) | A KVM virtual machine, `labvm.sh build lab` |
+| The distro `openmove-mover` | A chroot inside the lab machine, `mover_chroot.sh create` |
+| The distro `openmove-fresh` | A small virtual machine, `labvm.sh build fresh` |
+| The distro `openmove-vmhost` that runs QEMU for a nested machine | The machine `openmove-vmhost` is that virtual machine itself: no nesting |
+| `wsl -d NAME -- ...` | `ssh -i <lab>/ssh/lab_ed25519 root@ADDRESS ...`; the migration host through `nsenter` into the chroot |
+| A detached `sleep infinity` keeps a distro up | The virtual machine runs until `down` |
+| The lab address changes after a restart | Fixed addresses |
+
+### One command: `deploy`
+
+```
+python tools/lab/lab.py deploy --install-prereqs      (or: ./openmove-lab.sh deploy --install-prereqs)
+```
+
+It builds everything from nothing and can be started again after a stop: each stage is skipped when it is already done.
+
+1. Checks the host (`--install-prereqs` installs the packages on Debian and Ubuntu).
+2. Makes the lab-only password in `<lab folder>/lab-secret.json` (it is never printed) and a key for the lab machines.
+3. Brings up the bridge and the NAT.
+4. Builds the lab machine: a base Ubuntu 24.04 root file system by `debootstrap`, copied for each machine, with its kernel started directly by QEMU (no boot loader), a static address and its own host keys. Takes some minutes the first time.
+5. Runs `tools/lab/provision_devstack.sh` in it and waits for `stack.sh` (about 40 to 90 minutes). It writes `lab.json` with the lab machine as the cloud (`http://192.168.221.10/identity`).
+6. Makes the migration host.
+7. Runs `seed` and `more`: the 71 `lab-*` volumes and their guests (skip with `--no-seed`).
+
+Then `./openmove-lab.sh` starts OpenMove in lab mode.
+
+### Every day
+
+| Command | What it does |
+|---|---|
+| `./openmove-lab.sh` | The counterpart of `OpenMove-Lab.bat`: starts the lab if it does not answer, then OpenMove under the supervisor |
+| `./openmove-lab.sh up` / `down` | Start the lab machine, its services and guests; stop them in order and power the machine off (data is kept) |
+| `./openmove-lab.sh seed`, `more`, `clean`, `list`, `status`, `reset` | As in the commands table above |
+| `./openmove-lab.sh fresh-host`, `vm-up`, `vm-down` | As above; the machines are the Linux ones |
+| `./openmove-lab.sh shell [lab\|mover\|fresh\|vmhost]` | A root shell in a machine |
+| `./openmove-lab.sh destroy --yes` | Removes every lab machine and its disk |
+
+### Rules
+
+- The lab is on a private bridge and the machines have no route from outside. The password in `lab-secret.json` is for the lab only.
+- `labvm.sh` asks for `sudo` itself where it needs it (bridge, `tap` devices, `qemu`, `mke2fs -d`, `debootstrap`). The lab folder is owned by the user who ran it.
+- The lab does not change `iptables` or `nft` rules other than its own table and the two `DOCKER-USER` and `FORWARD` rules for its bridge; `net down` removes them.
+- Do not run `deploy` on a host whose `192.168.221.0/24` is in use: set `LAB_SUBNET`.
+- A host that is itself a virtual machine needs nested virtualisation turned on for the lab machine to use KVM.
+
+### What was proven, and what was not
+
+This was written and tried **without a real Linux host**. The only Linux available was Ubuntu 24.04 in a WSL 2 distro, so the host side was tried there (its network is shared with the other distros, and Docker's firewall rules are present, which is a hard case). Be careful with what follows.
+
+**Proven** (a bare machine, inside WSL):
+
+- `labvm.sh prereqs` and `net up`: the bridge `omlab0`, its address, the `nft` table of the lab. `net up` twice does not duplicate rules; `net down` removes the bridge, the table and the rules it put in another tool's chain.
+- A firewall whose forward policy is drop (here Docker's, made by `iptables-nft`) dropped the machines' packets until the lab put its accept rules **in that chain** as well. The lab does that now, with `iptables` when it exists and with `nft` otherwise. A host with `ufw` has the same kind of chain; that was not tried.
+- `build fresh` and `build vmhost`: a base Ubuntu 24.04 root file system by `debootstrap` (about 20 minutes the first time; the second machine took 6 seconds from the base), then a raw ext4 disk made with `mke2fs -d` without mounting it (1.1 GB used of 8 GB).
+- `start`, `wait`, `stop`, `destroy`: the machine boots its **own kernel** under QEMU with a direct kernel boot (no boot loader), `systemd` reports `running`, the static address and the gateway are right, `sshd` accepts the lab key and the root password, the machines reach each other over the bridge, and the machine reaches the Internet (ping, DNS, HTTP to the Ubuntu archive) through the NAT. A graceful stop took 3 seconds and a restart kept the disk.
+- The Python backend: `hosts.run` reaches a machine over ssh with the lab key, passes arguments (with spaces) and the script on standard input correctly, and `address` and `distros` give the right answers.
+- The unit tests of the backend choice, the addresses, the ssh commands, the stages of `deploy` (with every machine call stubbed) and `bash -n` of every script: the full suite passes.
+- QEMU had `/dev/kvm` in that test; the CPU module detection in `provision_devstack.sh` was read, not run on a Linux host.
+
+**Not proven.** Treat each of these as untested until a run on a Linux host says otherwise:
+
+- A real Linux host at all (the host side was emulated inside WSL), other distributions than Debian and Ubuntu, a host with `ufw` or `firewalld`, a host that is itself a virtual machine, nested virtualisation on real hardware.
+- The **lab machine** build with its extras, and **DevStack inside it** (on KVM or on plain QEMU): `provision_devstack.sh` is the one the WSL lab uses, but not under this machine's kernel (Ubuntu's generic kernel with `linux-modules-extra`) or its modules (LIO, `dm_thin_pool`, Open vSwitch).
+- The **migration host as a chroot** (`mover_chroot.sh`): the `debootstrap` of its root, LVM without udev (`udev_sync=0`), the `systemd` unit, `nsenter` into it from the outside, `sshd` on port 2202. It is the least certain part, because a chroot that shares the kernel and `/dev` with the machine that runs the volume groups has not been run.
+- `seed` and `more` against that cloud, the `more` growth of the volume groups inside the machine's 300 GB disk, `up` and `down` of the whole lab with its loop devices, and `OpenMove-Lab` style operation (`./openmove-lab.sh`).
+- `vm-up`: the iSCSI target with two portals on the lab machine and the multipath of the second machine.
+- `deploy` end to end (about 40 to 90 minutes), and its resumption after a stop.
+
+If `deploy` stops on any of these, the message says where; `python tools/lab/lab.py shell lab` opens the machine and `/opt/stack/logs/stack.out` holds the DevStack log.
+
 
 ## Troubleshooting the lab
 

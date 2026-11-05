@@ -1,6 +1,6 @@
 # Copyright (c) 2026 Eugene Beauzec and Obi1 - FZCO. All Rights Reserved.
 # Proprietary software; see LICENSE.
-"""Lab mode: OpenMove connected to a real OpenStack that runs on this machine (DevStack in a WSL distro, see tools/lab).
+"""Lab mode: OpenMove connected to a real OpenStack that runs on this machine (DevStack in a WSL distro on Windows, or in a virtual machine on a Linux host, see tools/lab).
 
 This is not the demonstration. The demonstration uses a mock cloud and simulates the migration. The lab is a real Keystone, Nova and
 Cinder (two LVM back-ends standing in for the two arrays), and the real engine moves real volumes in it with Cinder's retype.
@@ -25,12 +25,43 @@ from urllib.parse import urlencode, urlsplit
 LAB_KIND = "lab"
 DISTRO = "openmove-lab"
 DEFAULT_CONFIG = {"auth_url": "http://localhost/identity", "user": "admin", "project": "admin"}
+LINUX_SUBNET = "192.168.221"      # the private network of the lab machines on a Linux host (tools/lab/linux/labvm.sh)
+# machine name -> (last octet of its address, the ssh port the lab tools use). The migration host is a separate root file system inside the lab machine.
+LINUX_MACHINES = {"openmove-lab": (10, 22), "openmove-mover": (10, 2202), "openmove-fresh": (12, 22), "openmove-vmhost": (13, 22)}
 SOURCE_BACKEND = "sf-sim"       # the Cinder back-end that stands in for the source array
 TARGET_BACKEND = "pure-sim"     # ... and the target array
 
 
 class LabError(Exception):
     """The lab is not set up or not reachable. The message says what to do."""
+
+
+def backend():
+    """How the lab's machines are made and reached: `wsl` (Windows, WSL 2 distros) or `linux` (KVM virtual machines on a Linux host). OPENMOVE_LAB_BACKEND forces one."""
+    forced = os.environ.get("OPENMOVE_LAB_BACKEND", "").lower()
+    if forced in ("wsl", "linux"):
+        return forced
+    return "wsl" if os.name == "nt" else "linux"
+
+
+def linux_subnet():
+    try:
+        return str(json.loads((lab_dir() / "lab.json").read_text(encoding="utf-8-sig")).get("linux_subnet") or LINUX_SUBNET)
+    except (OSError, ValueError):
+        return os.environ.get("LAB_SUBNET") or LINUX_SUBNET
+
+
+def linux_target(machine):
+    """(address, ssh port) of a lab machine on a Linux host."""
+    if machine not in LINUX_MACHINES:
+        raise LabError("%s is not a lab machine (%s)" % (machine, ", ".join(sorted(LINUX_MACHINES))))
+    octet, port = LINUX_MACHINES[machine]
+    return "%s.%d" % (linux_subnet(), octet), port
+
+
+def lab_key():
+    """The ssh key the lab tools use to reach the lab machines on a Linux host (made by labvm.sh; lab only)."""
+    return lab_dir() / "ssh" / "lab_ed25519"
 
 
 def lab_dir():
@@ -50,6 +81,8 @@ def load_config():
         cfg = json.loads((d / "lab.json").read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         cfg = dict(DEFAULT_CONFIG)
+        if backend() == "linux":
+            cfg["auth_url"] = "http://%s/identity" % linux_target(DISTRO)[0]
     if not cfg.get("auth_url") or not secret.get("password"):
         raise LabError("lab.json needs auth_url and lab-secret.json needs password (folder %s)" % d)
     return dict(cfg, password=secret["password"])

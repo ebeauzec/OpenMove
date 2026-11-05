@@ -35,6 +35,8 @@ class LabHostsTests(unittest.TestCase):
         self.addCleanup(self.dir.cleanup)
         os.environ["OPENMOVE_LAB_DIR"] = self.dir.name
         self.addCleanup(os.environ.pop, "OPENMOVE_LAB_DIR", None)
+        os.environ["OPENMOVE_LAB_BACKEND"] = "wsl"          # these tests are about the WSL lab; tests/test_lab_linux.py is about the Linux host
+        self.addCleanup(os.environ.pop, "OPENMOVE_LAB_BACKEND", None)
         (Path(self.dir.name) / "lab.json").write_text(json.dumps({"auth_url": "http://127.0.0.1:1", "wsl_distro": "lab-one"}), encoding="utf-8")
         (Path(self.dir.name) / "lab-secret.json").write_text(json.dumps({"password": "unused-test-value"}), encoding="utf-8")
         self.home = Path(self.dir.name) / "home"
