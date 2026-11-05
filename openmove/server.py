@@ -525,6 +525,14 @@ def api_selection_set(state, body, query):
         merged = {} if body.get("reset_options") else dict(state.options or {})
         merged.update(body.get("options") or {})
         selection.check_options(merged, state.demo)               # raises SelectionError (a bad value is refused, never clamped)
+        if merged.get("one_approval") and not selection.options_of(state)["one_approval"]:
+            note = str(body.get("note") or "").strip()
+            if not body.get("acknowledged") or len(by) < 3 or len(note) < 8:
+                raise ApiError("One approval for every volume removes the second person's look at each volume. Switching it on needs your name, a reason (at least 8 characters) "
+                               "and your acknowledgement of the warning.", 409)
+            record.update({"standing_approval": "on", "reason": note, "warning_acknowledged": True})
+        elif selection.options_of(state)["one_approval"] and not merged.get("one_approval"):
+            record["standing_approval"] = "off"
         state.options = merged or None
         record["options"] = selection.options_of(state)
     if action:
@@ -797,9 +805,19 @@ WORKING = {"precheck": "being checked before the copy", "validate": "being check
            "postcheck": "being verified", "copy": "being copied"}
 
 
+def _standing(state):
+    """(first approver, second approver) while the option "one approval for every volume" is in force, else None."""
+    if not getattr(state, "options", None) or not getattr(state, "checks", None):       # nothing chosen, or the safety checks have not run
+        return None
+    return lifecycle.standing_signers(selection.options_of(state), _gate(state))
+
+
 def _wait_kind(state, r, mine):
-    """What a volume waits for from a person: 'g23' (second person: the copy is right and it is ready to switch), 'release' (you), 'g4' (second person: the result), or None."""
+    """What a volume waits for from a person: 'g23' (second person: the copy is right and it is ready to switch), 'release' (you), 'g4' (second person: the result), or None.
+    With the standing approval in force the approvals are signed by the system on its next look, so they are not asked of a person."""
     ph, gs = r["phase"], r.get("gates") or {}
+    if _standing(state):
+        gs = dict(gs, G2="standing", G3="standing", G4="standing")
     if mine:
         if ph in ("validate", "recheck"):
             if not (gs.get("G2") and gs.get("G3")):
@@ -931,8 +949,11 @@ def _board(state, rows, waiting):
 def _waits(state, rows):
     """What a real move waits for, from the engine's rows: (volumes that need a second person for G2 and G3, volumes that wait for the release, volumes that need a second person for G4)."""
     wait23 = held = wait4 = 0
+    standing = _standing(state)
     for r in rows:
         ph, gs = r["phase"], r["gates"]
+        if standing:
+            gs = dict(gs, G2="standing", G3="standing", G4="standing")
         if ph in ("validate", "recheck") and not (gs["G2"] and gs["G3"]):
             wait23 += 1
         elif ph in ("validate", "recheck") and r["id"] not in state.released:
@@ -1078,6 +1099,7 @@ def api_live(state, body, query):
             "simulation": {"status": sim.status, "running": sim.running, "throughput_mb_s": round(sim.throughput),
                            "rate_cap_mb_s": opts["rate_cap_mb_s"], "virtual_time": sim.vnow.strftime("%Y-%m-%d %H:%M"), "ticks": sim.ticks} if sim else None,
             "groups": [{"id": k, "label": label, "count": groups[k]} for k, label in GROUPS], "todo": list(todo.values()), "operator": who,
+            "standing": ({"first": _standing(state)[0], "second": _standing(state)[1]} if _standing(state) else None),
             "summary": _summary([r["state"] for r in rows]),
             "total": total, "started": len(st), "active": len(active), "counts": counts, "ready": held if mine else len(ready), "need_g23": need_g23, "need_g4": wait4 if mine else len(g4wait), "auto_sign": state.auto_sign, "options": opts,
             "by_class": {k: sum(1 for v in admitted if inv.get(v, {}).get("class") == k) for k in "ABC"} if admitted else {},

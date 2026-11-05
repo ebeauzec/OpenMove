@@ -177,7 +177,9 @@ class Simulation:
     def _auto_sign(self, gate):
         """Demonstration only: a made-up second person signs the volume gates, labelled synthetic. Off unless the screen switches it on."""
         who = getattr(self.state, "auto_sign", None)
-        if not who:
+        if not who:                                  # the option "one approval for every volume" works in the demonstration too
+            for vid in list(self._active):
+                L.apply_standing(self.state.journal, vid, gate, self.opts(), now=self.vnow, rules=selection.rules(self.opts()))
             return
         for vid in list(self._active):
             st = self._plan[vid]["stage"]

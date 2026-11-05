@@ -67,6 +67,7 @@
         if (f.type === 'textarea') inp = el('textarea', { rows: String(f.rows || 3) });
         else if (f.type === 'select') { inp = el('select'); f.options.forEach(function (op) { inp.appendChild(el('option', { value: op[0], text: op[1] })); }); }
         else inp = el('input', { type: f.type || 'text' });
+        if (f.type === 'checkbox') { inp.style.width = 'auto'; inp.style.display = 'block'; inp.style.margin = '6px 0 0 0'; }
         if (f.placeholder) inp.setAttribute('placeholder', f.placeholder);
         if (f.value != null) inp.value = f.value;
         inputs[f.key] = inp;
@@ -86,8 +87,8 @@
         ev.preventDefault();
         var vals = {}, bad = '';
         fields.forEach(function (f) {
-          var v = inputs[f.key].value;
-          if (f.type !== 'password') v = v.trim();
+          var v = f.type === 'checkbox' ? inputs[f.key].checked : inputs[f.key].value;
+          if (f.type !== 'password' && f.type !== 'checkbox') v = v.trim();
           vals[f.key] = v;
           if (!bad && f.min && v.length < f.min) bad = f.label + (f.min <= 3 ? ' is needed.' : ': please write at least ' + f.min + ' characters (you wrote ' + v.length + ').');
         });
@@ -1174,6 +1175,8 @@
     var box = $('live-now'); clear(box);
     var rows = [], kind = 'ok', eng = (lastStatus.recovery || {}).engine || null;
     function say(k, t) { rows.push(t); if (k === 'bad' || (k === 'warn' && kind !== 'bad')) kind = k; }
+    if (l.standing) say('warn', 'One approval for every volume is ON: ' + l.standing.first + ' (first approver) and ' + l.standing.second + ' (second approver) approved the safety checks once, ' +
+      'and the system signs every volume\'s approvals in ' + l.standing.second + '\'s name. No person looks at the volumes one by one. Switch it off in step 4, Choose.');
     if (l.halted) say('bad', 'Everything is stopped: ' + l.halted.by + ' pressed the emergency stop (' + l.halted.reason + '). Nothing moves until someone allows changes again.');
     if (eng && eng.trouble) say('warn', 'The move hit a problem and is trying again by itself: ' + eng.trouble);
     if (eng && eng.gaps && eng.gaps.length) say('ok', 'The computer paused for ' + eng.gaps[eng.gaps.length - 1] + ' s (sleep or a stall). OpenMove looked at every volume again; nothing was lost.');
@@ -1340,7 +1343,10 @@
       var lim = d.limits[k], wrap;
       if (typeof d.defaults[k] === 'boolean') {
         var cb = el('input', { type: 'checkbox' }); cb.checked = d.options[k];
-        cb.addEventListener('change', function () { setOption(k, cb.checked); });
+        cb.addEventListener('change', function () {
+          if (k === 'one_approval' && cb.checked) { cb.checked = false; confirmOneApproval(); return; }           // switched on only through the warning
+          setOption(k, cb.checked);
+        });
         wrap = el('label', { class: 'check', title: 'safe value: ' + (d.defaults[k] ? 'on' : 'off') }, [cb, document.createTextNode(' ' + d.labels[k])]);
       } else {
         var inp = el('input', { type: 'number', min: String(lim[0]), max: String(lim[1]), value: String(d.options[k]), title: lim[2] });
@@ -1349,6 +1355,21 @@
       }
       box.appendChild(wrap);
     });
+  }
+  function confirmOneApproval() {
+    ask({ title: 'One approval for every volume?', danger: true, ok: 'I understand: switch it on',
+      intro: 'WARNING. Normally a second person looks at every volume before it is switched (the copy is correct, ready to switch) and again after (the switch worked). ' +
+        'With this setting nobody does. The two approvers of the safety checks sign once, and the system signs those approvals for EVERY volume in the name of the second approver. ' +
+        'The history says so for every volume ("standing approval"), but no person looked at any single volume. A volume that fails a check is still stopped by the system; ' +
+        'what is lost is the human look at each volume.\n\nThe safety checks must be approved by two different people. If you run them again, this setting waits for their new approval. ' +
+        'You can switch it off at any time; volumes already approved stay approved.',
+      fields: [nameField('Your name'), { key: 'reason', label: 'Why is this acceptable here?', type: 'textarea', min: 8, hint: 'A few words. This is saved in the history.' },
+               { key: 'ack', label: 'I have read the warning', type: 'checkbox' }],
+      submit: function (v) {
+        if (!v.ack) throw new Error('Tick "I have read the warning" to go on.');
+        me = v.by;
+        return postSelection({ options: { one_approval: true }, by: v.by, note: v.reason, acknowledged: true }).then(function () { $('opt-status').textContent = 'Saved.'; loadSelection(); });
+      } }).then(function (v) { if (v) banner('warn', 'One approval for every volume is on. It is shown on the Progress page until you switch it off.'); });
   }
   function setOption(k, v) {
     var o = {}; o[k] = v;

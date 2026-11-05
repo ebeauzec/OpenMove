@@ -153,7 +153,41 @@ def gate_signed(journal, volume, gate_name, gate, h=None):
     return cur
 
 
-def sign_gate(journal, volume, gate_name, by, evidence, gate, withdraw=False, now=None, rules=None):
+def standing_signers(opts, gate):
+    """(first approver, second approver) when the option "one approval for every volume" is on and the safety checks are approved by two different people; otherwise None.
+    Then the second approver's name stands for the second person of every volume (G2, G3 and G4): see apply_standing."""
+    if not (opts or {}).get("one_approval") or not gate or gate.get("status") != "approved":
+        return None
+    so = gate.get("signoffs") or {}
+    first, second = str((so.get("operator") or {}).get("by") or "").strip(), str((so.get("reviewer") or {}).get("by") or "").strip()
+    if not first or not second or first.lower() == second.lower():
+        return None
+    return first, second
+
+
+def apply_standing(journal, volume, gate, opts, now=None, rules=None):
+    """Sign G2, G3 and G4 of this volume under the standing approval, each only when the volume is at that point and every other condition of the gate holds
+    (sign_gate decides: the same checks as for a person). The journal records each as signed by the second approver, with the note and standing=true, so that a
+    report can say that nobody looked at this volume on its own. Returns the gates signed now."""
+    who = standing_signers(opts, gate)
+    if not who:
+        return []
+    first, second = who
+    note = ("Standing approval: %s (first approver) and %s (second approver) approved the safety checks once, and the option \"one approval for every volume\" "
+            "stood for the second person of each volume. This volume was not looked at on its own." % (first, second))
+    signed = []
+    for g in VOLUME_GATES:
+        if gate_signed(journal, volume, g, gate):
+            continue
+        try:
+            sign_gate(journal, volume, g, second, note, gate, now=now, rules=rules, standing=True)
+            signed.append(g)
+        except LifecycleError:
+            pass
+    return signed
+
+
+def sign_gate(journal, volume, gate_name, by, evidence, gate, withdraw=False, now=None, rules=None, standing=False):
     """One person's sign-off (or withdrawal) of G2, G3 or G4 for one volume. Refused unless the volume is at the right point."""
     if gate_name not in VOLUME_GATES:
         raise LifecycleError("the volume gates are G2, G3 and G4")
@@ -184,7 +218,10 @@ def sign_gate(journal, volume, gate_name, by, evidence, gate, withdraw=False, no
                 raise LifecycleError("G3 cannot be signed yet: " + "; ".join(bad))
         if gate_name == "G4" and cur != "postcheck":
             raise LifecycleError("G4 is signed after the cutover, while the volume is in postcheck; it is in %s" % (cur or "no phase"))
-    journal.record("volume_gate", volume, {"gate": gate_name, "by": by, "evidence": evidence, "withdrawn": bool(withdraw)})
+    data = {"gate": gate_name, "by": by, "evidence": evidence, "withdrawn": bool(withdraw)}
+    if standing:
+        data["standing"] = True
+    journal.record("volume_gate", volume, data)
 
 
 def gates_of(journal, volume, gate, h=None):

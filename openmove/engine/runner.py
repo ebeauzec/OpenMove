@@ -364,6 +364,8 @@ class Engine(StagedMixin):
         h = safety.halted(self.state.journal)
         if h and ph != "soak":                      # a halt waits for a person, also before an unknown answer is read back
             return self.note(vid, "halted by %s: %s" % (h["by"], h["reason"]))
+        if ph and not acts.open_steps(vid):         # the option "one approval for every volume": the second approver of the safety checks stands for this volume's gates
+            L.apply_standing(self.state.journal, vid, self._gate(), selection.options_of(self.state), now=self.clock(), rules=self.rules())
         if acts.open_steps(vid):
             return self.settle(vid, acts)
         if self.method(vid) == L.STAGED:

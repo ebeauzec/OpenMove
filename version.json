@@ -1,8 +1,8 @@
 {
-  "version": "0.15.2",
+  "version": "0.16.0",
   "major": 0,
-  "minor": 15,
-  "patch": 2,
+  "minor": 16,
+  "patch": 0,
   "date": "2026-11-05",
-  "notes": "Lab: guests whose start was lost are started again; the safety checks page shows the lab approval"
+  "notes": "One approval for every volume: an option with a warning lets the two approvers sign once for all"
 }

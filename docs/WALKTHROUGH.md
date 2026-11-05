@@ -298,6 +298,7 @@ A sentence at the top answers the three questions at once, for example: *21 of 2
 
 Three kinds of action exist, and every action on the page carries its kind as a label: **Approval by a second person** (the copy is right and ready to switch, or the switch worked), **Release by you** (you say that the switch may happen) and **Your decision** (a volume was not moved).
 
+* **One approval for every volume.** If the option is on (step 4, Choose), the page shows an amber warning line, and the cards *Approval by a second person* stay empty: the system signs them in the name of the second approver of the safety checks.
 * **What you need to do.** One card for each kind of action that is waiting, with the number of volumes, the label of the kind, and the button that does it (**Approve before switching**, **Release all volumes that are ready to switch**, **Approve the result**, **Show these volumes** for the decisions). When nothing waits, the page says so: *Nothing. No volume is waiting for a person.*
 * **Every volume**: one line each, with the volume, the place it is in, one sentence about what happens next, and what you must do (a label, or *Nothing to do*). The volumes that need a person come first, then the ones that were not moved, then the rest. Click a volume to see exactly what is being done to it.
 * The **board** at the top of every page shows the same five places as small buttons next to the percentage, and the **Open actions** with their buttons.

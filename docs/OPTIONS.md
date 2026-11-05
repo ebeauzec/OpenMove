@@ -114,6 +114,7 @@ They start at their defaults. A value outside its limits is refused, never chang
 | Minutes between rechecks (`recheck_gap_min`) | 5 | 5 | 5 to 120 | Staged method. Five is the minimum |
 | Soak period, days (`soak_days`) | 7 | 7 | 1 to 90 | How long the source is kept untouched after the move. A reverse needs it. One day is the minimum |
 | Hold each volume until released (`hold_before_cutover`) | on | on | on or off | Each volume waits after G2 and G3 until the operator releases it |
+| One approval for every volume (`one_approval`) | off | off | on or off | **Less safe.** The two approvers of the safety checks (the operator and the second approver) approve once. The system then signs G2, G3 and G4 of every volume in the name of the second approver, as soon as the volume is at that point and the usual conditions hold (copy verified, rechecks passed, result checked). Switching it on asks for a name, a reason and a tick on a warning, and is journaled with all three. Every such signature is marked *standing approval* in the history. It works only while the safety checks are approved by two different people; run them again and it waits for the new approval. Switching it off stops new signatures; those already given stay in force. |
 | Halt automatically after this many failed volumes (`stop_after_failures`) | 10 | 10 | 0 to 500 (0 = never) | A run that keeps failing stops itself |
 
 ### Workload risk

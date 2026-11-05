@@ -25,6 +25,7 @@ DEFAULTS = {
     "recheck_gap_min": 5,          # minutes between the last two rechecks
     "soak_days": 7,                # days the source is kept after the cutover
     "hold_before_cutover": True,   # volumes wait, in sync, until a person releases them
+    "one_approval": False,         # the two approvers of the safety checks stand in for the second person of EVERY volume (G2, G3, G4): see lifecycle.apply_standing
     "stop_after_failures": 10,     # halt automatically when this many volumes failed in one run; 0 = never
 }
 DEMO_DEFAULTS = dict(DEFAULTS, concurrency=16, rate_cap_mb_s=600)
@@ -39,11 +40,12 @@ LIMITS = {
     "soak_days": (1, 90, "Days the source is kept untouched after the cutover. A rollback needs it."),
     "stop_after_failures": (0, 500, "Halt automatically when this many volumes failed in one run. 0 turns it off."),
 }
-BOOLEANS = ("hold_before_cutover",)
+BOOLEANS = ("hold_before_cutover", "one_approval")
 
 LABELS = {
     "concurrency": "Copies at the same time", "max_in_flight": "Volumes in progress at once (copying or waiting)", "rate_cap_mb_s": "Copy rate cap (MB/s per host)", "rechecks": "Rechecks before cutover",
     "recheck_gap_min": "Minutes between rechecks", "soak_days": "Soak period (days)", "hold_before_cutover": "Hold each volume until I release it for cutover",
+    "one_approval": "One approval for every volume: the two approvers of the safety checks sign once for all (less safe)",
     "stop_after_failures": "Halt automatically after this many failed volumes (0 = never)"}
 
 

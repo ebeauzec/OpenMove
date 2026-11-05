@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.16.0 (2026-11-05)
+
+### Added
+- New option **One approval for every volume** (off by default). The two approvers of the safety checks approve once; the system then signs G2, G3 and G4 of every volume in the second approver's name, each only when the volume is at that point and the usual conditions hold. Switching it on asks for a name, a reason and a ticked warning, all journaled; every signature is marked standing approval in the history; the Progress page shows a warning line while it is on. Looked at in the demonstration (warning dialog, refusal without the tick, journal entry, warning on the Progress data); not run against the real lab or a real cloud.
+
 ## 0.15.2 (2026-11-05)
 
 ### Fixed

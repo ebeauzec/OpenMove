@@ -235,6 +235,24 @@ class SimulationTests(DemoBase):
                 self.assertLess(phases.index("copy"), phases.index("sync"))
                 self.assertLess(phases.index("sync"), phases.index("cutover"))
 
+    def test_one_approval_for_every_volume_lets_the_run_finish_without_a_second_person_per_volume(self):
+        from openmove import lifecycle as L
+        from openmove.demo.simulate import Simulation
+        S.api_demo_approve(self.state, {}, {})
+        self.state.options = {"hold_before_cutover": False, "stop_after_failures": 0, "one_approval": True}
+        self.state.auto_sign = None                                    # nobody signs by hand
+        sim = Simulation(self.state, lambda: S._gate(self.state), tick=0)
+        self.state.sim = sim
+        sim.start()
+        sim._thread.join(timeout=60)
+        self.assertEqual(sim.status, "finished", sim.status)
+        gate = S._gate(self.state)
+        signed = [e for e in self.state.journal.events("volume_gate", None, 5000) if not e["data"].get("withdrawn")]
+        self.assertTrue(signed)
+        self.assertTrue(all(e["data"].get("standing") and e["data"]["by"] == gate["signoffs"]["reviewer"]["by"] for e in signed))
+        self.assertTrue(any(r["phase"] == "soak" for r in S.api_live(self.state, {}, {})["volumes"]))
+        self.assertTrue(S.api_live(self.state, {}, {})["standing"])
+
     def test_halt_pauses_the_run_and_resume_continues_it(self):
         from openmove import safety
         S.api_demo_approve(self.state, {}, {})
