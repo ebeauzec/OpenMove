@@ -1,8 +1,8 @@
 {
-  "version": "0.15.0",
+  "version": "0.15.1",
   "major": 0,
   "minor": 15,
-  "patch": 0,
+  "patch": 1,
   "date": "2026-11-05",
-  "notes": "Plain-words failures, moved/ready/completed for every volume, a guided Move step"
+  "notes": "Cinder's version document (HTTP 300) is read, so the release is detected exactly"
 }

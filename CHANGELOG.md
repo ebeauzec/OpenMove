@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.1 (2026-11-05)
+
+### Fixed
+- Found on the real lab: Cinder answers its version document with HTTP 300 (Multiple Choices), a normal answer. OpenMove treated it as a failure, so the Block Storage version was unknown ("no cinder version reported") and the release was ambiguous (2025.1 or 2025.2). A GET answered 300 with a body is now read as the answer; every other non-success answer is still a failure. The lab now reads Cinder 3.71 and release 2025.1 (exact).
+
+### Not done, and not proven
+- Seen on the lab: the version, the release, the new Move step (one type chosen by itself, "Automatic: pure-sim") and a rehearsal of 52 volumes. No volume was moved with this version.
+
 ## 0.15.0 (2026-11-05)
 
 ### Changed

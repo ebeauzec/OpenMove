@@ -75,13 +75,20 @@ class Http:
             with urllib.request.urlopen(req, timeout=self.timeout, context=self._ctx) as resp:
                 status, rheaders, raw = resp.status, resp.headers, resp.read(MAX_BODY + 1)
         except urllib.error.HTTPError as exc:
-            detail = ""
-            try:
-                detail = exc.read(2048).decode("utf-8", "replace")
-            except OSError:
-                pass
-            raise ConnectorError("%s %s answered %s %s" % (method, _safe_url(url), exc.code, _brief(detail)),
-                                 status=exc.code, url=url) from None
+            if exc.code == 300 and method in READ_METHODS:
+                # 300 Multiple Choices is how Cinder (and others) answer their version document: it is a normal answer with the versions in the body
+                try:
+                    status, rheaders, raw = 300, exc.headers, exc.read(MAX_BODY + 1)
+                except OSError:
+                    raise ConnectorError("%s %s answered 300 and the body could not be read" % (method, _safe_url(url)), status=300, url=url) from None
+            else:
+                detail = ""
+                try:
+                    detail = exc.read(2048).decode("utf-8", "replace")
+                except OSError:
+                    pass
+                raise ConnectorError("%s %s answered %s %s" % (method, _safe_url(url), exc.code, _brief(detail)),
+                                     status=exc.code, url=url) from None
         except (urllib.error.URLError, OSError, ssl.SSLError) as exc:
             reason = getattr(exc, "reason", exc)
             raise ConnectorError("%s %s failed: %s" % (method, _safe_url(url), reason), url=url,
