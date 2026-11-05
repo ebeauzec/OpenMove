@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.4 (2026-11-05)
+
+### Changed
+- The Open actions at the top of every page now carry the button that does the thing: Approve before switching, Release them for the switch, Approve the result, and, before the move, Approve as first approver, Approve as second approver, and a button that shows the safety checks that failed, need a person or are out of date. The button opens the same dialog as the one lower on the page, so nobody has to scroll and look for it. Before this, the approvals of the safety checks were only at the bottom of the Safety checks step and the top said nothing about them. The Back and Next buttons moved from the bottom of the page to the top, under the tabs. When something waits for a person and no move runs yet, the status says 'Waiting for you' and not 'No move is running'. GET /api/status carries do and cta for each open action.
+
 ## 0.12.3 (2026-11-04)
 
 ### Fixed

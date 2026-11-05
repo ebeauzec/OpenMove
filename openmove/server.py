@@ -797,7 +797,7 @@ def _board(state, rows, waiting):
         level, name, detail = "bad", "Everything is stopped", "%s pressed the emergency stop: %s. Nothing is changed until someone allows changes again." % (h["by"], h["reason"])
     elif status.startswith("stopped after an error"):
         level, name, detail = "bad", "Stopped by an error", "%s. Nothing was lost; start the move again from step 5, Move." % status
-    elif not rows and status in ("idle", "finished"):
+    elif not rows and not n and status in ("idle", "finished"):
         level, name, detail = "idle", "No move is running", "Nothing is moving. Go on with the steps; the move is started in step 5, Move."
     elif e and e.trouble:
         level, name, detail = "warn", "Trying again", "The move hit a problem and tries again by itself: %s" % e.trouble
@@ -839,25 +839,63 @@ def _operator(state):
     return ((e or {}).get("data") or {}).get("by") or ""
 
 
+def _waiting_before_the_move(state):
+    """What a person has to do with the safety checks before the move can start: confirm what OpenMove could not check, approve (first and second approver), or run them again."""
+    if state.demo or state.session is None:
+        return []
+    g = _gate(state)
+    if not g or g["status"] == "approved":
+        return []
+    out = []
+    if g["status"] == "blocked":
+        n = len(g["blockers"])
+        out.append({"kind": "checks_failed", "count": n, "tab": "preflight", "do": "goto", "cta": "Show the failed checks",
+                    "title": "%d safety check%s failed" % (n, "" if n == 1 else "s"), "text": "The move cannot start. Nothing was changed in the cloud.",
+                    "action": "Fix the cause, then run the safety checks again."})
+    elif g["status"] == "open":
+        n = len(g["open_items"])
+        out.append({"kind": "checks_confirm", "count": n, "tab": "preflight", "do": "goto", "cta": "Show the checks to confirm",
+                    "title": "%d safety check%s need%s a person to look and confirm" % (n, "" if n == 1 else "s", "s" if n == 1 else ""),
+                    "text": "OpenMove could not check %s by itself, often because it has no access yet." % ("it" if n == 1 else "them"),
+                    "action": "Check each one yourself, press \"I have checked this\" and write down what you checked."})
+    elif g["status"] == "stale":
+        out.append({"kind": "checks_stale", "count": 1, "tab": "preflight", "do": "goto", "cta": "Go to the safety checks",
+                    "title": "The safety checks are out of date", "text": g["message"], "action": "Run the safety checks again."})
+    elif g["status"] == "awaiting_signoff":
+        so = g.get("signoffs") or {}
+        if "operator" not in so:
+            out.append({"kind": "signoff_operator", "count": 1, "tab": "preflight", "do": "signoff:operator", "cta": "Approve as first approver",
+                        "title": "The safety checks need the first approval", "text": "The first approver is the person who runs the move.",
+                        "action": "Press \"Approve as first approver\"."})
+        if "reviewer" not in so:
+            out.append({"kind": "signoff_reviewer", "count": 1, "tab": "preflight", "do": "signoff:reviewer", "cta": "Approve as second approver",
+                        "title": "The safety checks need the second approval", "text": "The second approver is a different person, who reviews the checks.",
+                        "action": "Press \"Approve as second approver\"."})
+        if len(so) == 2:
+            out.append({"kind": "signoff_same", "count": 1, "tab": "preflight", "do": "goto", "cta": "Go to the safety checks",
+                        "title": "The first and the second approver are the same person", "text": g["message"], "action": "Two different people must approve."})
+    return out
+
+
 def _waiting(state, rows):
     """Everything a person has to do before the move can go on, in plain words, and where to do it. Empty when nothing waits for a person."""
+    out = _waiting_before_the_move(state)
     if not rows:
-        return []
+        return out
     w23, held, w4 = _waits(state, rows)
     who = _operator(state)
     other = ("%s started the move and cannot approve it." % who) if who else "The person who started the move cannot approve it."
-    out = []
     if w23:
-        out.append({"kind": "g23", "count": w23, "tab": "live", "button": "sign-g23",
+        out.append({"kind": "g23", "count": w23, "tab": "live", "button": "sign-g23", "do": "g23", "cta": "Approve before switching",
                     "title": "%d volume%s waiting for a second person to approve %s before %s switched" % (w23, " is" if w23 == 1 else "s are", "it" if w23 == 1 else "them", "it is" if w23 == 1 else "they are"),
                     "text": other,
                     "action": "Press \"Approve before switching\" (it pulses). A second person looks at them first (the copy is correct and the volume is ready to switch)."})
     if held:
-        out.append({"kind": "release", "count": held, "tab": "live", "button": "live-release",
+        out.append({"kind": "release", "count": held, "tab": "live", "button": "live-release", "do": "release", "cta": "Release them for the switch",
                     "title": "%d volume%s approved and waiting for you to release %s" % (held, " is" if held == 1 else "s are", "it" if held == 1 else "them"),
                     "text": "Nothing is switched until you say so.", "action": "Press \"Release all volumes that are ready to switch\" (it pulses)."})
     if w4:
-        out.append({"kind": "g4", "count": w4, "tab": "live", "button": "sign-g4",
+        out.append({"kind": "g4", "count": w4, "tab": "live", "button": "sign-g4", "do": "g4", "cta": "Approve the result",
                     "title": "%d volume%s switched over and waiting for a second person to approve the result" % (w4, " is" if w4 == 1 else "s are"),
                     "text": other,
                     "action": "Press \"Approve the result\" (it pulses). A second person confirms the volume works on its new storage."})

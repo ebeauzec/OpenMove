@@ -165,7 +165,7 @@ The table below describes each step in the technical names.
 
 ![The gated steps, with the pre-flight approved](images/06-preflight-approved.png)
 
-**Back and Next.** A bar at the bottom of every screen walks through the numbered steps in order (Back and Next name the step they lead to). The tabs at the top still work for jumping. The Journal is not a step; Back returns from it to the last step.
+**Back and Next.** A bar at the top of every screen, under the tabs, walks through the numbered steps in order (Back and Next name the step they lead to). The tabs at the top still work for jumping. The Journal is not a step; Back returns from it to the last step.
 
 The header shows the connection state, the version and the **HALT** button. A thin progress bar appears under the header on every tab once a migration has started.
 
@@ -339,7 +339,7 @@ Everything OpenMove reads about a customer's cloud stays on the machine it runs 
 | "the lab validation needs two different people". | Record lab validation (G0) needs two names, and a description of at least 40 characters. |
 | A volume on the Move tab says "the post-check failed: halted". | The result differs from the before-state. Look at the volume and the instance; reverse it, or fix it by hand, then resume. |
 | The engine seems stopped after a restart. | Sign in again when the page asks (the lab does it by itself). OpenMove puts the saved work back and carries on the move; nothing needs to be signed again. If the page says it could not, press *Try again* (`RECOVERY.md`). |
-| The top of every page shows Status, Progress and Open actions. | Status says in a few words how the move is (green: moving or finished; amber: waiting for a person or trying again; red: stopped; grey: no move running). Progress is the bar and the count of volumes switched. Open actions lists what only a person can do, with the button to press; the tab that holds the button shows a number, and the button pulses. Nothing waits for you when it says "Nothing needs you right now". |
+| The top of every page shows Status, Progress and Open actions. | Status says in a few words how the move is (green: moving or finished; amber: waiting for a person or trying again; red: stopped; grey: no move running). Progress is the bar and the count of volumes switched. Open actions lists what only a person can do, and each item has its own button (approve as first or second approver, approve before switching, release, approve the result); the button opens the same dialog as the one further down the page. The tab that holds the work shows a number. Nothing waits for you when it says "Nothing needs you right now". |
 | A bar at the top says "OpenMove is not answering". | OpenMove stopped or the computer slept. Your work is saved. The page carries on by itself when OpenMove is back; start `OpenMove-Lab.bat` or `OpenMove.bat` if it stays like this for more than a minute. |
 | "OpenMove is already running with this data folder". | Another OpenMove holds the same data folder. Use that one (the address is in its window) or close it first. Two programs on one journal would each move the same volumes. |
 | The Progress page says volumes wait for a second person. | The copy is finished and checked; G2 and G3 (or G4) need a person who is not the operator. Use the Approve button on the page. It is not stuck. |

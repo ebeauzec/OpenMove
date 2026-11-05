@@ -24,7 +24,7 @@ nav { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; }
 nav button { background: transparent; border: 1px solid transparent; border-bottom: 2px solid transparent; padding: 8px 14px;
   color: var(--muted); cursor: pointer; font: inherit; border-radius: 6px 6px 0 0; }
 nav button.active { color: var(--text); background: var(--surface); border-color: var(--border); border-bottom-color: var(--accent); }
-.wiz { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px 12px;
+.wiz { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; padding: 10px 12px;
         background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
 .wiz .wiz-mid { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
 .wiz-hint { color: var(--warn, #9a6700); font-size: .85rem; }

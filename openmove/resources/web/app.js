@@ -368,13 +368,24 @@
 
   // ---- the board at the top of every page: status, progress and open actions. Colour says how it is: green all well, amber a person is needed, red stopped, grey nothing running ----
   var NY_BUTTONS = ['sign-g23', 'live-release', 'sign-g4'];
+  // the button of an open action, at the top of the page: it opens the same dialog as the button further down the page
+  function doOpenAction(w) {
+    var after = function () { refreshStatus(); };
+    if (w.do === 'g23' || w.do === 'g4' || w.do === 'release') {
+      api('GET', 'live').then(function (l) { renderLive(l); return w.do === 'release' ? releaseVolumes({ all: true }) : signGates(w.do === 'g4' ? ['G4'] : ['G2', 'G3']); }).then(after).catch(function (e) { banner('bad', e.message); });
+    } else if (w.do === 'signoff:operator' || w.do === 'signoff:reviewer') {
+      api('GET', 'checks').then(function (c) { renderChecks(c); var role = w.do.split(':')[1]; return signoffDialog(c, role, role === 'operator' ? 'First approver' : 'Second approver'); }).then(after).catch(function (e) { banner('bad', e.message); });
+    } else {
+      showTab(w.tab, true);
+    }
+  }
   function drawBoard(b, list) {
     var box = $('topboard'); list = list || [];
     document.querySelectorAll('#tabs .tab-badge').forEach(function (x) { x.parentNode.removeChild(x); });
     NY_BUTTONS.forEach(function (id) { $(id).classList.remove('attention'); });
     if (!b) { box.className = 'topboard hidden'; clear(box); return; }
     var tabs = {};
-    list.forEach(function (w) { tabs[w.tab] = (tabs[w.tab] || 0) + w.count; $(w.button).classList.add('attention'); });
+    list.forEach(function (w) { tabs[w.tab] = (tabs[w.tab] || 0) + w.count; if (w.button && $(w.button)) $(w.button).classList.add('attention'); });
     Object.keys(tabs).forEach(function (t) {
       var tb = document.querySelector('#tabs button[data-tab="' + t + '"]');
       if (tb) tb.appendChild(el('span', { class: 'tab-badge', text: String(tabs[t]), title: 'Waiting for a person' }));
@@ -394,12 +405,10 @@
     if (!list.length) ac.appendChild(el('div', { class: 'tb-none', text: 'Nothing needs you right now.' }));
     list.forEach(function (w) {
       var item = el('div', { class: 'ny-item' });
-      item.appendChild(el('div', {}, [el('div', { class: 'ny-title', text: w.title }), el('div', { class: 'ny-do', text: w.action }), el('div', { class: 'ny-text', text: w.text })]));
-      if (currentTab !== w.tab) {
-        var go = el('button', { class: 'primary', type: 'button', text: 'Go to the button' });
-        go.addEventListener('click', function () { showTab(w.tab, true); setTimeout(function () { var x = $(w.button); if (x && x.scrollIntoView) x.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); });
-        item.appendChild(go);
-      }
+      item.appendChild(el('div', {}, [el('div', { class: 'ny-title', text: w.title }), el('div', { class: 'ny-text', text: w.text })]));
+      var go = el('button', { class: 'primary', type: 'button', text: w.cta || 'Go there' });      // the action is done from here: no hunting for the button further down
+      go.addEventListener('click', function () { doOpenAction(w); });
+      item.appendChild(go);
       ac.appendChild(item);
     });
     box.appendChild(st); box.appendChild(pr); box.appendChild(ac);
@@ -925,6 +934,13 @@
     }
     return box;
   }
+  function signoffDialog(c, role, label) {
+    return ask({ title: 'Approve the safety checks (' + label.toLowerCase() + ')',
+      intro: 'You are saying that you have read the safety checks and that the move may go ahead. Two different people must approve.',
+      fields: [nameField('Your name', role === 'reviewer' ? 'You must be a different person from the first approver.' : '', role === 'operator')], ok: 'Approve',
+      submit: function (v) { return api('POST', 'checks/signoff', { role: role, by: v.by }).then(function (r) { if (role === 'operator') me = v.by; renderChecks(r); refreshStatus(); }); } })
+      .then(function (v) { if (v) banner('ok', 'Approved by ' + v.by + '.'); });
+  }
   function signBox(c, role, label, help) {
     var so = (c.gate.signoffs || {})[role], box = el('div', { class: 'card sign' }, [el('div', { class: 'k', text: label })]);
     if (so) {
@@ -933,13 +949,7 @@
     }
     var ready = !c.gate.blockers.length && !c.gate.open_items.length, go = el('button', { class: 'primary', type: 'button', text: 'Approve' });
     go.disabled = !ready;
-    go.addEventListener('click', function () {
-      ask({ title: 'Approve the safety checks (' + label.toLowerCase() + ')',
-        intro: 'You are saying that you have read the safety checks and that the move may go ahead. Two different people must approve.',
-        fields: [nameField('Your name', role === 'reviewer' ? 'You must be a different person from the first approver.' : '', role === 'operator')], ok: 'Approve',
-        submit: function (v) { return api('POST', 'checks/signoff', { role: role, by: v.by }).then(function (r) { if (role === 'operator') me = v.by; renderChecks(r); refreshStatus(); }); } })
-        .then(function (v) { if (v) banner('ok', 'Approved by ' + v.by + '.'); });
-    });
+    go.addEventListener('click', function () { signoffDialog(c, role, label); });
     box.appendChild(el('div', { class: 'muted small', text: help })); box.appendChild(go);
     if (!ready) box.appendChild(el('div', { class: 'muted small', text: 'Available when nothing has failed and everything that needs a person is confirmed.' }));
     return box;

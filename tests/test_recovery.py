@@ -4,6 +4,7 @@
 import json
 import tempfile
 import threading
+import types
 import time
 import unittest
 import urllib.error
@@ -433,6 +434,29 @@ class ProgressPageTests(unittest.TestCase):
         self.state.engine = FakeViewEngine([self.row("a", "validate")])
         r = S.api_live(self.state, {}, {})["volumes"][0]
         self.assertEqual((r["name"], r["size"], r["volume_type"], r["snapshots"], r["attached_to"], r["source_backend"]), ("db-data", 50, "sf-gold", 3, ["db-server"], "sf-1"))
+
+    def gate(self, status, signoffs=None, blockers=0, open_items=0):
+        from unittest import mock
+        g = {"status": status, "message": "m", "signoffs": signoffs or {}, "blockers": [{}] * blockers, "open_items": [{}] * open_items}
+        self.state.session = types.SimpleNamespace(project_name="p")
+        return mock.patch.object(S, "_gate", lambda state: g)
+
+    def test_the_approvals_of_the_safety_checks_are_open_actions_with_their_own_button(self):
+        with self.gate("awaiting_signoff"):
+            acts = {w["kind"]: w for w in S.api_status(self.state, {}, {})["waiting"]}
+            self.assertEqual((acts["signoff_operator"]["do"], acts["signoff_reviewer"]["do"]), ("signoff:operator", "signoff:reviewer"))
+            self.assertEqual(S.api_status(self.state, {}, {})["board"]["state"], "Waiting for you")
+        with self.gate("awaiting_signoff", {"operator": {"by": "Olive"}}):
+            self.assertEqual([w["kind"] for w in S.api_status(self.state, {}, {})["waiting"]], ["signoff_reviewer"])
+        with self.gate("approved"):
+            self.assertEqual(S.api_status(self.state, {}, {})["waiting"], [])
+
+    def test_checks_that_need_a_person_or_failed_or_are_old_are_open_actions(self):
+        for status, kind, kw in (("open", "checks_confirm", {"open_items": 2}), ("blocked", "checks_failed", {"blockers": 1}), ("stale", "checks_stale", {})):
+            with self.gate(status, **kw):
+                w = S.api_status(self.state, {}, {})["waiting"]
+                self.assertEqual([x["kind"] for x in w], [kind])
+                self.assertEqual((w[0]["do"], w[0]["tab"]), ("goto", "preflight"))
 
     def test_release_reaches_a_volume_in_flight_that_is_not_in_todays_choice(self):
         self.state.engine = FakeViewEngine([self.row("held", "recheck", True, True)])

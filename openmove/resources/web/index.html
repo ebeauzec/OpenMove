@@ -49,6 +49,13 @@
     <button role="tab" data-tab="diagnostics" class="adv">Support</button>
   </nav>
 
+  <div id="wiz" class="wiz" aria-label="Steps">
+    <button id="wiz-back" class="secondary" type="button">Back</button>
+    <div class="wiz-mid"><span id="wiz-step" class="muted"></span><span id="wiz-hint" class="wiz-hint"></span></div>
+    <button id="wiz-next" class="primary" type="button">Next</button>
+  </div>
+
+
   <div id="recovery" class="recovery hidden" aria-live="polite"></div>
   <div id="guide" class="guide" aria-live="polite"></div>
 
@@ -505,11 +512,6 @@
     </details>
   </section>
 
-  <div id="wiz" class="wiz" aria-label="Steps">
-    <button id="wiz-back" class="secondary" type="button">Back</button>
-    <div class="wiz-mid"><span id="wiz-step" class="muted"></span><span id="wiz-hint" class="wiz-hint"></span></div>
-    <button id="wiz-next" class="primary" type="button">Next</button>
-  </div>
 </main>
 
 <dialog id="ask" class="ask"></dialog>
