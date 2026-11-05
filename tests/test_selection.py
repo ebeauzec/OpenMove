@@ -114,7 +114,8 @@ class SelectionTests(Base):
         self.assertTrue(o["hold_before_cutover"])
         self.assertEqual((o["rechecks"], o["recheck_gap_min"], o["soak_days"]), (2, 5, 7))
         for bad in ({"rechecks": 1}, {"recheck_gap_min": 4}, {"soak_days": 0}, {"concurrency": 0}, {"concurrency": 99}, {"rate_cap_mb_s": 1},
-                    {"hold_before_cutover": 1}, {"concurrency": 1.5}, {"unknown": 3}, {"rechecks": True}):
+                    {"hold_before_cutover": 1}, {"concurrency": 1.5}, {"unknown": 3}, {"rechecks": True},
+                    {"max_in_flight": 5}, {"concurrency": 20, "max_in_flight": 10}):
             with self.assertRaises(ValueError, msg=bad):
                 S.api_selection_set(self.state, {"options": bad}, {})
         self.assertIsNone(self.state.options)                          # nothing was half applied

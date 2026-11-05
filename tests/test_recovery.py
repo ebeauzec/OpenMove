@@ -18,7 +18,7 @@ from openmove.demo.mock_cloud import PASSWORD, MockCloud
 from openmove.engine import runner
 from openmove.server import create_server
 
-from tests.test_engine import GATE, SECOND, V1, V2, EngineCase
+from tests.test_engine import GATE, SECOND, V1, V2, V3, EngineCase
 
 
 class EngineLoopTests(EngineCase):
@@ -85,7 +85,7 @@ class EngineLoopTests(EngineCase):
         self.assertEqual(self.state.journal.latest("engine_gap")["data"]["seconds"], self.engine.gaps[0])
 
     def test_a_volume_in_its_safety_period_does_not_hold_back_the_next_ones(self):
-        self.state.options["concurrency"] = 1
+        self.state.options.update(concurrency=1, max_in_flight=1)
         self.start([V1, V2])
         self.engine.tick()
         self.assertEqual(self.engine.active, [V1])                  # one place, taken by the first
@@ -99,7 +99,7 @@ class EngineLoopTests(EngineCase):
         self.assertIn(V2, self.engine.active)                        # waiting out the safety period takes no place
 
     def test_a_place_that_is_freed_goes_to_the_next_volume_in_the_same_pass(self):
-        self.state.options["concurrency"] = 1
+        self.state.options.update(concurrency=1, max_in_flight=1)
         self.start([V1, V2])
         self.engine.tick()
         self.assertEqual(self.engine.active, [V1])
@@ -109,6 +109,39 @@ class EngineLoopTests(EngineCase):
         self.engine.tick()
         self.assertEqual(seen, [V1, V2])                             # the second started in the same pass, not five seconds later
         self.assertEqual(self.engine.active, [V2])
+
+    def test_volumes_that_wait_for_approval_do_not_use_a_copy_place(self):
+        self.state.options.update(concurrency=1, max_in_flight=5)
+        self.start([V1, V2])
+        for _ in range(4):
+            self.engine.tick()
+        self.assertEqual((self.phase(V1), self.phase(V2)), ("validate", "validate"))     # both validated and waiting for a second person
+        self.assertEqual(self.engine.counts()["copying"], 0)
+
+    def test_only_as_many_volumes_copy_at_once_as_there_are_copy_places(self):
+        self.state.options.update(concurrency=1, max_in_flight=5)
+        self.start([V1, V2])
+        for _ in range(3):
+            self.engine.tick()
+        self.sign(V1, "G2", "G3")
+        self.sign(V2, "G2", "G3")
+        self.engine.tick()
+        phases = sorted(str(self.phase(v)) for v in (V1, V2))
+        self.assertEqual(phases, ["cutover", "validate"])            # one copies, the other is ready and waits for a place
+        waiting = V1 if self.phase(V1) == "validate" else V2
+        self.assertIn("free copy place", self.engine.notes[waiting])
+        self.assertEqual(self.engine.counts()["copying"], 1)
+
+    def test_the_volumes_in_progress_are_bounded(self):
+        self.state.options.update(concurrency=1, max_in_flight=1)
+        self.start([V1, V2])
+        for _ in range(4):
+            self.engine.tick()
+        self.assertEqual((self.engine.active, self.engine.queue), ([V1], [V2]))          # the first waits for approval: the second does not start
+
+    def test_a_volume_that_waits_for_its_snapshots_goes_last(self):
+        self.start([V3, V1])
+        self.assertEqual(self.engine.queue, [V1, V3])
 
     def test_a_dead_thread_is_started_again(self):
         self.start([V1])                                            # thread=False: the run is meant to go on, and nothing is running it
@@ -445,7 +478,7 @@ class ProgressPageTests(unittest.TestCase):
         with self.gate("awaiting_signoff"):
             acts = {w["kind"]: w for w in S.api_status(self.state, {}, {})["waiting"]}
             self.assertEqual((acts["signoff_operator"]["do"], acts["signoff_reviewer"]["do"]), ("signoff:operator", "signoff:reviewer"))
-            self.assertEqual(S.api_status(self.state, {}, {})["board"]["state"], "Waiting for you")
+            self.assertEqual(S.api_status(self.state, {}, {})["board"]["state"], "Action required")
         with self.gate("awaiting_signoff", {"operator": {"by": "Olive"}}):
             self.assertEqual([w["kind"] for w in S.api_status(self.state, {}, {})["waiting"]], ["signoff_reviewer"])
         with self.gate("approved"):

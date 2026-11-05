@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.5 (2026-11-05)
+
+### Changed
+- The limit on simultaneous copies now counts only volumes that move data (copy, sync, cutover, rollback). A volume that waits for a person (the approvals, the release), for the run window, for its snapshots to rotate away or in its safety period no longer holds a copy place. A volume takes a copy place when everything else is in place and waits for a free place otherwise, with a note that says so. A second limit, volumes in progress at once (default 30, new setting max_in_flight), bounds the volumes that are copying or ready and waiting, so the space on the new storage, the staging copies and the open approvals stay bounded; volumes that wait on the clock are not counted, at most as many are watched as there are copy places, and class B volumes start last. The default for copies at the same time is 10 (was 8). The interface: every control has a tooltip; the Move step lists the three conditions of a real move with their state and a button for each; the helper servers are named before the safety checks, where the choice depends on them; the second copy of the approval buttons on the Move step is gone (they are in the open actions at the top and on the Progress step); the wording is plainer (Standard and Staged copy for the groups, Action required, No action required, Session restored). GET /api/engine carries slots.
+
 ## 0.12.4 (2026-11-05)
 
 ### Changed

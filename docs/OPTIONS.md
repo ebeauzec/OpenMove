@@ -107,7 +107,8 @@ They start at their defaults. A value outside its limits is refused, never chang
 
 | Setting | Default (real) | Default (demo) | Limits | Effect |
 |---|---|---|---|---|
-| Volumes at once (`concurrency`) | 8 | 16 | 1 to 32 | How many volumes are moved at the same time. A volume in its safety period takes no place, and a place that is freed goes to the next volume in the queue at once. Lower is gentler on production |
+| Copies at the same time (`concurrency`) | 10 | 16 | 1 to 32 | How many volumes move data at the same time: the copy, the sync and the cutover. A volume that waits for a person, for its snapshots to rotate away, or is in its safety period does not use a copy place. A volume that is ready and has both approvals waits for a free copy place, and takes it as soon as one is free. Lower is gentler on production |
+| Volumes in progress at once (`max_in_flight`) | 30 | 30 | 1 to 500 | How many volumes are copying, or ready and waiting for a person or a copy place, at once. It bounds the space used on the new storage, the staging copies that can go out of date, and the number of approvals open at one time. It cannot be lower than the copies at the same time. A volume that waits for snapshots to rotate away or is in its safety period does not count |
 | Copy rate cap, MB/s per host (`rate_cap_mb_s`) | 200 | 600 | 10 to 2000 | For the staged method: the data mover slows a copy to this rate (`rate_mbps` on a host entry sets it for one host) |
 | Rechecks before cutover (`rechecks`) | 2 | 2 | 2 to 5 | Passed rechecks in a row before a cutover (staged method). Two is the minimum of the process |
 | Minutes between rechecks (`recheck_gap_min`) | 5 | 5 | 5 to 120 | Staged method. Five is the minimum |

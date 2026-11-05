@@ -798,11 +798,11 @@ def _board(state, rows, waiting):
     elif status.startswith("stopped after an error"):
         level, name, detail = "bad", "Stopped by an error", "%s. Nothing was lost; start the move again from step 5, Move." % status
     elif not rows and not n and status in ("idle", "finished"):
-        level, name, detail = "idle", "No move is running", "Nothing is moving. Go on with the steps; the move is started in step 5, Move."
+        level, name, detail = "idle", "No move is running", "No volume is being moved. Continue with the steps; the move starts in step 5, Move."
     elif e and e.trouble:
         level, name, detail = "warn", "Trying again", "The move hit a problem and tries again by itself: %s" % e.trouble
     elif n:
-        level, name, detail = "warn", "Waiting for you", "%d thing%s only a person can do. Nothing else is holding the move back." % (n, "" if n == 1 else "s")
+        level, name, detail = "warn", "Action required", "%d action%s only a person can do. Nothing else holds the move back." % (n, "" if n == 1 else "s")
     elif status == "finished" or (rows and active == 0 and not counts.get("queued")):
         level, name, detail = "ok", "Finished", "Every volume of this move has reached its end."
     elif status == "stopped":
@@ -815,7 +815,7 @@ def _board(state, rows, waiting):
             bits.append("%d waiting for a free place" % counts["queued"])
         if counts.get("soak"):
             bits.append("%d in the safety period" % counts["soak"])
-        level, name, detail = "ok", "Moving", "%s. Nothing needs you right now." % (", ".join(bits) or "Working")
+        level, name, detail = "ok", "Moving", "%s. No action required." % (", ".join(bits) or "Working")
     return {"level": level, "state": name, "detail": detail, "total": total, "switched": switched, "active": active, "failed": failed, "percent": min(100.0, pct),
             "stages": [{"id": k, "label": label, "count": counts[k]} for k, label in STAGES if counts.get(k)], "actions": waiting}
 

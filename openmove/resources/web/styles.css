@@ -279,3 +279,9 @@ button.attention { animation: attn 1.4s ease-in-out infinite; outline: 3px solid
 .approve-vols table { font-size: .8rem; }
 .approve-vols .mono { font-family: ui-monospace, monospace; font-size: .72rem; }
 dialog.ask:has(.approve-vols) { width: min(1000px, 96vw); }
+.prereq { margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.prereq .prow { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.prereq .prow.ok .tick { color: var(--ok, #1a7f37); font-weight: 700; }
+.prereq .prow.open .tick { color: var(--warn, #9a6700); font-weight: 700; }
+.prereq .prow button { margin-left: auto; }
+.note-line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--muted); }

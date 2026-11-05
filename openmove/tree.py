@@ -7,9 +7,9 @@ shown with a short name and a sentence a person who has not read the method can 
 """
 
 PLAIN = {
-    "A": ("Easy", "ok", "No snapshots. The storage system can move it in one step."),
+    "A": ("Standard", "ok", "No snapshots. The storage system can move it in one step."),
     "B": ("Waits for snapshots", "warn", "Its snapshots are about to expire. OpenMove waits for them to go, then moves it like an easy one."),
-    "C": ("Careful copy", "warn", "It has snapshots that must be kept, so it is copied with the careful method. That needs a helper server."),
+    "C": ("Staged copy", "warn", "It has snapshots that must be kept, so it is copied in stages. That needs a helper server."),
     "D": ("Instance is off", "stop", "The instance it is attached to is not running. Start the instance, then read the volumes again."),
     "E": ("Not moved by this tool", "stop", "This kind of volume (for example encrypted, shared between instances or grouped) is not moved here. It is listed so a person can plan it."),
 }

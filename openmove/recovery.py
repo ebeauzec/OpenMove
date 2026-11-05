@@ -257,7 +257,7 @@ def start_restore(state, auto_resume=True):
             rec["message"] = ("You signed in to a different cloud or project than the one saved. The saved work is kept. "
                               "Sign in again to the same one, or choose Start fresh.")
         return False
-    rec.update(status="restoring", message="Getting back to where you were. OpenMove is reading the cloud again.")
+    rec.update(status="restoring", message="Restoring the session. OpenMove is reading the cloud again.")
     t = threading.Thread(target=_restore, args=(state, saved, auto_resume), name="openmove-recovery", daemon=True)
     t.start()
     return True
@@ -302,7 +302,7 @@ def _restore(state, saved, auto_resume):
                 state.journal.record("engine_resume", "batch", {"by": "OpenMove (automatic, after a restart)", "volumes": resumed})
             except S.ApiError as exc:                  # the permit said no (a halt, a stale pre-flight): the person decides
                 rec["resume_refused"] = str(exc)
-        text = ["Back where you were."]
+        text = ["Session restored."]
         if resumed:
             text.append("The move carried on by itself with %d volume%s." % (resumed, "" if resumed == 1 else "s"))
         elif rec.get("resume_refused"):

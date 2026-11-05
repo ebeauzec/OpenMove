@@ -179,7 +179,9 @@ The signer must not be the operator of the run (the person who signed the pre-fl
 
 ### Choosing what moves
 
-Before the run, the Select tab decides which admitted volumes take part. The default is every admitted volume except the high-risk ones. Volumes can be added or removed one by one or by group. The settings of the run (hold before the cutover, rechecks, gap, soak, concurrency, rate cap, stop after N failures) start at their defaults and can only be made stricter. Nothing about the selection changes while a run is in progress. Volumes admitted but not selected are reported as "not selected".
+Before the run, the Select tab decides which admitted volumes take part. The default is every admitted volume except the high-risk ones. Volumes can be added or removed one by one or by group. The settings of the run (hold before the cutover, rechecks, gap, soak, concurrency, rate cap, stop after N failures) start at their defaults and can only be made stricter. Nothing about the selection changes while a run is in progress.
+
+Two limits govern how many volumes the engine holds. Copies at the same time (default 10) limits the volumes that move data: copy, sync, cutover and rollback. Volumes in progress at once (default 30) limits the volumes that are copying or are ready and waiting for approval, for a release or for a copy place. A volume that waits on the clock does not count against either limit: a class B volume that waits for its snapshots to rotate away (at most as many are watched as there are copy places, and they are started last) and a volume in its safety period. A volume takes a copy place only when everything else is in place (both approvals, the release, the run window), so waiting volumes never keep a ready volume from copying. Volumes admitted but not selected are reported as "not selected".
 
 ### Workload risk
 

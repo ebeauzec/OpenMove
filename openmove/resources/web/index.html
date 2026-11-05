@@ -157,6 +157,7 @@
 
   <section id="tab-preflight" class="panel hidden">
     <h2>Safety checks</h2>
+    <p class="note-line">Volumes with long-lived snapshots are moved through a helper server. Set one up before you run the checks with "The cloud, the helper servers and the storage arrays". <button class="secondary" type="button" id="pf-to-hosts">Open helper servers</button></p>
     <div class="actions inline">
       <label>Move volumes from<select id="pf-source"><option value="">choose</option></select></label>
       <label>Move volumes to<select id="pf-target"><option value="">choose</option></select></label>
@@ -227,7 +228,7 @@
       <div><b>2. Start</b><span>OpenMove moves the volumes you chose, one after another, and checks each one.</span></div>
       <div><b>3. Second person approves</b><span>For each volume, a different person approves before the switch. See the Progress step.</span></div>
     </div>
-    <div id="mv-note" class="banner warn static">Before a real move can start, three things must be true: the lab tests for this OpenStack release are recorded (gate G0), the safety checks are approved, and nobody has pressed the emergency stop. Volumes with long-lived snapshots also need a helper server (see "Helper servers").</div>
+    <div id="mv-prereq" class="prereq" aria-live="polite"></div>
     <div class="actions inline">
       <button class="secondary big" id="mv-dry">1. Rehearse (changes nothing)</button>
       <button class="primary big" id="mv-start">2. Start moving</button>
@@ -248,15 +249,7 @@
         <label>Stop starting new volumes after (UTC)<input id="mv-until" placeholder="optional: 2026-11-08T04:00"></label>
       </div>
     </details>
-    <details class="more">
-      <summary>Approvals by the second person</summary>
-      <p class="muted">Each volume needs a second person, who is not the person running the move, to approve three points: the copy is correct, the volume is ready to switch, and the switch worked. You can approve for all volumes that are at that point.</p>
-      <div class="actions inline">
-        <button class="secondary" id="mv-g23">Approve before switching</button>
-        <button class="secondary" id="mv-g4">Approve the result</button>
-        <button class="secondary" id="mv-release">Release all volumes that are ready to switch</button>
-      </div>
-    </details>
+    <p class="muted">Approvals and releases are given from the open actions at the top of the page, and from the Progress step.</p>
     <details class="more">
       <summary>Undo: put volumes back</summary>
       <p class="muted">Preview first. The preview shows what undoing would do and changes nothing.</p>
@@ -382,7 +375,7 @@
   </section>
   <section id="tab-hosts" class="panel hidden">
     <h2>Helper servers</h2>
-    <div class="banner static"><b>Do you need this?</b> Only if some volumes have long-lived snapshots (the "Careful copy" group in the scan). Those volumes are copied by a small program, the <strong>data mover</strong>, running on a Linux <strong>migration host</strong>. A <strong>Cinder host</strong> creates the new volume record. One server can do both. If you have no such volumes, you can skip this page.</div>
+    <div class="banner static"><b>Do you need this?</b> Only if some volumes have long-lived snapshots (the "Staged copy" group in the scan). Those volumes are copied by a small program, the <strong>data mover</strong>, running on a Linux <strong>migration host</strong>. A <strong>Cinder host</strong> creates the new volume record. One server can do both. If you have no such volumes, you can skip this page.</div>
     <details class="more" open>
       <summary><strong>Step 1. OpenMove's public key</strong></summary>
       <p class="muted">Add this line to <code>~/.ssh/authorized_keys</code> of the login user on each helper server. It is the only credential OpenMove keeps.</p>

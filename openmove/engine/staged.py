@@ -171,6 +171,8 @@ class StagedMixin:
         if ph == "precheck":
             return self.s_validate(vid, acts)
         if ph == "validate":
+            if not self.copy_place(vid):
+                return self.snote(vid, "validated: waiting for a free copy place (%d of %d in use)" % (self.counts()["copying"], selection.options_of(self.state)["concurrency"]))
             n = len(ctx.get("chain", []))
             L.enter(self.state.journal, vid, "copy", {"validated": True, "snapshots": n}, now=self.clock(), rules=self.rules())
             return self.snote(vid, "copying %d snapshot image(s) to the target" % n)
@@ -499,6 +501,8 @@ class StagedMixin:
             return self.snote(vid, "ready: G2 and G3 are signed; waiting for you to release it for the cutover")
         if not self.in_window():
             return self.snote(vid, "ready: waiting for the run window (%s)" % self.window_text())
+        if not self.copy_place(vid):
+            return self.snote(vid, self.copy_wait_note())
         before = {"volume": vol, "snapshots": snaps, "servers": servers, "at": self.clock().strftime("%Y-%m-%dT%H:%M:%SZ")}
         self.ev.save(vid, "before.json", before)
         try:

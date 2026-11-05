@@ -18,7 +18,8 @@ Nothing here talks to a cloud.
 import math
 
 DEFAULTS = {
-    "concurrency": 8,              # volumes in flight at once
+    "concurrency": 10,             # volumes copied at the same time
+    "max_in_flight": 30,           # volumes in progress at once: copying, or ready and waiting for a person or a free place
     "rate_cap_mb_s": 200,          # copy rate cap per host
     "rechecks": 2,                 # passed rechecks needed before a cutover
     "recheck_gap_min": 5,          # minutes between the last two rechecks
@@ -30,7 +31,8 @@ DEMO_DEFAULTS = dict(DEFAULTS, concurrency=16, rate_cap_mb_s=600)
 
 # (low, high, meaning). The low end of rechecks, recheck_gap_min and soak_days is the floor of the process.
 LIMITS = {
-    "concurrency": (1, 32, "Volumes copied at the same time. Lower is gentler on production."),
+    "concurrency": (1, 32, "Volumes copied at the same time. Lower is gentler on production. A volume that waits for a person or for a snapshot does not use one."),
+    "max_in_flight": (1, 500, "Volumes in progress at once, copying or ready and waiting. It bounds the space used on the new storage and the number of approvals open at one time."),
     "rate_cap_mb_s": (10, 2000, "Copy rate cap per host, MB/s. Lower is gentler on production."),
     "rechecks": (2, 5, "Passed rechecks in a row before a cutover. Two is the minimum of the process."),
     "recheck_gap_min": (5, 120, "Minutes between the last two rechecks. Five is the minimum of the process."),
@@ -40,7 +42,7 @@ LIMITS = {
 BOOLEANS = ("hold_before_cutover",)
 
 LABELS = {
-    "concurrency": "Volumes at once", "rate_cap_mb_s": "Copy rate cap (MB/s per host)", "rechecks": "Rechecks before cutover",
+    "concurrency": "Copies at the same time", "max_in_flight": "Volumes in progress at once (copying or waiting)", "rate_cap_mb_s": "Copy rate cap (MB/s per host)", "rechecks": "Rechecks before cutover",
     "recheck_gap_min": "Minutes between rechecks", "soak_days": "Soak period (days)", "hold_before_cutover": "Hold each volume until I release it for cutover",
     "stop_after_failures": "Halt automatically after this many failed volumes (0 = never)"}
 
@@ -70,6 +72,8 @@ def check_options(opts, demo=False):
             out[k] = int(v)
         else:
             raise SelectionError("unknown option %r" % k)
+    if out["max_in_flight"] < out["concurrency"]:
+        raise SelectionError("max_in_flight (%d) must be at least concurrency (%d): copies are part of the volumes in progress" % (out["max_in_flight"], out["concurrency"]))
     return out
 
 

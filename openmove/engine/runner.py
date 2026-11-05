@@ -24,6 +24,9 @@ from .staged import StagedMixin
 
 ROTATION_TIMEOUT = timedelta(hours=72)      # how long a class B volume may wait for its snapshots to rotate away before it is given up
 MIGRATION_TIMEOUT = timedelta(hours=6)      # how long a retype may run before the engine halts and asks a person
+# phases in which data is moving, and phases in which a volume only waits on the clock (snapshots to rotate away, the safety period)
+COPYING = ("copy", "sync", "cutover", "rollback")
+WATCHING = ("precheck",)
 LOOP_PAUSE = 5                              # seconds between two ticks
 GAP_SECONDS = 90                            # a longer silence between two ticks means the computer slept or the program was stalled
 MAX_RETRIES = 40                            # errors in a row (with a growing pause, up to a minute) before the loop gives up and leaves the volumes to a person
@@ -200,6 +203,7 @@ class Engine(StagedMixin):
             started = self.open_volumes()
             ids = [i for i in (ids or self.candidates()) if (self.inv(i) or {}).get("class") in self.movable()]
             self.queue = [i for i in ids if self.phase(i) is None]
+            self.queue.sort(key=lambda i: (self.inv(i) or {}).get("class") == "B")      # a volume that waits for its snapshots to rotate away goes last
             self.active = started
             self.failed, self.finished = set(), set()
             self._specs = self.specs(acts, list(set(self.queue) | set(self.active)), self.type_map) if (self.queue or self.active) else {}
@@ -306,10 +310,32 @@ class Engine(StagedMixin):
             if not self.queue and not self.active:
                 self.status = "finished"
 
+    def counts(self):
+        """The volumes the engine holds, by what they use: copying (a copy place), in progress (copying, or ready and waiting), watched (waiting on the clock), in the safety period."""
+        ph = [self.phase(v) for v in self.active]
+        copying = sum(1 for p in ph if p in COPYING)
+        watched = sum(1 for p in ph if p in WATCHING)
+        soak = sum(1 for p in ph if p == "soak")
+        return {"copying": copying, "in_progress": len(ph) - watched - soak, "watched": watched, "soak": soak, "queued": len(self.queue)}
+
+    def room(self, o):
+        """Is there room to take one more volume from the queue? Volumes waiting on the clock (snapshots, the safety period) do not count as in progress; at most as many are watched as there are copy places."""
+        c = self.counts()
+        return c["in_progress"] < o["max_in_flight"] and c["watched"] < o["concurrency"]
+
+    def copy_place(self, vid):
+        """May this volume start moving data now? One that is already copying keeps its place; a new one needs a free place among the copy places."""
+        o = selection.options_of(self.state)
+        return self.phase(vid) in COPYING or self.counts()["copying"] < o["concurrency"]
+
+    def copy_wait_note(self):
+        o = selection.options_of(self.state)
+        return "ready: waiting for a free copy place (%d of %d in use)" % (self.counts()["copying"], o["concurrency"])
+
     def fill(self, o):
-        """Take volumes from the queue while there is a free place. A volume in its safety period only waits for days: it does not hold a place. Returns the volumes taken."""
+        """Take volumes from the queue while there is room. A volume only waits on the clock (snapshots to rotate away, the safety period) is not counted as in progress. Returns the volumes taken."""
         taken = []
-        while self.queue and sum(1 for v in self.active if self.phase(v) != "soak") < o["concurrency"] and not safety.halted(self.state.journal) and self.in_window():
+        while self.queue and self.room(o) and not safety.halted(self.state.journal) and self.in_window():
             vid = self.queue.pop(0)
             self.active.append(vid)
             taken.append(vid)
@@ -408,6 +434,8 @@ class Engine(StagedMixin):
             return self.note(vid, "ready: G2 and G3 are signed; waiting for you to release it for the retype")
         if not self.in_window():
             return self.note(vid, "ready: waiting for the run window (%s)" % self.window_text())
+        if not self.copy_place(vid):
+            return self.note(vid, self.copy_wait_note())
         sp = self.spec(vid, acts)
         vol, snaps, servers = self.read_all(acts, vid)              # fresh reads, right now: the volume may have changed since the validation
         checks = plan.validate(vol, snaps, servers, sp)
@@ -683,7 +711,8 @@ class Engine(StagedMixin):
                          "reversible": vid in rev, "method": "staged" if self.method(vid) == L.STAGED else "retype", "error": self.errors.get(vid, ""),
                          "stage": self.staged_progress(vid) if self.method(vid) == L.STAGED else None})
         lo, hi = self.window
-        return {"window": {"start_at": lo.strftime("%Y-%m-%dT%H:%M:%SZ") if lo else None, "stop_at": hi.strftime("%Y-%m-%dT%H:%M:%SZ") if hi else None,
+        slots = dict(self.counts(), copy_limit=selection.options_of(self.state)["concurrency"], in_progress_limit=selection.options_of(self.state)["max_in_flight"])
+        return {"slots": slots, "window": {"start_at": lo.strftime("%Y-%m-%dT%H:%M:%SZ") if lo else None, "stop_at": hi.strftime("%Y-%m-%dT%H:%M:%SZ") if hi else None,
                            "open": self.in_window()}, "reversible": len(self.reversible()),
                 "status": self.status, "ticks": self.ticks, "queued": len(self.queue), "active": len(self.active), "finished": len(self.finished),
                 "failed": len(self.failed), "volumes": rows, "more": max(0, len(ids) - 300), "halted": safety.halted(j),

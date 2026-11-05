@@ -297,7 +297,7 @@
     recShown = key; clear(box);
     var kind = r.status === 'done' || r.status === 'info' ? 'ok' : r.status === 'failed' ? 'bad' : '';
     box.className = 'recovery ' + kind;
-    var title = { waiting: 'OpenMove was restarted. Your work is saved.', restoring: 'Getting back to where you were ...', done: 'Back where you were.', failed: 'Could not get back to where you were.', info: 'OpenMove was stopped without closing.' }[r.status] || '';
+    var title = { waiting: 'OpenMove restarted. Saved work was found.', restoring: 'Restoring the session ...', done: 'Session restored.', failed: 'The session could not be restored.', info: 'OpenMove stopped without closing.' }[r.status] || '';
     box.appendChild(el('h3', { text: title }));
     box.appendChild(el('p', { text: r.message || '' }));
     var acts = el('div', { class: 'actions inline' });
@@ -402,11 +402,11 @@
     var head = el('div', { class: 'tb-label', text: 'Open actions' });
     if (list.length) head.appendChild(el('span', { class: 'tb-count', text: String(list.length) }));
     ac.appendChild(head);
-    if (!list.length) ac.appendChild(el('div', { class: 'tb-none', text: 'Nothing needs you right now.' }));
+    if (!list.length) ac.appendChild(el('div', { class: 'tb-none', text: 'No action required.' }));
     list.forEach(function (w) {
       var item = el('div', { class: 'ny-item' });
       item.appendChild(el('div', {}, [el('div', { class: 'ny-title', text: w.title }), el('div', { class: 'ny-text', text: w.text })]));
-      var go = el('button', { class: 'primary', type: 'button', text: w.cta || 'Go there' });      // the action is done from here: no hunting for the button further down
+      var go = el('button', { class: 'primary', type: 'button', text: w.cta || 'Open', title: w.tip || w.action || '' });      // the action is done from here: no hunting for the button further down
       go.addEventListener('click', function () { doOpenAction(w); });
       item.appendChild(go);
       ac.appendChild(item);
@@ -561,7 +561,7 @@
   });
 
   // ---- inventory ----
-  var CLS_NAME = { A: 'Easy', B: 'Waits for snapshots', C: 'Careful copy', D: 'Instance is off', E: 'Not moved by this tool' };
+  var CLS_NAME = { A: 'Standard', B: 'Waits for snapshots', C: 'Staged copy', D: 'Instance is off', E: 'Not moved by this tool' };
   function clsName(c) { return CLS_NAME[c] || String(c || '-'); }
   function renderInventory(inv) {
     inventory = inv;
@@ -890,7 +890,7 @@
 
   // ---- safety checks (the pre-flight) and the gate ----
   var GATE_TEXT = { approved: 'All clear: you can go on', blocked: 'Stopped: something failed', open: 'Not ready: a person must confirm some checks',
-                    awaiting_signoff: 'Almost ready: two approvals are needed', stale: 'Out of date: run the safety checks again' };
+                    awaiting_signoff: 'Two approvals are needed', stale: 'Out of date: run the safety checks again' };
 
   function isBlocker(c, k) { return k.status === 'fail' && (c.platform.indexOf(k) >= 0 || k.id === 'V9' || k.id === 'V10'); }
 
@@ -947,7 +947,7 @@
       box.appendChild(el('div', { class: 'v', text: '\u2713 ' + so.by })); box.appendChild(el('div', { class: 'muted small', text: 'Approved ' + String(so.at).replace('T', ' ').replace('Z', ' UTC') }));
       return box;
     }
-    var ready = !c.gate.blockers.length && !c.gate.open_items.length, go = el('button', { class: 'primary', type: 'button', text: 'Approve' });
+    var ready = !c.gate.blockers.length && !c.gate.open_items.length, go = el('button', { class: 'primary', type: 'button', text: 'Approve', title: 'Approve the safety checks as the ' + label.toLowerCase() + '. Two different people must approve.' });
     go.disabled = !ready;
     go.addEventListener('click', function () { signoffDialog(c, role, label); });
     box.appendChild(el('div', { class: 'muted small', text: help })); box.appendChild(go);
@@ -1097,13 +1097,13 @@
     var rows = [], kind = 'ok', eng = (lastStatus.recovery || {}).engine || null;
     function say(k, t) { rows.push(t); if (k === 'bad' || (k === 'warn' && kind !== 'bad')) kind = k; }
     if (l.halted) say('bad', 'Everything is stopped: ' + l.halted.by + ' pressed the emergency stop (' + l.halted.reason + '). Nothing moves until someone allows changes again.');
-    if (l.need_g23) say('warn', 'Nothing is stuck. ' + l.need_g23 + ' volume' + (l.need_g23 === 1 ? ' needs' : 's need') + ' a second person to approve it (the copy is correct and it is ready to switch) before it can be switched. Until then it keeps being checked. Press "Approve before switching" below. The second person must not be the one who started the move.');
+    if (l.need_g23) say('warn', l.need_g23 + ' volume' + (l.need_g23 === 1 ? ' needs' : 's need') + ' a second person to approve it (the copy is correct and it is ready to switch) before it can be switched. Until then it keeps being checked. Press "Approve before switching" below. The second person must not be the one who started the move.');
     if (l.need_g4) say('warn', l.need_g4 + ' volume' + (l.need_g4 === 1 ? ' is' : 's are') + ' switched over and waiting for a second person to approve the result. Press "Approve the result" below.');
     if (l.ready && !l.need_g23) say('warn', l.ready + ' volume' + (l.ready === 1 ? ' is' : 's are') + ' copied and checked, and waiting for your release. Use the button "Release all volumes that are ready to switch".');
     if (eng && eng.trouble) say('warn', 'The move hit a problem and is trying again by itself: ' + eng.trouble);
     if (eng && eng.gaps && eng.gaps.length) say('ok', 'The computer paused for ' + eng.gaps[eng.gaps.length - 1] + ' s (sleep or a stall). OpenMove looked at every volume again; nothing was lost.');
     if (eng && eng.revived) say('ok', 'The program that watches the move was started again ' + eng.revived + ' time' + (eng.revived === 1 ? '' : 's') + ' by its guardian. Nothing was lost.');
-    if (!rows.length && l.active) say('ok', l.active + ' volume' + (l.active === 1 ? ' is' : 's are') + ' being worked on. Nothing needs you right now.');
+    if (!rows.length && l.active) say('ok', l.active + ' volume' + (l.active === 1 ? ' is' : 's are') + ' being worked on. No action required.');
     box.className = 'livenow ' + kind + (rows.length ? '' : ' hidden');
     rows.forEach(function (t) { box.appendChild(el('p', { text: t })); });
   }
@@ -1176,9 +1176,27 @@
     $('sel-confirm-note').textContent = ok ? 'Confirmed. If you change the choice, or run the safety checks again, you must confirm again.' :
       'The next step (Move) stays closed until you confirm your choice.';
   }
+
+  // ---- the conditions a real move needs, with their state, on the Move step ----
+  function drawPrereq(s) {
+    var box = $('mv-prereq'); if (!box) return; clear(box);
+    if (!s || !s.connected) { box.className = 'prereq hidden'; return; }
+    box.className = 'prereq';
+    box.appendChild(el('div', { class: 'k', text: 'Before a real move can start' }));
+    function row(ok, text, label, go) {
+      var r = el('div', { class: 'prow ' + (ok ? 'ok' : 'open') }, [el('span', { class: 'tick', text: ok ? '\u2713' : '\u2022' }), el('span', { text: ' ' + text })]);
+      if (!ok && go) { var b = el('button', { class: 'secondary', type: 'button', text: label, title: go.tip }); b.addEventListener('click', go.run); r.appendChild(b); }
+      box.appendChild(r);
+    }
+    row(!s.read_only, 'The lab tests for this OpenStack release are recorded.', 'Open the lab tests', { tip: 'Open the list of lab tests and record gate G0.', run: function () { var d = $('p0-box'); if (d) { d.open = true; d.scrollIntoView({ behavior: 'smooth', block: 'start' }); } } });
+    row(s.gate === 'approved', 'The safety checks are approved by two people.', 'Go to the safety checks', { tip: 'Open the safety checks step.', run: function () { showTab('preflight', true); } });
+    row(!s.halted, 'The emergency stop is not pressed.', '', null);
+    box.appendChild(el('div', { class: 'muted small', text: 'Volumes with long-lived snapshots also need a helper server that is ready.' }));
+  }
   function drawMoveGate() {
     var w = wizardInfo('move');
     if (w) { drawSelConfirm(); }
+    drawPrereq(lastStatus);
     var st = $('mv-start');
     if (st) {                                       // a real run needs a rehearsal first; the server enforces it too
       st.disabled = !wizardDone('move');
@@ -1383,6 +1401,71 @@
       box.appendChild(el('div', { class: 'table-wrap' }, [t]));
     }
   }
+
+  // ---- tooltips: what each control does, in one sentence ----
+  var TIPS = {
+    'wiz-back': 'Return to the previous step.', 'wiz-next': 'Go to the next step. It opens when the current step is complete.',
+    'disconnect': 'Close the session with the cloud. Nothing in the cloud changes.',
+    'scan-run': 'Read the platform, the volumes and the health of the cloud. This only reads; nothing is changed.',
+    'tree-find': 'Show only the projects, instances and volumes that match.', 'tree-open': 'Expand every project and instance.', 'tree-close': 'Collapse every project and instance.',
+    'inv-backend': 'Limit the scan to the volumes on one storage system.', 'inv-window': 'A snapshot that expires within this many days counts as short-lived. Volumes whose snapshots will rotate away can wait and then move like any other.',
+    'inv-import': 'Use the query results pasted or loaded above instead of reading the Cinder database.', 'audit-run': 'Check the cloud for problems that would affect a move. Read-only.',
+    'discover': 'Read the OpenStack release, the storage systems and the services again.', 'inv-class': 'Show only the volumes in this group.', 'inv-search': 'Filter by id, name, project or host.', 'inv-run': 'Read the volumes from the cloud again.',
+    'pf-source': 'The storage system the volumes are on now.', 'pf-target': 'The storage system the volumes will be moved to.',
+    'pf-access': 'The cloud only: volumes with long-lived snapshots stay behind. With helper servers and arrays: those volumes can be moved too.',
+    'pf-run': 'Run every safety check against the cloud. Read-only. The result must be confirmed and approved by two people before a move can start.', 'pf-to-hosts': 'Open the helper servers page.',
+    'sel-confirm': 'Fix the choice of volumes. The Move step opens once it is confirmed; changing the choice later asks for a new confirmation.',
+    'sel-all': 'Choose every volume the safety checks admitted.', 'sel-none': 'Clear the choice.', 'sel-reset': 'Return to the suggested choice: every admitted volume except the high-risk ones.', 'sel-find': 'Show only the volumes that match.',
+    'sel-kind': 'Choose the way volumes are grouped: by project, instance, group or storage system.', 'sel-filter': 'Show only the volumes that match.',
+    'risk-op': 'First of two people confirms that the ticked volumes can be moved although they may be sensitive to it.', 'risk-rv': 'Second person confirms the same. It must be a different person.', 'risk-wd': 'Withdraw your own confirmation for the ticked volumes.',
+    'opt-reset': 'Set every setting back to its safe value.',
+    'mv-dry': 'List every call the move would make, in order, with its undo. Nothing is sent. A real run requires a rehearsal first.', 'mv-start': 'Start moving the chosen volumes. Each volume still waits for two approvals and for your release before it is switched.',
+    'mv-stop': 'Stop taking new volumes. Volumes already sent carry on in the cloud.', 'mv-refresh': 'Read the state of the move again.',
+    'mv-type': 'The volume type on the new storage. Leave empty if only one type fits.', 'mv-from': 'No volume is started before this time (UTC).', 'mv-until': 'No new volume is started after this time (UTC).',
+    'mv-rev-preview': 'Show what putting the whole move back would do. Nothing is changed.', 'mv-rev-all': 'Put every moved volume back on its original storage.',
+    'p0-g0': 'Record the lab validation for this OpenStack release from the results above. Without it OpenMove only reads.', 'mv-validate': 'Record the lab validation by typing the evidence yourself.',
+    'rep-customer': 'Shown on the first page and in the footer of every report.', 'rep-by': 'Shown as the author of the report.', 'rep-audit': 'Add the health check of the cloud to the report before the move.',
+    'rep-before': 'Word report: the state of the cloud and the plan, before any change.', 'rep-audit-only': 'Word report: the health check only.', 'rep-unmigrated': 'Word report: the volumes that are not moved, with the cause and the step to resolve it.',
+    'rep-update': 'Word report: the progress so far, volume by volume.', 'rep-after': 'Word report: each moved volume compared with its state before the move.', 'rep-xlsx': 'The volume list as an Excel file.', 'rep-csv': 'The volume list as a CSV file.',
+    'um-report': 'Word report: the volumes that are not moved, with the cause and the step to resolve it.',
+    'live-release': 'Allow every volume that has both approvals to be switched now. OpenMove checks every safety rule again for each volume.',
+    'sign-g23': 'Second person approves that the copy is correct and the volume is ready to switch. The person who started the move cannot approve.',
+    'sign-g4': 'Second person approves that the volume works on its new storage after the switch.',
+    'journal-refresh': 'Read the history again.',
+    'su-name': 'A short name for this server.', 'su-address': 'IP address or host name of the server.', 'su-port': 'SSH port of the server.', 'su-user': 'The administrator login used once to prepare the server.',
+    'su-password': 'Used once to prepare the server. It is never saved.', 'su-probe': 'Read the key of the server so that you can compare its fingerprint.', 'su-fp': 'The fingerprint you checked out of band. OpenMove trusts only this key.',
+    'su-by': 'Your name, saved with the record of the check.', 'su-proto': 'How the server reaches the storage arrays.', 'su-check': 'List what would be changed on the server. Nothing is changed.', 'su-run': 'Prepare the server and register it.',
+    'hs-sc-show': 'Show the preparation command to run on the server.', 'hs-sc-download': 'Download the preparation script.', 'hs-save': 'Save this server in the list.', 'hs-check': 'Check that every server answers and is ready.', 'hs-bench': 'Also read 64 MiB to measure the copy speed.',
+    'dg-bundle': 'Collect the logs and the state into one file for support. Secrets are removed.', 'dg-refresh': 'Read the list of files again.', 'dg-remote': 'Also collect the logs of the helper servers.', 'dg-log-save': 'Save the log settings.',
+    'demo-scenario': 'Choose the example cloud to explore.', 'imp-a1': 'Result of the playbook query A1: the volume inventory.', 'imp-a2': 'Result of the playbook query A2: snapshot churn.', 'imp-a4': 'Result of the playbook query A4: root volumes.', 'imp-inst': 'The attached instances.',
+    'pf-demo-validate': 'Demonstration only: record a made-up lab validation.', 'live-start': 'Start the simulated move with made-up data and a made-up clock.', 'live-stop': 'Stop the simulation.', 'sign-demo': 'Demonstration only: a made-up second person approves.',
+    'su-role-mover': 'The server copies the data of volumes with long-lived snapshots.', 'su-role-cinder': 'The server runs the Cinder volume service. OpenMove reads the Cinder database through it.',
+    'su-portals': 'The iSCSI portals of the arrays, one per line, as IP or IP:port.', 'su-initiator': 'The iSCSI initiator name. Leave empty to keep the one the server has.', 'su-chap-user': 'The CHAP user, if the arrays need one.', 'su-chap-secret': 'The CHAP secret. Used once, never saved.',
+    'su-timeo': 'Seconds before multipath replaces a lost path.', 'su-arr-pure': 'Add the multipath settings recommended for Pure FlashArray.', 'su-arr-sf': 'Add the multipath settings recommended for SolidFire.', 'su-mpextra': 'Extra text added to the multipath configuration.',
+    'su-from': 'Only this address may use the key. The address of this computer is recommended.', 'su-service': 'The account OpenMove uses on the server.', 'su-cpython': 'The Python interpreter Cinder uses. Leave empty to read it from the cinder-volume program.',
+    'hs-sc-role': 'What the server is used for.', 'hs-sc-user': 'The account created on the server.', 'hs-sc-from': 'Only this address may use the key.',
+    'hs-name': 'A short name for this server.', 'hs-address': 'IP address or host name of the server.', 'hs-port': 'SSH port of the server.', 'hs-user': 'The login OpenMove uses.', 'hs-python': 'The Python interpreter to use. Leave empty for python3.', 'hs-cuser': 'The user that can read cinder.conf. Optional.',
+    'hs-role-mover': 'The server copies the data of volumes with long-lived snapshots.', 'hs-role-cinder': 'The server runs the Cinder volume service.', 'hs-sudo': 'Run commands with sudo, without a password.',
+    'dg-level': 'How much the support bundle hides: names, addresses and secrets.', 'dg-log-level': 'How much the log file hides.',
+    'dg-token': 'A token that replaces a name or address in a support bundle.', 'dg-decode': 'Show the name or address behind the token.', 'halt-btn': 'Stop every change to the cloud at once. It asks for your name and a reason.', 'help-btn': 'Explain the steps of the tool.'
+  };
+  var NAME_TIPS = {
+    auth_url: 'The Identity (Keystone) address of the cloud, for example https://cloud.example.net:5000.', username: 'An administrator account.', password: 'Kept in memory for this session only. Never written to disk.', project_name: 'The project to sign in to.',
+    user_domain: 'The domain of the user. Usually Default.', project_domain: 'The domain of the project. Usually Default.', region: 'Only needed if the cloud has more than one region.', interface: 'Which type of OpenStack address to use. Public is the usual choice.',
+    ca_file: 'Path to the certificate authority file, for a cloud that uses a private authority.', verify: 'Check the security certificate of the cloud. Switch off only for a test cloud.'
+  };
+  var TAB_TIPS = {
+    connect: 'Sign in to the OpenStack cloud with an administrator account.', scan: 'Read the cloud: platform, volumes and health. Read-only.', preflight: 'Run the safety checks and have two people approve them.',
+    select: 'Choose the volumes to move and set the limits of the move.', move: 'Rehearse the move, then start it.', live: 'Follow the move, approve and release volumes.', reports: 'Build the reports in Word, Excel or CSV.',
+    journal: 'Everything OpenMove has done, in order.', hosts: 'Servers that copy volumes with long-lived snapshots.', diagnostics: 'Support bundle, logs and settings for support.'
+  };
+  function applyTips() {
+    Object.keys(TIPS).forEach(function (id) { var e = $(id); if (e && !e.getAttribute('title')) e.setAttribute('title', TIPS[id]); });
+    Object.keys(NAME_TIPS).forEach(function (n) { document.querySelectorAll('[name="' + n + '"]').forEach(function (e) { if (!e.getAttribute('title')) e.setAttribute('title', NAME_TIPS[n]); }); });
+    document.querySelectorAll('#tabs button[data-tab]').forEach(function (b) { var t = TAB_TIPS[b.dataset.tab]; if (t && !b.getAttribute('title')) b.setAttribute('title', t); });
+  }
+  applyTips();
+
   // the codes G2, G3 and G4 in a text from the server, in plain words
   function plain(t) {
     return String(t == null ? '' : t)
@@ -1675,9 +1758,7 @@
   });
   $('mv-stop').addEventListener('click', function () { guard($('mv-stop'), function () { return api('POST', 'engine/stop', {}).then(drawMove); }); });
   $('mv-refresh').addEventListener('click', loadMove);
-  $('mv-release').addEventListener('click', function () { releaseVolumes({ all: true }, $('mv-release')); });
-  $('mv-g23').addEventListener('click', function () { signGates(['G2', 'G3'], $('mv-g23')); });
-  $('mv-g4').addEventListener('click', function () { signGates(['G4'], $('mv-g4')); });
+  $('pf-to-hosts').addEventListener('click', function () { showTab('hosts', true); });
   $('mv-validate').addEventListener('click', function () {
     ask({ title: 'Record gate G0: the lab tests passed',
       intro: 'You are recording that the lab tests for this OpenStack release were run and passed. This lifts the look-only state of the release. Two different people are needed.',
@@ -1775,8 +1856,8 @@
       ['6. Progress', 'Watch each volume. A second person approves each volume before it is switched.'],
       ['7. Reports', 'Word and Excel reports for the customer and for your own records.']]));
     d.appendChild(el('h3', { text: 'How volumes are grouped' }));
-    d.appendChild(list([['Easy', 'No snapshots. The storage system moves it in one step.'], ['Waits for snapshots', 'Its snapshots are about to expire. OpenMove waits, then moves it like an easy one.'],
-      ['Careful copy', 'It has snapshots that must be kept. It is copied with the careful method and needs a helper server.'], ['Instance is off', 'The instance is not running. Start it, then scan again.'],
+    d.appendChild(list([['Standard', 'No snapshots. The storage system moves it in one step.'], ['Waits for snapshots', 'Its snapshots are about to expire. OpenMove waits, then moves it like an easy one.'],
+      ['Staged copy', 'It has snapshots that must be kept. It is copied in stages and needs a helper server.'], ['Instance is off', 'The instance is not running. Start it, then scan again.'],
       ['Not moved by this tool', 'Encrypted, shared or grouped volumes, for example. They are listed so that a person can plan them.']]));
     d.appendChild(el('h3', { text: 'Words you will see' }));
     d.appendChild(list([

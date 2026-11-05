@@ -1,8 +1,8 @@
 {
-  "version": "0.12.4",
+  "version": "0.12.5",
   "major": 0,
   "minor": 12,
-  "patch": 4,
+  "patch": 5,
   "date": "2026-11-05",
-  "notes": "Everything that needs a person is at the top of the page, with its own button"
+  "notes": "Copy places apart from volumes in progress; tooltips; the Move step lists what it needs"
 }
