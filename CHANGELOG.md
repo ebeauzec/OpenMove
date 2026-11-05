@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.13.0 (2026-11-05)
+
+### Added
+- Helper servers tab: a new host can be read (initiator name, Fibre Channel port names, interfaces, sessions, multipath) and configured from the interface, and a registered host is managed through OpenMove only, with OpenMove's key. Parameters: iSCSI portals, target IQNs, initiator, CHAP, interface binding, session settings; Fibre Channel target ports and scan; storage interface IPv4 address and MTU; ARP rules; multipath. The management interface is never changed. Control program openmove-hostctl (install by SHA-256, run). New routes hosts/inspect and hosts/configure; events host_inspected and host_configured. All documentation rewritten for the seven-step interface with new screenshots.
+
+### Changed
+- Documentation rewritten for the seven-step interface: `WALKTHROUGH.md` (every step, the board and open actions, copy places and volumes in progress, the Move checklist, the plain-words approvals, the Helper servers tab), `DEPLOYMENT.md` section 5.2 (the control program, reading the host, the configuration fields and their limits, what is left on the host), `OPERATIONS.md` (configuring a helper server, check C-6), `USER_GUIDE.md`, `OPTIONS.md` section 11 (every host field and limit), `SAFETY.md` rows 58 to 60, `NETWORK.md`, `MOVER.md`, `COVERAGE.md`, `ARCHITECTURE.md`. "Hosts tab" is now "Helper servers tab" everywhere.
+- Screenshots retaken from the real interface and renumbered 01 to 13 (the lab shots are 14 to 16 and are not retaken: the lab is shut down). The old screenshots of the nine-tab layout are removed. `tools/dev/screenshots.py` takes the Helper servers tab with a made-up host reading.
+- A link such as `/#hosts:mover-1` opens the Helper servers tab, selects that server and reads it.
+
+### Not done, and not proven
+- OpenMove cannot register a host on an array, zone a Fibre Channel fabric, create bonds or VLANs, or set IPv6 addresses. A loop initialisation (LIP) is not performed; the Fibre Channel scan only rescans.
+- Proven on WSL and on a QEMU virtual machine with iSCSI. Not proven: real Fibre Channel hardware, the Pure and SolidFire multipath stanzas against real arrays, hosts whose interfaces are managed by NetworkManager or netplan (OpenMove's boot unit applies the address after them).
+- A host prepared before this release has no control program: run the setup of that host once more with the administrator password.
+
 ## 0.12.5 (2026-11-05)
 
 ### Changed

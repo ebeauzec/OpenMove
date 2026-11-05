@@ -285,3 +285,5 @@ dialog.ask:has(.approve-vols) { width: min(1000px, 96vw); }
 .prereq .prow.open .tick { color: var(--warn, #9a6700); font-weight: 700; }
 .prereq .prow button { margin-left: auto; }
 .note-line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--muted); }
+.hostinfo h4 { margin: 1em 0 .2em; } .hostinfo table { margin: .3em 0; } .nic-locked { opacity: .6; }
+#su-storage h5, #mg-storage h5 { margin: 1em 0 .2em; }

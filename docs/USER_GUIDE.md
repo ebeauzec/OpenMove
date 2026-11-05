@@ -34,9 +34,9 @@ OpenMove runs on Windows, macOS and Linux. It contacts the OpenStack cloud you g
 
 **To move class A and B volumes (this version):** the same administrator account is enough, with the APIs only. A change is allowed only when the release has a recorded lab validation (gate G0), the pre-flight gate is approved, and a second person has signed G2 and G3 for each volume. Nothing is installed on any host.
 
-**To set up a migration host or a Cinder host:** give OpenMove the address and the administrator login of a plain Linux machine on the customer network (Hosts tab, **Set up a new host from here**). OpenMove logs in once with the password, installs its own key, prepares the host, sets up the iSCSI or Fibre Channel paths you describe, registers the host and checks it (`DEPLOYMENT.md`, section 4.1). The password is not kept.
+**To set up a migration host or a Cinder host:** give OpenMove the address and the administrator login of a plain Linux machine on the customer network (Helper servers tab, **Set up a new helper server from here**). OpenMove logs in once with the password, installs its own key, prepares the host, sets up the iSCSI or Fibre Channel paths you describe, registers the host and checks it (`DEPLOYMENT.md`, section 4.1). The password is not kept.
 
-**To move class C volumes (Hosts tab, `MOVER.md`):** the administrator account is not enough. That method also needs facts and actions that the OpenStack API does not offer:
+**To move class C volumes (Helper servers tab, `MOVER.md`):** the administrator account is not enough. That method also needs facts and actions that the OpenStack API does not offer:
 
 | Needed | For |
 |---|---|
@@ -145,6 +145,18 @@ The volume classes keep their letters in the documents. On the screen each has a
 **Messages and boxes.** A message is fixed at the top of the window, so it is seen wherever the page is scrolled; a good one fades after nine seconds, a problem stays until it is closed. Every question (confirm a check, approve, release, start, put back, emergency stop) opens one box with its fields. If the server refuses, the reason is shown inside the box and the box stays open. The **Help** button explains the steps and the words.
 
 **What to do next.** A panel at the top of every step says what the step is for and what to do. When the step is done it says so.
+
+**The board and the open actions.** Once a move exists, a board at the top of every page shows three things: *Status* (what OpenMove is doing, in one line), *Progress* (the volumes finished, copying, waiting, in their safety period, stopped) and *Open actions*. An open action is something only a person can do, for example "12 volumes wait for approval before switching". Each has its own button: **Approve before switching**, **Release**, **Approve the result**, and, before the move, **Approve as first approver**, **Approve as second approver** and **Confirm**. A button that needs a name or a reason opens one box with those fields; the box lists the volumes it covers, with size, project and instance. Back and Next are also at the top, under the tabs.
+
+**Copy places and volumes in progress.** Two settings decide how much runs at once. *Copies at the same time* (default 10) is the number of copy places: how many volumes are copied, synchronised or switched at the same moment. *Volumes in progress at once* (default 30) is how many volumes OpenMove works on at all. A volume that is only waiting (for approval, for the release, for the time window, for its snapshots to rotate away, or in its safety period) does not take a copy place. The queue therefore never stops because volumes are waiting: when a copy place is free, the next volume starts at once. Volumes of class B (waiting for snapshots) are queued last.
+
+**Tooltips.** Every field, button, tab and approval has a short explanation. Hold the pointer on it.
+
+**Before a real move can start.** The Move step opens with a checklist: the lab tests for this OpenStack release are recorded, the safety checks are approved by two people, the emergency stop is not pressed. A line that is not ticked has a button to the place where it is done. Volumes with long-lived snapshots also need a helper server that is ready.
+
+**The approvals, in plain words.** The technical gates G2, G3 and G4 are three approvals by a second person: *the copy is correct* (the copy was built on the new storage and compared with the original), *ready to switch* (the new record exists, the original is frozen and a way back is prepared) and *the switch worked* (the volume was checked on the new storage). The first two are given with one button, **Approve before switching**; then **Release** allows the switch. The third is **Approve the result**. The person who started the move cannot approve. The panel "What do the stages and the approvals mean?" on the Progress step explains each stage.
+
+**Helper servers.** The tab sets up and manages the servers that copy volumes with long-lived snapshots. Step 2 sets up a new server from its address and administrator login; step 3 reads and changes a server that is already set up. **Read the host** shows the iSCSI initiator name and the Fibre Channel port names (to register on the arrays, each with a Copy button), the network interfaces (the management interface is locked), the iSCSI sessions, the Fibre Channel target ports seen and the multipath devices. The form sets the iSCSI portals, target names, CHAP, the interfaces to bind, session settings, the address and MTU of the storage interfaces, the Fibre Channel target ports and the multipath settings. **Check only** changes nothing. Once a server is set up it is managed through OpenMove only, with OpenMove's key; the password is needed once, for the setup (`DEPLOYMENT.md` sections 4.1 and 5.2).
 
 The table below describes each step in the technical names.
 

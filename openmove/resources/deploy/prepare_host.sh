@@ -21,6 +21,7 @@
 #   mover   run the data mover as root:  env OPENMOVE_MOVER_HOME=* <python> */.openmove-mover/mover-*.py *
 #           The data mover itself writes only to volumes that carry its tag and to files in its own folder, but OpenMove places it in the service user's
 #           own folder, so treat this account as root on this host: key only, dedicated host, --from the OpenMove machine (docs/DEPLOYMENT.md, security).
+#           run /usr/local/sbin/openmove-hostctl as root: it installs OpenMove's storage scripts (checked by hash) and runs them, nothing else
 #   cinder  run the Cinder helper as the Cinder service user:  (cinder) every command   -- that user already owns the Cinder database credentials
 # Not granted: root shell, any other command, any other user.
 set -u
@@ -111,11 +112,57 @@ elif [ -n "$HOME_DIR" ]; then
   ok "OpenMove's key added to $HOME_DIR/.ssh/authorized_keys"
 fi
 
+# ---- 4a. the control program: how OpenMove changes this host later, without the password -----------------------------------------------------
+# After this setup OpenMove has only its key. The host's storage settings are read and changed through this one program, which takes only
+# three commands: install a script of OpenMove (checked by its hash), run it, and print the hashes. Nothing else is reachable through it.
+HOSTCTL=/usr/local/sbin/openmove-hostctl
+if [ "$ROLE" = "mover" ] || [ "$ROLE" = "both" ]; then
+  tmp="$(mktemp)"
+  cat > "$tmp" <<'HOSTCTL_EOF'
+#!/bin/bash
+# openmove-hostctl: written by OpenMove's prepare_host.sh. install NAME SHA256 (script on standard input) | run NAME [ARGS] | version
+set -u
+DIR=/usr/local/lib/openmove
+case "${1:-}" in
+  install)
+    name="${2:-}"; sha="${3:-}"
+    case "$name" in configure_storage.sh|inspect_host.py) ;; *) echo "not an OpenMove script: $name" >&2; exit 2 ;; esac
+    case "$sha" in *[!0-9a-f]*|"") echo "give the sha256 of the script" >&2; exit 2 ;; esac
+    [ "${#sha}" -eq 64 ] || { echo "give the sha256 of the script" >&2; exit 2; }
+    mkdir -p "$DIR"; chmod 755 "$DIR"
+    t="$(mktemp "$DIR/.new.XXXXXX")" || exit 1
+    cat > "$t"
+    got="$(sha256sum "$t" | cut -d' ' -f1)"
+    if [ "$got" != "$sha" ]; then rm -f "$t"; echo "the script arrived damaged (sha256 $got, expected $sha)" >&2; exit 3; fi
+    chmod 755 "$t"; mv -f "$t" "$DIR/$name"; echo "$sha" > "$DIR/$name.sha256"; echo "installed $name"
+    ;;
+  run)
+    name="${2:-}"; shift 2
+    case "$name" in
+      configure_storage.sh) [ -f "$DIR/$name" ] || { echo "install $name first" >&2; exit 4; }; exec bash "$DIR/$name" "$@" ;;
+      inspect_host.py) [ -f "$DIR/$name" ] || { echo "install $name first" >&2; exit 4; }; exec python3 "$DIR/$name" "$@" ;;
+      *) echo "not an OpenMove script: $name" >&2; exit 2 ;;
+    esac
+    ;;
+  version) for f in "$DIR"/*.sha256; do [ -f "$f" ] && echo "$(basename "$f" .sha256) $(cat "$f")"; done; exit 0 ;;
+  *) echo "usage: openmove-hostctl install NAME SHA256 | run NAME [ARGS] | version" >&2; exit 2 ;;
+esac
+HOSTCTL_EOF
+  if [ -f "$HOSTCTL" ] && cmp -s "$tmp" "$HOSTCTL"; then ok "the control program is in place ($HOSTCTL)"
+  elif act "the control program is missing or different ($HOSTCTL)"; then
+    mkdir -p /usr/local/lib/openmove && chmod 755 /usr/local/lib/openmove
+    install -m 755 -o root -g root "$tmp" "$HOSTCTL" && ok "the control program written to $HOSTCTL" || bad "could not write $HOSTCTL"
+  fi
+  rm -f "$tmp"
+fi
+
 # ---- 4. sudo rights --------------------------------------------------------------------------------------------------------------
 SUDOERS=/etc/sudoers.d/openmove
 want=""
 if [ "$ROLE" = "mover" ] || [ "$ROLE" = "both" ]; then
   want="$want$USER_NAME ALL=(root) NOPASSWD: /usr/bin/env OPENMOVE_MOVER_HOME=* * */.openmove-mover/mover-*.py *"$'
+'
+  want="$want$USER_NAME ALL=(root) NOPASSWD: $HOSTCTL *"$'
 '
 fi
 if [ "$ROLE" = "cinder" ] || [ "$ROLE" = "both" ]; then

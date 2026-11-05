@@ -180,7 +180,7 @@ flowchart LR
 * **Halt.** A button in the header. Needs a name and a reason. Any person may press it. It takes effect before the next change.
 * **One sender.** `actions.py` is the only engine code that calls `session.mutate()`. Reading that one file is enough to review every change the engine can make.
 
-* **Gated wizard.** `wizard.py` decides, on the server, which of the nine steps is open. A step opens only when every earlier step is done; the selection must be confirmed for the exact pre-flight run and volume ids; a real run needs a dry run that covered the same volumes. The page only draws what `/api/status` says (`wizard`).
+* **Gated wizard.** `wizard.py` decides, on the server, which of the nine internal steps (shown as seven on the screen: Platform, Inventory and Audit are one step, Scan) is open. A step opens only when every earlier step is done; the selection must be confirmed for the exact pre-flight run and volume ids; a real run needs a dry run that covered the same volumes. The page only draws what `/api/status` says (`wizard`).
 
 The hazards and the control for each are listed in `SAFETY.md`.
 
@@ -223,7 +223,7 @@ The files hold cloud answers (ids, states, sizes). They never hold a password or
 
 ### The gated wizard
 
-The nine steps are not just tabs. `wizard.steps()` computes, from the state the server holds, which step is done and which is open, and `/api/status` returns it. The page draws it and cannot open a step the server did not open.
+The steps are not just tabs (nine internally, seven on the screen). `wizard.steps()` computes, from the state the server holds, which step is done and which is open, and `/api/status` returns it. The page draws it and cannot open a step the server did not open.
 
 ```mermaid
 %%{init: {"theme": "base", "fontFamily": "Arial, Helvetica, sans-serif", "themeVariables": {"fontSize": "15px"}, "flowchart": {"htmlLabels": false, "padding": 32, "nodeSpacing": 40, "rankSpacing": 50}}}%%
@@ -288,3 +288,7 @@ Run the automated tests with `python -m unittest discover -s tests -t .`. There 
 4. `engine/runner.py`: what comes next for a volume.
 5. `engine/plan.py`: the checks and the dry run.
 6. `server.py`: the routes.
+
+## Managing a host after its setup
+
+`bootstrap.py` holds the host setup and, since 0.13.0, the later management of a registered host. The first setup uses the administrator password once (`prepare_host.sh`, then `configure_storage.sh`); `prepare_host.sh` also installs `/usr/local/sbin/openmove-hostctl` and a sudo rule for it. From then on `bootstrap.inspect` and `bootstrap.reconfigure` reach the host with OpenMove's key: they send `inspect_host.py` or `configure_storage.sh` to the control program (`install NAME SHA256`, checked on the host), then run it (`run NAME ARGS`). The request is checked by `bootstrap.clean_storage` (closed patterns and ranges); the management interface is found from the address of the connection (`--mgmt-peer`, from `SSH_CONNECTION`) and the default route and is never changed; the CHAP secret travels on standard input only. The routes are `POST /api/hosts/inspect` and `POST /api/hosts/configure` (`server_hosts.py`); the page is the Helper servers tab. A configuration is saved to the host's registry entry (without secrets) only after a change that succeeded.

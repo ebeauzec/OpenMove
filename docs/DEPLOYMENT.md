@@ -32,15 +32,16 @@ flowchart LR
 | Place the data mover on the migration host | **OpenMove** | Sent over SSH, checked by its SHA-256, kept in the login user's `.openmove-mover` folder (check H3) |
 | Send the Cinder helper to the Cinder host | **OpenMove** | Sent on standard input for each call; nothing is left on the host |
 | Make OpenMove's SSH key | **OpenMove** | When the first host is saved, or by `--host-setup` |
-| Run the host checks and say what is missing | **OpenMove** | Hosts tab: H1 to H9, C1, C2 (`MOVER.md`, section 4) |
-| Remove the data mover | **OpenMove** | Hosts tab, Remove the data mover |
+| Run the host checks and say what is missing | **OpenMove** | Helper servers tab: H1 to H9, C1, C2 (`MOVER.md`, section 4) |
+| Remove the data mover | **OpenMove** | Helper servers tab, Remove the data mover |
 | Collect logs and write support bundles | **OpenMove** | `DIAGNOSTICS.md` |
-| Log in with the administrator password once, prepare the host (account, packages, key, sudo rights, sshd) and register it | **OpenMove**, when a person gives the address and the login | Hosts tab, **Set up a new host from here** (section 4.1) |
+| Log in with the administrator password once, prepare the host (account, packages, key, sudo rights, sshd) and register it | **OpenMove**, when a person gives the address and the login | Helper servers tab, **Set up a new helper server from here** (section 4.1) |
 | Set up the iSCSI initiator, multipath and the logins to the arrays on the migration host | **OpenMove**, from the description a person gives | `configure_storage.sh`, section 5.1 |
+| Read the host (initiator name, FC ports, interfaces, sessions, multipath) and change its storage configuration later, with the key only | **OpenMove**, through the control program on the host | Helper servers tab, step 3 (section 5.2) |
 | The same preparation without giving OpenMove a password | **OpenMove's script, run by an administrator** | `prepare_host.sh`, section 4.2 |
 | Register the host's initiator name (or FC port names) on each array, zone Fibre Channel, give the host access to the volumes it will see | **A person** | Section 5 (it depends on the arrays; OpenMove shows the name to register) |
 | Install a Linux machine with `sshd` and a network leg on the storage network | **A person** | Section 4.1 |
-| Compare the host key's fingerprint with the host's own and pin it | **A person** | Hosts tab, Check host key. This is never done by the tool alone |
+| Compare the host key's fingerprint with the host's own and pin it | **A person** | Helper servers tab, Check host key. This is never done by the tool alone |
 | Open the firewall between OpenMove and the hosts | **A person** | Section 6 |
 | Install the SSH client where OpenMove runs | **A person**, or the container image | Section 3 |
 
@@ -69,7 +70,7 @@ A host is a Linux machine that OpenMove reaches by SSH. One machine may hold bot
 **Requirements for the host**
 
 * Linux with `sshd`, **Python 3.6 or later** (the data mover is written for 3.6 and up and uses only the standard library), and for the migration host `lvm2`, `util-linux` and `coreutils`.
-* For the **Cinder host**: the machine that runs `cinder-volume` for the back-ends, and **the Python interpreter that Cinder uses** (in a virtual environment or a container this is not `/usr/bin/python3`). Give its path on the Hosts tab (field Cinder Python). The helper uses Cinder's own object layer; it needs no database password of its own.
+* For the **Cinder host**: the machine that runs `cinder-volume` for the back-ends, and **the Python interpreter that Cinder uses** (in a virtual environment or a container this is not `/usr/bin/python3`). Give its path on the Helper servers tab (field Cinder Python). The helper uses Cinder's own object layer; it needs no database password of its own.
 * The login account does not have to be `root`. It needs the sudo rights in section 4.3 or to be `root`.
 
 ### 4.1 Set up a host from OpenMove (the normal way)
@@ -82,11 +83,11 @@ OpenMove sets up a new host by itself. A person prepares a plain Linux machine a
 * `sshd` running, and an account that OpenMove may use with a password: `root` with `PermitRootLogin yes`, or another account that has passwordless `sudo`. The password login can be switched off again after the setup.
 * A way to install packages: the host's package repository, or the packages of section 8.
 
-**What a person does in OpenMove** (Hosts tab, **Set up a new host from here**)
+**What a person does in OpenMove** (Helper servers tab, **Set up a new helper server from here**)
 
 1. Give the host a name, its address, the administrator login and password, and its roles (migration host, Cinder host, or both).
 2. **Read the host key.** Compare the fingerprint with the host's own (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the host, or its console) and type what you checked, with your name. OpenMove sends the password only after the key is pinned. It refuses a key other than the one you checked.
-3. Describe the storage paths when the host needs them (section 5.1): the iSCSI portals, the initiator name, CHAP, the array types. Choose **none** when the host already sees its storage.
+3. Describe the storage paths when the host needs them (sections 5.1 and 5.2): the iSCSI portals, target names, initiator name, CHAP, interface binding, addresses and MTU of the storage interfaces, or the Fibre Channel target ports, and the array types. **Read the host** first lists the interfaces, the initiator name and the Fibre Channel ports, so the form is filled in from facts. Choose **none** when the host already sees its storage.
 4. **Check only** reports what the host is missing and changes nothing. **Set up the host** does the work.
 
 **What OpenMove does.** Each step is shown with its complete output. The host is registered only when every step has passed.
@@ -103,7 +104,7 @@ After S5 OpenMove saves the host (login `openmove`, `sudo` on for a migration ho
 
 **The password.** It is used for steps S1 to S4 and then dropped. It is read from the request, held in memory, and given to `ssh` through the environment of that process and a small helper (`SSH_ASKPASS`). It is not in a command line, a file, the journal, a log, the call trace, a support bundle or an answer. It is not left on the host. The CHAP secret is handled the same way: it goes to the script on standard input and is written only into `iscsid.conf` on the host, readable by root. The registry (`hosts.json`) keeps the storage description without the secret. Change the administrator password after the setup if it was a temporary one.
 
-**Running it again.** Both scripts look before they change anything, so a failed setup is repaired by correcting the cause and pressing **Set up the host** again. To change a host's storage paths, run it again with the new description (the password is asked again; OpenMove does not keep it).
+**Running it again.** Both scripts look before they change anything, so a failed setup is repaired by correcting the cause and pressing **Set up the host** again. To change a host's storage paths later, use step 3 of the Helper servers tab (section 5.2): it needs only OpenMove's key. Run the setup again with the password only for a host that has no control program.
 
 **If it does not work**
 
@@ -119,7 +120,7 @@ After S5 OpenMove saves the host (login `openmove`, `sudo` on for a migration ho
 
 **Status.** Proven in the lab twice. (1) On a bare WSL host that had only `sshd` and the `root` password: S1, S2 and S5 passed, the host was registered and H1 to H7 passed. (2) On a **real virtual machine with its own kernel** (Ubuntu 24.04, kernel 6.8, QEMU with KVM; `LAB.md`, "A real virtual machine for the storage paths"), through the interface: the setup logged in with the password, prepared the host, set the initiator name, set CHAP, logged in to **two iSCSI portals**, and showed **2 sessions and 1 multipath device with 2 paths**; H1 to H7 passed (H7 checked `iscsiadm` and `multipath`). On that machine data written through the multipath device read back identical; with one path logged out the device stayed up on the other and read the same data, and the path came back when logged in again; after a reboot both sessions and the map came back by themselves and the data was identical; running the setup again changed nothing. **Not proven:** the target in the lab is the Linux target (LIO), not a FlashArray or SolidFire, so the Pure and SolidFire multipath settings were written but not exercised against those arrays; Fibre Channel was not tried; the registration of the initiator on a real array is a person's step. The WSL hosts of the lab share one kernel with the Cinder host, so `iscsid` cannot start in a second distro and `multipathd` refuses to start inside a container; step S4 reports exactly these reasons if the setup is tried there.
 
-### 4.2 The script, by hand or from the Hosts tab
+### 4.2 The script, by hand or from the Helper servers tab
 
 OpenMove writes the script and the command, with its own public key filled in:
 
@@ -127,7 +128,7 @@ OpenMove writes the script and the command, with its own public key filled in:
 python -m openmove --host-setup both --out .
 ```
 
-The same is on the Hosts tab: **Prepare a host (script)**, with a button to show the command and a button to download `prepare_host.sh`. Choose the role (`mover`, `cinder` or `both`) and, as a protection, the address of the machine that runs OpenMove. Copy `prepare_host.sh` to the host and run the command as an administrator:
+The same is on the Helper servers tab: **Prepare a host (script)**, with a button to show the command and a button to download `prepare_host.sh`. Choose the role (`mover`, `cinder` or `both`) and, as a protection, the address of the machine that runs OpenMove. Copy `prepare_host.sh` to the host and run the command as an administrator:
 
 ```bash
 sudo bash prepare_host.sh --role both --user openmove --key 'ssh-ed25519 AAAA... openmove' --from 192.0.2.5
@@ -136,7 +137,7 @@ sudo bash prepare_host.sh --role both --user openmove --key 'ssh-ed25519 AAAA...
 | Option | Meaning |
 |---|---|
 | `--role mover\|cinder\|both` | What the host does. A mover needs LVM tools and sudo rights to run the data mover. A Cinder host needs the right to run commands as the Cinder service user. |
-| `--key` or `--key-file` | OpenMove's public key (shown on the Hosts tab). |
+| `--key` or `--key-file` | OpenMove's public key (shown on the Helper servers tab). |
 | `--user` | The service account (default `openmove`). It has no password. |
 | `--cinder-user` | The Cinder service user (default `cinder`). |
 | `--from` | Only this address may log in with the key (written as `from="..."` in `authorized_keys`). Recommended. |
@@ -212,6 +213,55 @@ What the script does on the host, each step only when it differs:
 
 **What a person does with the answer.** The result shows the **initiator name** (or the **FC port names**). Register it on each array: a host entry (FlashArray) or an access group (SolidFire), and give it the volumes it will see. For Fibre Channel, zone the ports. Then press **Set up the host** again: the script finds the targets and logs in. Open the firewall for iSCSI (port 3260) between the host and the arrays.
 
+### 5.2 Reading and changing the host afterwards, from OpenMove
+
+After the setup, **a helper server is managed through OpenMove only**. No one needs to log in to it to change a storage path. OpenMove reaches it with its own key, and it can read the host and apply a changed configuration (Helper servers tab, step 3, `WALKTHROUGH.md` section 12).
+
+**The control program.** `prepare_host.sh` installs `/usr/local/sbin/openmove-hostctl` on a migration host and one sudo rule for the service account: it may run that program as root, and nothing else is added for this purpose. The program does three things:
+
+| Command | What it does |
+|---|---|
+| `install NAME SHA256` | Takes a script on standard input, checks its SHA-256 against the value OpenMove computed, and installs it in `/usr/local/lib/openmove/` only when they match. Only two names are accepted: `configure_storage.sh` and `inspect_host.py` |
+| `run NAME [ARGS]` | Runs one of the two installed scripts as root (`bash` or `python3`) |
+| `version` | Prints the hash of each installed script |
+
+A script that arrived damaged, or any other name, is refused. A host that was prepared before this release has no control program: OpenMove says "run the setup of this host once more", and one run of the setup with the administrator password installs it. From then on the key is enough.
+
+**Read the host** (`POST /api/hosts/inspect`; the setup form can do the same with the password for a host that is not set up yet). `inspect_host.py` changes nothing and returns:
+
+| Item | Content |
+|---|---|
+| The host | Name, system, kernel, CPUs, memory, uptime, clock synchronised or not, firewall, free space, tools and services (iSCSI, multipath) |
+| Names to register on the arrays | The iSCSI initiator name; each Fibre Channel port (WWPN, state, speed, model) |
+| Network interfaces | Type (physical, bond, VLAN, virtual), state, addresses, MTU, speed, driver, and which interface carries the management connection |
+| iSCSI sessions | Portal, target, interface, state |
+| Fibre Channel | The target ports seen on the fabric (WWPN, state, roles) |
+| Multipath | Each map with its product, size and the state of every path |
+
+**Change the configuration** (`POST /api/hosts/configure`). The form takes the fields of section 5.1 and these:
+
+| Field | Meaning |
+|---|---|
+| Target IQNs | Log in only to these targets of the portals. Empty: every target a portal reports |
+| Interfaces to bind | iSCSI interface binding: one session per interface and portal, so each path uses its own network interface |
+| Session settings | `login_timeout`, `noop_out_interval`, `noop_out_timeout`, `cmds_max`, `queue_depth`, `nr_sessions`. Empty: the host's default |
+| Interface address and MTU | IPv4 as `ADDRESS/PREFIX`, MTU 576 to 9216, per storage interface |
+| ARP and return-path rules | `arp_ignore`, `arp_announce` and `rp_filter` per storage interface, for several storage networks on one host (`/etc/sysctl.d/90-openmove-iscsi.conf`) |
+| Fibre Channel target ports | The WWPNs that must be visible on the fabric. The check fails for a port that is missing |
+| Fibre Channel scan | Scans the Fibre Channel hosts for new devices after the change. A loop initialisation (LIP) is not performed |
+
+What the change does, and its limits:
+
+* **The management interface is protected.** The interface that carries OpenMove's connection (found from the address the connection comes from, and from the default route) is never given an address or an MTU. A request that names it is refused before anything changes.
+* **Addresses survive a restart.** They are written to `/etc/openmove/network.conf` and made again at every boot by `openmove-network.service`. On a host whose interfaces are managed by NetworkManager or netplan, OpenMove's unit still applies the address after those tools have run; tell the network administrator that these interfaces are configured by OpenMove.
+* **IPv4 only** for addresses. Bonds and VLANs are not created: configure them on the host first, then give the address to the resulting interface.
+* **Check first.** *Check only* runs the script in check mode: it lists what would change and changes nothing.
+* **The CHAP secret** is asked again for each change, sent on the standard input of the script and not kept. It is not in the journal, the host's saved configuration, a log or a command line.
+* **The configuration is saved** with the host (without secrets) only when the change succeeded, and the form is filled in from it the next time. The journal records who changed what (`host_configured`), without secrets.
+* **OpenMove cannot register the host on the arrays or zone a fabric.** The initiator name and the Fibre Channel port names are shown by *Read the host* so that the storage administrators can do it.
+
+What is left on the host by this release, besides section 5.1: `/usr/local/sbin/openmove-hostctl`, `/usr/local/lib/openmove/` (the two scripts and their hashes, and `apply-network.sh`), `/etc/openmove/network.conf`, `/etc/systemd/system/openmove-network.service` and `/etc/sysctl.d/90-openmove-iscsi.conf`.
+
 ## 6. Network
 
 | From | To | Port | Why |
@@ -227,7 +277,7 @@ If the hosts are reached through a jump host, set it on the host's entry (field 
 
 ## 7. The first connection
 
-1. Hosts tab: **Set up a new host from here** (section 4.1). It reads the host key, takes your check of the fingerprint, logs in with the password once, prepares and registers the host and sets up its storage paths. If the administrator password cannot be given to OpenMove, use **Prepare a host (script)** (section 4.2) and then **Add or change a host**, **Check host key** and **Trust**.
+1. Helper servers tab: **Set up a new helper server from here** (section 4.1). It reads the host key, takes your check of the fingerprint, logs in with the password once, prepares and registers the host and sets up its storage paths. If the administrator password cannot be given to OpenMove, use **Prepare a host (script)** (section 4.2) and then **Add or change a host**, **Check host key** and **Trust**.
 2. Register the host's initiator name on the arrays (section 5.1) and run the setup again.
 3. The host is saved with the service account. Check that the key was pinned: OpenMove then refuses any other key for that address.
 4. **Run the checks.** The data mover is placed by check H3. Every row must pass; a failed row says what to do.
@@ -243,7 +293,7 @@ If the hosts are reached through a jump host, set it on the host's entry (field 
 ## 9. Upgrading and removing
 
 * **Upgrade OpenMove:** replace the program or the image. The data mover on the hosts is replaced by the check that places it (the file name carries a hash, so the old file is never reused by mistake). No host needs a manual step.
-* **Remove from a host:** Hosts tab, **Remove the data mover** (it removes the folder `.openmove-mover` and everything in it). Then delete the account and `/etc/sudoers.d/openmove` by hand, or run `userdel -r openmove`.
+* **Remove from a host:** Helper servers tab, **Remove the data mover** (it removes the folder `.openmove-mover` and everything in it). Then delete the account and `/etc/sudoers.d/openmove` by hand, or run `userdel -r openmove`.
 * **A volume that stops half-way** leaves only objects that carry the tag `openmove` (staging volumes, clones); the rollbacks remove them, and `MOVER.md` lists the cleanup if a person must.
 
 ## 10. A checklist for the day before
@@ -252,8 +302,8 @@ If the hosts are reached through a jump host, set it on the host's entry (field 
 |---|---|---|
 | 1 | `--self-check` shows no FAIL | The machine that runs OpenMove |
 | 2 | The setup with **Check only** (or `prepare_host.sh --check`) shows no MISSING | Each host |
-| 3 | Host keys compared and pinned | Hosts tab |
-| 4 | H1 to H9 and C1, C2 pass for the pair of back-ends | Hosts tab |
+| 3 | Host keys compared and pinned | Helper servers tab |
+| 4 | H1 to H9 and C1, C2 pass for the pair of back-ends | Helper servers tab |
 | 5 | Free space on the target: size x (1 + snapshots) per class C volume | Arrays or `vgs` |
 | 6 | Compute services up for every instance with an attached volume | `openstack compute service list` |
 | 7 | A support bundle can be written and carried out (`--bundle --redact standard`) | `DIAGNOSTICS.md` |

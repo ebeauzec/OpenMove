@@ -405,22 +405,12 @@
       <h4>2b. Storage paths</h4>
       <div class="actions inline">
         <label>How does the server reach the storage?<select id="su-proto"><option value="none">It already sees its storage</option><option value="iscsi">iSCSI</option><option value="fc">Fibre Channel</option></select></label>
+        <button class="secondary" id="su-inspect">Read the host</button>
+        <span id="su-note" class="muted"></span>
       </div>
-      <div id="su-storage" class="hidden">
-        <div class="actions inline">
-          <label>Array portals (one per line, IP or IP:port)<textarea id="su-portals" rows="3" cols="30" placeholder="192.0.2.21&#10;192.0.2.22"></textarea></label>
-          <label>Initiator name (empty: keep the server's)<input id="su-initiator" placeholder="iqn.1994-05.com.example:migration-1" size="40"></label>
-          <label>CHAP user (if the arrays need it)<input id="su-chap-user"></label>
-          <label>CHAP secret<input id="su-chap-secret" type="password" autocomplete="off" placeholder="used once, never saved"></label>
-          <label>Path replacement timeout (seconds)<input id="su-timeo" value="15" size="4"></label>
-          <label><input type="checkbox" id="su-arr-pure"> Pure FlashArray multipath settings</label>
-          <label><input type="checkbox" id="su-arr-sf"> SolidFire multipath settings</label>
-        </div>
-        <details><summary>Extra multipath text</summary>
-          <p class="muted">Added to OpenMove's drop-in file <code>/etc/multipath/conf.d/openmove.conf</code>. The ready-made settings are starting values. Check them against the array vendor's current guide.</p>
-          <textarea id="su-mpextra" rows="6" cols="70" placeholder="devices { device { ... } }"></textarea>
-        </details>
-      </div>
+      <p class="muted">"Read the host" logs in with the password once and changes nothing. It lists the initiator name, the Fibre Channel port names, the network interfaces, the sessions and the multipath devices, so that you can fill in the form and register the names on the arrays. It needs the identity check of step 2a.</p>
+      <div id="su-info" class="hostinfo"></div>
+      <div id="su-storage" class="hidden"></div>
       <h4>2c. Run</h4>
       <div class="actions inline">
         <label>Allow only this address to use the key<input id="su-from" placeholder="the address of this computer (recommended)"></label>
@@ -431,6 +421,30 @@
         <span id="su-status" class="muted"></span>
       </div>
       <div id="su-result"></div>
+    </details>
+    <details class="more" id="mg-box">
+      <summary><strong>Step 3. Read and change a helper server that is already set up</strong></summary>
+      <p class="muted">After the setup a helper server is managed through OpenMove only. OpenMove connects with its key, sends its own checked scripts through the control program on the host and applies the storage configuration: portals, target names, interfaces, addresses, MTU, session settings, CHAP, Fibre Channel ports and multipath. The management interface is never changed. The CHAP secret is asked again each time and is not kept.</p>
+      <div class="actions inline">
+        <label>Server<select id="mg-host"></select></label>
+        <button class="secondary" id="mg-read">Read the host</button>
+        <span id="mg-note" class="muted"></span>
+      </div>
+      <div id="mg-info" class="hostinfo"></div>
+      <div id="mg-form-box" class="hidden">
+        <h4>Configuration</h4>
+        <div class="actions inline">
+          <label>How does the server reach the storage?<select id="mg-proto"><option value="iscsi">iSCSI</option><option value="fc">Fibre Channel</option></select></label>
+        </div>
+        <div id="mg-storage"></div>
+        <div class="actions inline">
+          <label>Your name<input id="mg-by" placeholder="who makes the change"></label>
+          <button class="secondary" id="mg-check">Check only (changes nothing)</button>
+          <button class="primary" id="mg-apply">Apply the configuration</button>
+          <span id="mg-status" class="muted"></span>
+        </div>
+        <div id="mg-result"></div>
+      </div>
     </details>
     <details class="more">
       <summary><strong>Prepare a server by hand (script)</strong></summary>

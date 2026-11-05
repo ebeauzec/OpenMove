@@ -5,6 +5,7 @@
 That the steps work on a real machine is shown by the lab run (docs/LAB.md). Here: the request is checked, the commands are the ones intended, the host key
 is checked before the password is sent, and the password and the CHAP secret are found nowhere: not in an argument, not in the journal, not in a file.
 """
+import hashlib
 import json
 import shutil
 import subprocess
@@ -437,3 +438,117 @@ class StorageScriptTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HostConfigurationTests(unittest.TestCase):
+    """The storage configuration of a host: every parameter, checked; the scripts it sends; and the changes made later with the key only."""
+
+    def test_every_parameter_of_the_storage_is_accepted_when_it_is_valid(self):
+        st, secret = bootstrap.clean_storage({
+            "protocol": "iscsi", "portals": ["192.0.2.21", "192.0.2.22:3260"], "targets": ["iqn.2010-06.com.purestorage:flasharray.1234"], "initiator": "iqn.1994-05.com.example:mover-1",
+            "bind_interfaces": ["ens224", "ens256"], "session": {"login_timeout": 30, "cmds_max": 256, "queue_depth": "64", "nr_sessions": ""},
+            "nics": [{"name": "ens224", "address": "192.0.2.10/24", "mtu": 9000}, {"name": "ens256", "address": "198.51.100.10/24"}], "sysctl_iscsi": True,
+            "chap_user": "om", "chap_secret": "s3cret", "arrays": ["pure"]})
+        self.assertEqual(st["targets"], ["iqn.2010-06.com.purestorage:flasharray.1234"])
+        self.assertEqual(st["session"], {"login_timeout": 30, "cmds_max": 256, "queue_depth": 64})
+        self.assertEqual(st["nics"][0], {"name": "ens224", "address": "192.0.2.10/24", "mtu": 9000})
+        self.assertTrue(st["sysctl_iscsi"])
+        self.assertNotIn("chap_secret", st)
+        self.assertEqual(secret, "s3cret")
+        fc, _ = bootstrap.clean_storage({"protocol": "fc", "fc_targets": ["52:4A:93:70:00:00:00:01", "524a937000000002"], "fc_rescan": True})
+        self.assertEqual(fc["fc_targets"], ["524a937000000001", "524a937000000002"])
+
+    def test_a_parameter_that_does_not_fit_is_refused(self):
+        p = {"protocol": "iscsi", "portals": ["192.0.2.1"]}
+        bad = (dict(p, targets=["nonsense"]), dict(p, session={"evil": 1}), dict(p, session={"queue_depth": 99999}), dict(p, bind_interfaces=["eth0; id"]),
+               dict(p, nics=[{"name": "eth1", "address": "192.0.2.1"}]), dict(p, nics=[{"name": "eth1", "address": "fe80::1/64"}]), dict(p, nics=[{"name": "eth1", "mtu": 100}]),
+               {"protocol": "fc", "fc_targets": ["123"]}, dict(p, fc_targets=["524a937000000001"]), {"protocol": "fc", "targets": ["iqn.2010-06.com.example:x"]},
+               dict(p, nics=[{"name": "eth1", "address": "192.0.2.1/24"}, {"name": "eth1", "mtu": 9000}]))
+        for raw in bad:
+            with self.assertRaises(bootstrap.SetupError, msg=raw):
+                bootstrap.clean_storage(raw)
+
+    def test_the_arguments_of_the_script_carry_every_parameter_and_the_management_peer(self):
+        st, _ = bootstrap.clean_storage({"protocol": "iscsi", "portals": ["192.0.2.21"], "targets": ["iqn.2010-06.com.example:t1"], "bind_interfaces": ["ens224"],
+                                         "session": {"queue_depth": 64}, "nics": [{"name": "ens224", "address": "192.0.2.10/24", "mtu": 9000}], "sysctl_iscsi": True})
+        a = bootstrap.storage_args(st, False, "198.51.100.7")
+        for flag, value in (("--target-iqn", "iqn.2010-06.com.example:t1"), ("--iface", "ens224"), ("--session-opt", "queue_depth=64"), ("--nic", "ens224=192.0.2.10/24"),
+                            ("--mtu", "ens224=9000"), ("--mgmt-peer", "198.51.100.7")):
+            self.assertEqual(a[a.index(flag) + 1], value)
+        self.assertIn("--sysctl-iscsi", a)
+        fc, _ = bootstrap.clean_storage({"protocol": "fc", "fc_targets": ["524a937000000001"], "fc_rescan": True})
+        b = bootstrap.storage_args(fc, True)
+        self.assertEqual((b[b.index("--fc-target") + 1], "--fc-rescan" in b, "--check" in b, "--mgmt-peer" in b), ("524a937000000001", True, True, False))
+
+    def test_the_scripts_are_sent_with_unix_line_ends(self):
+        for name in ("configure_storage.sh", "inspect_host.py"):
+            self.assertNotIn(b"\r\n", bootstrap.script_bytes(name))
+        self.assertNotIn(b"\r\n", (bootstrap.DEPLOY / "prepare_host.sh").read_bytes())
+
+    def test_the_new_scripts_parse(self):
+        bash = shutil.which("bash")
+        if bash:
+            for name in ("configure_storage.sh", "prepare_host.sh"):
+                r = subprocess.run([bash, "-n", str(bootstrap.DEPLOY / name)], capture_output=True, timeout=60)
+                self.assertEqual(r.returncode, 0, name + ": " + r.stderr.decode("utf-8", "replace"))
+        compile(bootstrap.script_bytes("inspect_host.py"), "inspect_host.py", "exec")
+
+    def test_the_script_refuses_bad_network_and_fibre_channel_parameters(self):
+        bash = shutil.which("bash")
+        if not bash:
+            self.skipTest("no bash on this machine")
+        cases = ((["--protocol", "iscsi", "--session-opt", "evil=1"], b"is not allowed"), (["--protocol", "iscsi", "--session-opt", "queue_depth=x"], b"is not allowed"),
+                 (["--protocol", "iscsi", "--nic", "eth1=192.0.2.1"], b"--nic must be"), (["--protocol", "iscsi", "--nic", "eth1=192.0.2.1;id/24"], b"IPv4"),
+                 (["--protocol", "iscsi", "--mtu", "eth1=100"], b"between 576 and 9216"), (["--protocol", "iscsi", "--mtu", "eth1"], b"--mtu must be"),
+                 (["--protocol", "fc", "--fc-target", "12"], b"16 hexadecimal"), (["--protocol", "iscsi", "--target-iqn", "x"], b"--target-iqn must be"),
+                 (["--protocol", "iscsi", "--iface", "eth0;id"], b"is not valid"))
+        for args, text in cases:
+            r = subprocess.run([bash, str(bootstrap.DEPLOY / "configure_storage.sh")] + args, capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
+            self.assertEqual(r.returncode, 2, args)
+            self.assertIn(text, r.stdout, args)
+
+    def test_a_registered_host_is_changed_through_the_control_program_with_the_hash_checked(self):
+        login = KeyLogin()
+        st, secret = bootstrap.clean_storage({"protocol": "iscsi", "portals": ["192.0.2.21"], "chap_user": "om", "chap_secret": "s3cret"})
+        res = bootstrap.reconfigure(login, st, secret, False)
+        self.assertTrue(res["ok"])
+        install = login.calls[0]
+        run = next(c for c in login.calls if c[0][:4] == ["sudo", "-n", bootstrap.HOSTCTL, "run"])
+        self.assertEqual(install[0][:4], ["sudo", "-n", bootstrap.HOSTCTL, "install"])
+        self.assertEqual(install[0][5], hashlib.sha256(bootstrap.script_bytes("configure_storage.sh")).hexdigest())
+        self.assertEqual(install[1], bootstrap.script_bytes("configure_storage.sh"))
+        self.assertEqual(run[0][4], "configure_storage.sh")
+        self.assertEqual(run[1], b"s3cret\n")                                # the secret is on standard input only
+        self.assertNotIn("s3cret", " ".join(" ".join(c[0]) for c in login.calls))
+        self.assertNotIn("s3cret", json.dumps(res))
+
+    def test_a_host_without_the_control_program_is_told_to_run_the_setup_again(self):
+        login = KeyLogin(install_rc=1, install_err="sudo: /usr/local/sbin/openmove-hostctl: command not found")
+        st, _ = bootstrap.clean_storage({"protocol": "iscsi", "portals": ["192.0.2.21"]})
+        res = bootstrap.reconfigure(login, st, "", False)
+        self.assertFalse(res["ok"])
+        self.assertIn("run the setup of this host once more", res["steps"][0]["detail"])
+
+    def test_inspecting_a_host_returns_what_the_script_printed(self):
+        info = {"system": {"hostname": "mover-1"}, "iscsi": {"initiator": "iqn.1994-05.com.example:mover-1", "sessions": []}, "fc_ports": [{"wwpn": "10000090fa123456", "state": "Online"}], "nics": []}
+        res = bootstrap.inspect(KeyLogin(inspect_info=info))
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["info"]["fc_ports"][0]["wwpn"], "10000090fa123456")
+        self.assertFalse(bootstrap.inspect(KeyLogin(inspect_info={}))["ok"])
+
+
+class KeyLogin:
+    """A registered host reached with the key: the control program answers."""
+
+    def __init__(self, install_rc=0, install_err="", inspect_info=None):
+        self.calls, self.install_rc, self.install_err, self.inspect_info = [], install_rc, install_err, inspect_info
+
+    def exec(self, argv, stdin=None, timeout=60):
+        self.calls.append((list(argv), stdin))
+        if argv[:3] == ["sudo", "-n", bootstrap.HOSTCTL]:
+            if argv[3] == "install":
+                return self.install_rc, ("installed %s" % argv[4]) if self.install_rc == 0 else "", self.install_err
+            if argv[4] == "inspect_host.py":
+                return (0, "OPENMOVE-JSON %s\n" % json.dumps(self.inspect_info), "") if self.inspect_info else (1, "", "boom")
+            return 0, "ok       iscsid is running\nOPENMOVE-JSON %s\n\nStorage paths ready." % json.dumps({"protocol": "iscsi", "initiator": "iqn.1994-05.com.example:m", "sessions": 1}), ""
+        return 0, "", ""

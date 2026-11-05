@@ -219,6 +219,7 @@
   drawWizard();
 
   // ---- status ----
+  var pendingHost = '';
   var lastStatus = {}, restoring = {}, deepLink = (window.location.hash || '').replace('#', '');
   // A step that is done keeps its result on the server. After a reload (or a link to a step) the page draws it again, so a done step is never blank.
   function restoreViews(s) {
@@ -280,6 +281,7 @@
       drawWizard();
       drawMoveGate();
       restoreViews(s);
+      if (/^hosts:/.test(deepLink)) { pendingHost = deepLink.slice(6); deepLink = 'hosts'; }                       // /#hosts:mover-1 opens the configuration of that server
       if (deepLink) { var go = stageOf(deepLink); deepLink = ''; if (wizardInfo(go) || go === 'journal' || go === 'hosts' || go === 'diagnostics') showTab(go); }     // a link such as  /#preflight  opens that step if it is open
       return s;
     }).catch(function () {});
@@ -1442,6 +1444,9 @@
     'su-role-mover': 'The server copies the data of volumes with long-lived snapshots.', 'su-role-cinder': 'The server runs the Cinder volume service. OpenMove reads the Cinder database through it.',
     'su-portals': 'The iSCSI portals of the arrays, one per line, as IP or IP:port.', 'su-initiator': 'The iSCSI initiator name. Leave empty to keep the one the server has.', 'su-chap-user': 'The CHAP user, if the arrays need one.', 'su-chap-secret': 'The CHAP secret. Used once, never saved.',
     'su-timeo': 'Seconds before multipath replaces a lost path.', 'su-arr-pure': 'Add the multipath settings recommended for Pure FlashArray.', 'su-arr-sf': 'Add the multipath settings recommended for SolidFire.', 'su-mpextra': 'Extra text added to the multipath configuration.',
+    'su-inspect': 'Log in once with the password and list what the host is and what it sees: names, ports, interfaces, sessions. Changes nothing.', 'su-note': 'Result of reading the host.',
+    'mg-host': 'The registered server to read or change.', 'mg-read': 'List what the server is and what it sees, using OpenMove\'s key. Changes nothing.', 'mg-proto': 'How the server reaches the storage arrays.',
+    'mg-by': 'Your name, saved with the change.', 'mg-check': 'Run the script in check mode: it reports what would change and changes nothing.', 'mg-apply': 'Apply the configuration to the server through its control program.',
     'su-from': 'Only this address may use the key. The address of this computer is recommended.', 'su-service': 'The account OpenMove uses on the server.', 'su-cpython': 'The Python interpreter Cinder uses. Leave empty to read it from the cinder-volume program.',
     'hs-sc-role': 'What the server is used for.', 'hs-sc-user': 'The account created on the server.', 'hs-sc-from': 'Only this address may use the key.',
     'hs-name': 'A short name for this server.', 'hs-address': 'IP address or host name of the server.', 'hs-port': 'SSH port of the server.', 'hs-user': 'The login OpenMove uses.', 'hs-python': 'The Python interpreter to use. Leave empty for python3.', 'hs-cuser': 'The user that can read cinder.conf. Optional.',
@@ -1553,6 +1558,10 @@
           });
         });
       });
+      if (h.transport !== 'local') btn('Read and configure', function () {
+        $('mg-host').value = h.name; mgSelect(h.name); $('mg-box').open = true; $('mg-box').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        readHost($('mg-read'), 'mg', { name: h.name });
+      });
       btn('Install the data mover', function (b) { hostAction(b, 'hosts/mover', { name: h.name, action: 'install' }, function () { banner('ok', 'The data mover is installed on ' + h.name + '.'); }); });
       btn('Remove the data mover', function (b) { hostAction(b, 'hosts/mover', { name: h.name, action: 'remove' }, function () { banner('ok', 'Nothing of OpenMove is left on ' + h.name + '.'); }); });
       btn('Forget this server', function (b) {
@@ -1563,6 +1572,8 @@
         el('td', { text: (h.user || '') + (h.sudo ? ' (sudo)' : '') }), el('td', { text: h.transport === 'local' ? 'n/a' : h.pinned ? 'checked and pinned' : 'not checked yet' }), acts]));
     });
     drawChecks(d.checks);
+    mgDraw(d.hosts);
+    if (pendingHost) { var ph = pendingHost; pendingHost = ''; if (mgHosts.some(function (h) { return h.name === ph; })) { $('mg-host').value = ph; mgSelect(ph); $('mg-box').open = true; readHost($('mg-read'), 'mg', { name: ph }); } }
   }
   function loadHosts() { return api('GET', 'hosts').then(drawHosts).catch(function (e) { banner('bad', e.message); }); }
   function setupScript(btn, done) {
@@ -1590,23 +1601,203 @@
     hostAction($('hs-check'), 'hosts/check', { bench: $('hs-bench').checked }, function (c) { drawChecks(c); });
   });
 
+  // ---- the storage configuration of a host: one form for the first setup (prefix su) and for later changes (prefix mg) ----
+  var SESSION_FIELDS = [
+    ['login_timeout', 'Login timeout (s)', 'Seconds to wait for a login to an array portal.'],
+    ['noop_out_interval', 'Ping interval (s)', 'Seconds between pings on an idle session.'],
+    ['noop_out_timeout', 'Ping timeout (s)', 'Seconds without an answer to a ping before the session is dropped.'],
+    ['cmds_max', 'Commands per session', 'The largest number of commands in flight on one session.'],
+    ['queue_depth', 'Queue depth', 'Commands queued per device.'],
+    ['nr_sessions', 'Sessions per portal', 'The number of sessions opened to each portal.']
+  ];
+  var hostInfo = {};                                                   // the last reading of each form's host: { su: info, mg: info }
+  function fld(p, id, label, node, tip) { node.id = p + '-' + id; node.setAttribute('title', tip); return el('label', { text: label }, [node]); }
+  function storageForm(p) {
+    function inp(id, label, tip, attrs) { return fld(p, id, label, el('input', attrs || {}), tip); }
+    function area(id, label, tip, rows, ph) { return fld(p, id, label, el('textarea', { rows: String(rows), cols: '32', placeholder: ph || '' }), tip); }
+    function chk(id, label, tip) { var c = el('input', { type: 'checkbox' }); c.id = p + '-' + id; c.setAttribute('title', tip); return el('label', {}, [c, ' ' + label]); }
+    var session = SESSION_FIELDS.map(function (f) { return inp('sess-' + f[0], f[1], f[2], { size: '6', placeholder: 'host default' }); });
+    var iscsi = el('div', { id: p + '-iscsi' }, [
+      el('h5', { text: 'iSCSI' }),
+      el('div', { class: 'actions inline' }, [
+        area('portals', 'Array portals (one per line, IP or IP:port)', 'The iSCSI portals of the arrays, one per line, as IP or IP:port.', 3, '192.0.2.21\n192.0.2.22:3260'),
+        area('targets', 'Target IQNs (one per line; empty: every target the portals report)', 'Log in only to these target names. Empty: log in to every target the portals report.', 3, 'iqn.2010-06.com.purestorage:flasharray.example'),
+        inp('initiator', 'Initiator IQN (empty: keep the host\'s)', 'The iSCSI initiator name of this host. Empty: keep the one the host has. Register it on every array.', { size: '40', placeholder: 'iqn.1994-05.com.example:migration-1' }),
+        inp('chap-user', 'CHAP user (if the arrays need it)', 'The CHAP user, if the arrays need one.'),
+        inp('chap-secret', 'CHAP secret', 'The CHAP secret. Used for this action only and never saved.', { type: 'password', autocomplete: 'off', placeholder: 'used once, never saved' }),
+        area('bind', 'Bind sessions to these interfaces (one per line)', 'Open the sessions through these network interfaces (iSCSI interface binding), one name per line. Empty: the routing table decides.', 2, 'ens224\nens256'),
+        inp('timeo', 'Path replacement timeout (s)', 'Seconds before multipath replaces a lost path.', { value: '15', size: '4' })
+      ]),
+      el('details', {}, [el('summary', { text: 'Session settings' }), el('div', { class: 'actions inline' }, session)])
+    ]);
+    var fc = el('div', { id: p + '-fc', class: 'hidden' }, [
+      el('h5', { text: 'Fibre Channel' }),
+      el('p', { class: 'muted', text: 'The ports of this host (WWPN) are read with "Read the host". Zone them to the arrays and register them there. OpenMove cannot do that on the arrays.' }),
+      el('div', { class: 'actions inline' }, [
+        area('fc-targets', 'Array target ports to expect (WWPN, one per line)', 'The WWPNs of the array ports this host should see. The check fails when one is missing.', 3, '52:4a:93:70:00:00:00:01'),
+        chk('fc-rescan', 'Scan the Fibre Channel ports for new devices after the change', 'Scan the Fibre Channel hosts for new devices after the change. A loop initialisation is not performed.')
+      ])
+    ]);
+    var net = el('div', {}, [
+      el('h5', { text: 'Storage network' }),
+      el('p', { class: 'muted', text: 'Address and MTU of the interfaces that carry storage traffic. The interface that OpenMove connects through is locked and never changed. IPv4 only. Read the host to list its interfaces, or add one by name.' }),
+      el('div', { class: 'table-wrap' }, [el('table', { id: p + '-nics' }, [el('thead', {}, [el('tr', {}, [el('th', { text: 'Interface' }), el('th', { text: 'Now' }), el('th', { text: 'New address (ADDRESS/PREFIX)' }), el('th', { text: 'MTU' })])]), el('tbody')])]),
+      el('div', { class: 'actions inline' }, [
+        (function () { var b = el('button', { class: 'secondary', text: 'Add an interface', type: 'button' }); b.id = p + '-nic-add'; b.setAttribute('title', 'Add an interface by name when it is not in the list.'); b.addEventListener('click', function () { nicRow(p, '', '', '', '', false); }); return b; })(),
+        chk('sysctl', 'Set the ARP and return-path rules for several storage interfaces', 'Several storage interfaces on one host: answer ARP per interface and relax the return-path filter. Kept across restarts.')
+      ])
+    ]);
+    var mp = el('div', {}, [
+      el('h5', { text: 'Multipath' }),
+      el('div', { class: 'actions inline' }, [chk('arr-pure', 'Pure FlashArray settings', 'Add the multipath settings recommended for Pure FlashArray.'), chk('arr-sf', 'SolidFire settings', 'Add the multipath settings recommended for SolidFire.')]),
+      el('details', {}, [el('summary', { text: 'Extra multipath text' }),
+        el('p', { class: 'muted', text: 'Added to OpenMove\'s drop-in file /etc/multipath/conf.d/openmove.conf. The ready-made settings are starting values: check them against the array vendor\'s current guide.' }),
+        fld(p, 'mpextra', '', el('textarea', { rows: '6', cols: '70', placeholder: 'devices { device { ... } }' }), 'Extra text added to the multipath configuration.')])
+    ]);
+    return el('div', {}, [iscsi, fc, net, mp]);
+  }
+  function setProto(p, proto) {
+    var on = proto === 'iscsi' || proto === 'fc';
+    if (p === 'su') $('su-storage').classList.toggle('hidden', !on);
+    $(p + '-iscsi').classList.toggle('hidden', proto !== 'iscsi');
+    $(p + '-fc').classList.toggle('hidden', proto !== 'fc');
+  }
+  function lines(id) { return $(id).value.split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean); }
+  function nicRow(p, name, now, addr, mtu, locked) {
+    var tr = el('tr', locked ? { class: 'nic-locked' } : {});
+    var nameCell = name ? el('td', { text: name + (locked ? ' (management, locked)' : '') }) : el('td', {}, [el('input', { size: '10', placeholder: 'ens224', title: 'The name of the interface on the host.' })]);
+    if (name) tr.dataset.name = name;
+    var a = el('input', { size: '20', placeholder: 'keep as it is', title: 'The IPv4 address of the interface as ADDRESS/PREFIX. Empty: keep the address it has.' });
+    var m = el('input', { size: '6', placeholder: 'keep', title: 'The MTU of the interface (576 to 9216). Use 9000 only when the whole path supports it.' });
+    a.value = addr || ''; m.value = mtu || '';
+    if (locked) { a.disabled = true; m.disabled = true; a.title = 'This interface carries the management connection of OpenMove and is never changed.'; }
+    tr.appendChild(nameCell); tr.appendChild(el('td', { class: 'muted', text: now || '' })); tr.appendChild(el('td', {}, [a])); tr.appendChild(el('td', {}, [m]));
+    $(p + '-nics').tBodies[0].appendChild(tr);
+  }
+  function readNics(p) {
+    var out = [];
+    Array.prototype.forEach.call($(p + '-nics').tBodies[0].rows, function (tr) {
+      if (tr.classList.contains('nic-locked')) return;
+      var ins = tr.getElementsByTagName('input');
+      var name = tr.dataset.name || ins[0].value.trim();
+      var a = tr.dataset.name ? ins[0] : ins[1], m = tr.dataset.name ? ins[1] : ins[2];
+      if (name && (a.value.trim() || m.value.trim())) out.push({ name: name, address: a.value.trim(), mtu: m.value.trim() ? parseInt(m.value, 10) : '' });
+    });
+    return out;
+  }
+  function setNics(p, nics, mgmt, saved) {
+    var typed = {};
+    readNics(p).concat(saved || []).forEach(function (n) { typed[n.name] = n; });
+    clear($(p + '-nics').tBodies[0]);
+    var shown = {};
+    (nics || []).forEach(function (n) {
+      var isMgmt = n.management || n.name === mgmt;
+      if (!isMgmt && n.kind === 'virtual' && !typed[n.name]) return;
+      shown[n.name] = true;
+      var t = typed[n.name] || {};
+      nicRow(p, n.name, (n.addresses || []).join(', ') + (n.mtu ? ' / MTU ' + n.mtu : '') + (n.state ? ' / ' + n.state : ''), isMgmt ? '' : t.address, isMgmt ? '' : t.mtu, !!isMgmt);
+    });
+    Object.keys(typed).forEach(function (k) { if (!shown[k]) nicRow(p, k, '', typed[k].address, typed[k].mtu, false); });
+  }
+  function storageBody(p, proto) {
+    var arrays = []; if ($(p + '-arr-pure').checked) arrays.push('pure'); if ($(p + '-arr-sf').checked) arrays.push('solidfire');
+    var s = { protocol: proto, arrays: arrays, multipath_extra: $(p + '-mpextra').value, replacement_timeout: parseInt($(p + '-timeo').value, 10) || 15, nics: readNics(p), sysctl_iscsi: $(p + '-sysctl').checked };
+    if (proto === 'iscsi') {
+      s.portals = lines(p + '-portals'); s.targets = lines(p + '-targets'); s.initiator = $(p + '-initiator').value.trim();
+      s.chap_user = $(p + '-chap-user').value.trim(); s.chap_secret = $(p + '-chap-secret').value; s.bind_interfaces = lines(p + '-bind');
+      s.session = {}; SESSION_FIELDS.forEach(function (f) { s.session[f[0]] = $(p + '-sess-' + f[0]).value.trim(); });
+    } else {
+      s.fc_targets = lines(p + '-fc-targets'); s.fc_rescan = $(p + '-fc-rescan').checked;
+    }
+    return s;
+  }
+  function fillStorage(p, st) {
+    st = st || {};
+    function put(id, v) { $(p + '-' + id).value = v == null ? '' : v; }
+    put('portals', (st.portals || []).join('\n')); put('targets', (st.targets || []).join('\n')); put('initiator', st.initiator); put('chap-user', st.chap_user); put('chap-secret', '');
+    put('bind', (st.bind_interfaces || []).join('\n')); put('timeo', st.replacement_timeout || 15); put('mpextra', st.multipath_extra);
+    SESSION_FIELDS.forEach(function (f) { put('sess-' + f[0], (st.session || {})[f[0]]); });
+    put('fc-targets', (st.fc_targets || []).map(colons).join('\n')); $(p + '-fc-rescan').checked = !!st.fc_rescan;
+    $(p + '-sysctl').checked = !!st.sysctl_iscsi;
+    $(p + '-arr-pure').checked = (st.arrays || []).indexOf('pure') >= 0; $(p + '-arr-sf').checked = (st.arrays || []).indexOf('solidfire') >= 0;
+    setNics(p, (hostInfo[p] && hostInfo[p].nics) || [], (hostInfo[p] && hostInfo[p].management_nic) || '', st.nics || []);
+  }
+  function colons(w) { return String(w || '').replace(/[^0-9a-fA-F]/g, '').toLowerCase().replace(/(..)(?=.)/g, '$1:'); }
+
+  // what the host is and what it sees
+  function copyBtn(text) {
+    var b = el('button', { class: 'secondary', text: 'Copy', type: 'button', title: 'Copy to the clipboard.' });
+    b.addEventListener('click', function () {
+      try { navigator.clipboard.writeText(text).then(function () { banner('ok', 'Copied.'); }, function () { banner('bad', 'The browser refused the copy: select the text and copy it.'); }); }
+      catch (e) { banner('bad', 'The browser refused the copy: select the text and copy it.'); }
+    });
+    return b;
+  }
+  function infoTable(heads, rows) {
+    var tb = el('tbody');
+    rows.forEach(function (r) { tb.appendChild(el('tr', {}, r.map(function (c) { return typeof c === 'object' && c !== null ? el('td', {}, [c]) : el('td', { text: c == null ? '' : String(c) }); }))); });
+    return el('div', { class: 'table-wrap' }, [el('table', {}, [el('thead', {}, [el('tr', {}, heads.map(function (h) { return el('th', { text: h }); }))]), tb])]);
+  }
+  function drawInfo(box, info) {
+    clear(box);
+    if (!info) return;
+    var s = info.system || {}, i = info.iscsi || {}, mp = info.multipath || {};
+    box.appendChild(el('h4', { text: 'The host' }));
+    box.appendChild(el('p', { class: 'muted', text: [s.hostname, s.os, 'kernel ' + (s.kernel || '?'), (s.cpus || '?') + ' CPUs', (s.memory_mib ? Math.round(s.memory_mib / 1024) : '?') + ' GiB memory',
+      'clock ' + (info.clock_synchronised ? 'synchronised' : 'NOT synchronised'), 'firewall: ' + (info.firewall || 'unknown'),
+      'free space: ' + Object.keys(info.free_gib || {}).map(function (k) { return info.free_gib[k] + ' GiB in /' + k; }).join(', '),
+      info.hostctl ? 'control program installed' : 'no control program (run the setup once more)'].join(' | ') }));
+    var ids = [];
+    ids.push([el('strong', { text: 'iSCSI initiator name' }), i.initiator || '(none)', i.initiator ? copyBtn(i.initiator) : '']);
+    (info.fc_ports || []).forEach(function (f) { ids.push([el('strong', { text: 'Fibre Channel port ' + f.host }), colons(f.wwpn) + '  (' + (f.state || '?') + (f.speed ? ', ' + f.speed : '') + ')', copyBtn(colons(f.wwpn))]); });
+    box.appendChild(el('h4', { text: 'Names to register on the arrays' }));
+    box.appendChild(el('p', { class: 'muted', text: 'OpenMove cannot register these on the arrays. Add them to the host entry (or host group) on each array, and zone the Fibre Channel ports.' }));
+    box.appendChild(infoTable(['What', 'Name', ''], ids));
+    box.appendChild(el('h4', { text: 'Network interfaces' }));
+    box.appendChild(infoTable(['Interface', 'Type', 'State', 'Addresses', 'MTU', 'Speed', 'Role'], (info.nics || []).map(function (n) {
+      return [n.name, n.kind, n.state, (n.addresses || []).join(', '), n.mtu, n.speed_mbps ? n.speed_mbps + ' Mb/s' : '', n.management ? 'management (locked)' : ''];
+    })));
+    box.appendChild(el('h4', { text: 'iSCSI sessions' }));
+    box.appendChild(i.installed === false ? el('p', { class: 'muted', text: 'iscsiadm is not installed on this host.' }) : infoTable(['Portal', 'Target', 'Interface', 'State'], (i.sessions || []).map(function (x) { return [x.portal, x.target, x.iface, x.state]; })));
+    if ((info.fc_ports || []).length || (info.fc_targets || []).length) {
+      box.appendChild(el('h4', { text: 'Fibre Channel target ports seen' }));
+      box.appendChild(infoTable(['Port', 'Host', 'State', 'Roles'], (info.fc_targets || []).map(function (t) { return [colons(t.wwpn), t.host, t.state, t.roles]; })));
+    }
+    box.appendChild(el('h4', { text: 'Multipath devices' }));
+    box.appendChild(mp.installed === false ? el('p', { class: 'muted', text: 'multipath is not installed on this host.' }) : infoTable(['Map', 'Product', 'Size', 'Paths'], (mp.maps || []).map(function (m) {
+      var up = (m.paths || []).filter(function (x) { return x.state === 'running' && x.dm_state === 'active'; }).length;
+      return [m.name, m.product, m.size, up + ' working of ' + (m.paths || []).length];
+    })));
+  }
+  function readHost(btn, p, body) {
+    guard(btn, function () {
+      return api('POST', 'hosts/inspect', body).then(function (r) {
+        $(p + '-note').textContent = '';
+        if (!r.ok) { $(p + '-note').textContent = r.detail; banner('bad', r.detail); return; }
+        hostInfo[p] = r.info; drawInfo($(p + '-info'), r.info);
+        setNics(p, r.info.nics, r.info.management_nic, []);
+        if (p === 'su' && $('su-proto').value === 'none') $('su-proto').value = (r.info.fc_ports || []).length ? 'fc' : 'iscsi';
+        setProto(p, $(p + '-proto').value);
+        banner('ok', 'The host was read. Nothing was changed on it.');
+      });
+    });
+  }
+
   // ---- set up a new host from here ----
   function suList(id) { return $(id).value.split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean); }
   function suBody(checkOnly) {
     var roles = []; if ($('su-role-mover').checked) roles.push('mover'); if ($('su-role-cinder').checked) roles.push('cinder');
-    var arrays = []; if ($('su-arr-pure').checked) arrays.push('pure'); if ($('su-arr-sf').checked) arrays.push('solidfire');
     var proto = $('su-proto').value;
     return {
       name: $('su-name').value.trim(), address: $('su-address').value.trim(), port: parseInt($('su-port').value, 10) || 22, user: $('su-user').value.trim() || 'root',
       password: $('su-password').value, roles: roles, service_user: $('su-service').value.trim() || 'openmove', from_address: $('su-from').value.trim(),
       cinder_python: $('su-cpython').value.trim(), fingerprint: $('su-fp').value.trim(), by: $('su-by').value.trim(), check_only: !!checkOnly,
-      storage: proto === 'none' ? { protocol: 'none' } : { protocol: proto, portals: suList('su-portals'), initiator: $('su-initiator').value.trim(),
-        chap_user: $('su-chap-user').value.trim(), chap_secret: $('su-chap-secret').value, arrays: arrays, multipath_extra: $('su-mpextra').value,
-        replacement_timeout: parseInt($('su-timeo').value, 10) || 15 }
+      storage: proto === 'none' ? { protocol: 'none' } : storageBody('su', proto)
     };
   }
-  function drawSetup(r) {
-    var box = $('su-result'); clear(box);
+  function drawSetup(r, p) {
+    p = p || 'su';
+    var box = $(p + '-result'); clear(box);
     var tb = el('tbody');
     (r.steps || []).forEach(function (s) {
       var det = el('td', { text: s.detail });
@@ -1622,20 +1813,72 @@
       box.appendChild(el('h4', { text: 'Checks of the new host' }));
       box.appendChild(el('div', { class: 'table-wrap' }, [el('table', {}, [el('thead', {}, [el('tr', {}, [el('th', { text: 'Check' }), el('th', { text: 'Result' }), el('th', { text: 'What was seen' })])]), ct])]));
     }
-    $('su-status').textContent = r.ok ? (r.check_only ? 'Nothing is missing.' : 'The host is set up and registered. The password has been dropped.') : 'The setup did not finish. Read the steps; run it again after the fix.';
+    $(p + '-status').textContent = r.ok ? (r.check_only ? 'Nothing is missing.' : p === 'mg' ? 'The configuration is applied.' : 'The host is set up and registered. The password has been dropped.') : 'The setup did not finish. Read the steps; run it again after the fix.';
   }
   function runSetup(btn, checkOnly) {
     var body = suBody(checkOnly);
     guard(btn, function () {
       return api('POST', 'hosts/setup', body).then(function (r) {
         $('su-password').value = ''; $('su-chap-secret').value = '';
-        drawSetup(r);
+        if (r.initiator) hostInfo.su = hostInfo.su || {};
+        drawSetup(r, 'su');
         if (r.hosts) drawHosts(r.hosts);
         banner(r.ok ? 'ok' : 'bad', r.ok ? (checkOnly ? 'The host needs nothing more.' : 'The host ' + body.name + ' is set up.') : 'The host setup did not finish: see the steps.');
       });
     });
   }
-  $('su-proto').addEventListener('change', function () { $('su-storage').classList.toggle('hidden', $('su-proto').value === 'none'); });
+  $('su-storage').appendChild(storageForm('su'));
+  $('mg-storage').appendChild(storageForm('mg'));
+  setProto('su', $('su-proto').value); setProto('mg', $('mg-proto').value);
+  $('su-proto').addEventListener('change', function () { setProto('su', $('su-proto').value); });
+  $('mg-proto').addEventListener('change', function () { setProto('mg', $('mg-proto').value); });
+  $('su-inspect').addEventListener('click', function () {
+    var b = suBody(true); delete b.storage; delete b.check_only; delete b.roles; delete b.service_user; delete b.from_address; delete b.cinder_python;
+    if (!b.address || !b.password) { banner('bad', 'Give the address, the administrator login and the password first.'); return; }
+    readHost($('su-inspect'), 'su', b);
+  });
+  // ---- later: read and change a registered host with the key only ----
+  var mgHosts = [];
+  function mgSelect(name) {
+    var h = mgHosts.filter(function (x) { return x.name === name; })[0];
+    hostInfo.mg = null; clear($('mg-info')); clear($('mg-result')); $('mg-note').textContent = ''; $('mg-status').textContent = '';
+    $('mg-form-box').classList.toggle('hidden', !h);
+    if (!h) return;
+    var st = h.storage || {};
+    $('mg-proto').value = st.protocol === 'fc' ? 'fc' : 'iscsi'; setProto('mg', $('mg-proto').value); fillStorage('mg', st);
+    if (!$('mg-by').value) $('mg-by').value = me || '';
+    if (!h.storage) $('mg-note').textContent = 'No storage configuration is saved for this server yet. Read the host, fill in the form and apply it.';
+  }
+  function mgDraw(hosts) {
+    mgHosts = (hosts || []).filter(function (h) { return h.transport !== 'local'; });
+    var sel = $('mg-host'), keep = sel.value; clear(sel);
+    mgHosts.forEach(function (h) { sel.appendChild(el('option', { value: h.name, text: h.name })); });
+    if (!mgHosts.length) sel.appendChild(el('option', { value: '', text: '(no registered server)' }));
+    if (keep && mgHosts.some(function (h) { return h.name === keep; })) sel.value = keep;
+    if (!hostInfo.mg) mgSelect(sel.value);
+  }
+  $('mg-host').addEventListener('change', function () { mgSelect($('mg-host').value); });
+  $('mg-read').addEventListener('click', function () {
+    if (!$('mg-host').value) { banner('bad', 'Register a server first (step 2).'); return; }
+    readHost($('mg-read'), 'mg', { name: $('mg-host').value });
+  });
+  function mgRun(btn, checkOnly) {
+    var name = $('mg-host').value, by = $('mg-by').value.trim();
+    if (!name) { banner('bad', 'Choose a server.'); return; }
+    if (by.length < 3) { banner('bad', 'Give your name: it is saved with the change.'); return; }
+    me = by;
+    var body = { name: name, by: by, check_only: !!checkOnly, storage: storageBody('mg', $('mg-proto').value) };
+    guard(btn, function () {
+      return api('POST', 'hosts/configure', body).then(function (r) {
+        $('mg-chap-secret').value = '';
+        drawSetup(r, 'mg');
+        if (r.hosts) drawHosts(r.hosts);
+        banner(r.ok ? 'ok' : 'bad', r.ok ? (checkOnly ? 'Nothing is missing on ' + name + '.' : 'The configuration of ' + name + ' is applied.') : 'The configuration did not finish: see the steps.');
+      });
+    });
+  }
+  $('mg-check').addEventListener('click', function () { mgRun($('mg-check'), true); });
+  $('mg-apply').addEventListener('click', function () { mgRun($('mg-apply'), false); });
   $('su-probe').addEventListener('click', function () {
     guard($('su-probe'), function () {
       return api('POST', 'hosts/probe', { address: $('su-address').value.trim(), port: parseInt($('su-port').value, 10) || 22 }).then(function (r) {

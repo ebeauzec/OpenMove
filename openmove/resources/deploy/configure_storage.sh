@@ -8,6 +8,15 @@
 #
 #   bash configure_storage.sh --protocol iscsi|fc [--portal IP[:PORT]]... [--initiator IQN] [--chap-user NAME --chap-secret-stdin]
 #                             [--array pure|solidfire]... [--multipath-extra-b64 TEXT] [--replacement-timeout SECONDS] [--check]
+#                             [--target-iqn IQN]... [--iface NIC]... [--session-opt KEY=NUMBER]... [--nic NAME=ADDR/PREFIX]... [--mtu NAME=N]...
+#                             [--sysctl-iscsi] [--fc-target WWPN]... [--fc-rescan] [--mgmt-peer IP]
+#   --target-iqn   log in only to these targets of the portals (default: every target a portal offers)
+#   --iface        bind the iSCSI sessions to this network interface (one session per interface and portal)
+#   --session-opt  an iSCSI session setting (login_timeout, noop_out_interval, noop_out_timeout, cmds_max, queue_depth, nr_sessions), as KEY=NUMBER
+#   --nic, --mtu   address and MTU of a storage interface; made again at every boot. The interface that carries the management connection is refused
+#   --sysctl-iscsi ARP and reverse-path settings for several storage networks on one host
+#   --fc-target    a target port name (WWPN) that must be visible on the fabric; --fc-rescan scans the FC hosts for new volumes
+#   --mgmt-peer    the address OpenMove connects from; the interface that reaches it is the management interface
 #   --chap-secret-stdin   the CHAP secret is read from the first line of standard input (never from the command line, so it is not in ps or in logs)
 #   --multipath-extra-b64 extra multipath.conf text, base64 encoded, appended to OpenMove's drop-in file
 #   --check               only report what is missing; change nothing
@@ -23,6 +32,7 @@
 set -u
 
 PROTO=""; PORTALS=(); INITIATOR=""; CHAP_USER=""; CHAP_STDIN=0; ARRAYS=(); EXTRA_B64=""; TIMEO=15; CHECK=0
+TARGETS=(); IFACES=(); SESSOPTS=(); NICS=(); MTUS=(); SYSCTL=0; FCT=(); FCRESCAN=0; PEER=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --protocol) PROTO="$2"; shift 2 ;;
@@ -34,6 +44,15 @@ while [ $# -gt 0 ]; do
     --multipath-extra-b64) EXTRA_B64="$2"; shift 2 ;;
     --replacement-timeout) TIMEO="$2"; shift 2 ;;
     --check) CHECK=1; shift ;;
+    --target-iqn) TARGETS+=("$2"); shift 2 ;;
+    --iface) IFACES+=("$2"); shift 2 ;;
+    --session-opt) SESSOPTS+=("$2"); shift 2 ;;
+    --nic) NICS+=("$2"); shift 2 ;;
+    --mtu) MTUS+=("$2"); shift 2 ;;
+    --sysctl-iscsi) SYSCTL=1; shift ;;
+    --fc-target) FCT+=("$2"); shift 2 ;;
+    --fc-rescan) FCRESCAN=1; shift ;;
+    --mgmt-peer) PEER="$2"; shift 2 ;;
     -h|--help) sed -n 5,26p "$0"; exit 0 ;;
     *) echo "unknown option: $1"; exit 2 ;;
   esac
@@ -47,6 +66,25 @@ done
 case "$INITIATOR" in ""|iqn.*|eui.*|naa.*) ;; *) echo "--initiator must be an iqn., eui. or naa. name"; exit 2 ;; esac
 case "$CHAP_USER" in *[!A-Za-z0-9._@:-]*) echo "the CHAP user name holds a character that is not allowed"; exit 2 ;; esac
 for a in "${ARRAYS[@]:-}"; do case "$a" in ""|pure|solidfire) ;; *) echo "--array must be pure or solidfire"; exit 2 ;; esac; done
+for t in "${TARGETS[@]:-}"; do case "$t" in ""|iqn.*|eui.*|naa.*) ;; *) echo "--target-iqn must be an iqn., eui. or naa. name"; exit 2 ;; esac; done
+for n in "${IFACES[@]:-}"; do case "$n" in "") ;; *[!A-Za-z0-9_.:-]*) echo "the interface name '$n' is not valid"; exit 2 ;; esac; done
+for o in "${SESSOPTS[@]:-}"; do
+  case "$o" in "") continue ;; login_timeout=[0-9]*|noop_out_interval=[0-9]*|noop_out_timeout=[0-9]*|cmds_max=[0-9]*|queue_depth=[0-9]*|nr_sessions=[0-9]*) ;;
+    *) echo "--session-opt '$o' is not allowed (login_timeout, noop_out_interval, noop_out_timeout, cmds_max, queue_depth, nr_sessions as KEY=NUMBER)"; exit 2 ;; esac
+  case "${o#*=}" in *[!0-9]*) echo "--session-opt '$o': the value is a number"; exit 2 ;; esac
+done
+for n in "${NICS[@]:-}"; do
+  case "$n" in "") continue ;; *=*/*) ;; *) echo "--nic must be NAME=ADDRESS/PREFIX"; exit 2 ;; esac
+  case "${n%%=*}" in *[!A-Za-z0-9_.:-]*|"") echo "--nic '$n': the interface name is not valid"; exit 2 ;; esac
+  case "${n#*=}" in *[!0-9./]*) echo "--nic '$n': the address is IPv4 as ADDRESS/PREFIX"; exit 2 ;; esac
+done
+for m in "${MTUS[@]:-}"; do
+  case "$m" in "") continue ;; *=[0-9]*) ;; *) echo "--mtu must be NAME=NUMBER"; exit 2 ;; esac
+  case "${m#*=}" in *[!0-9]*) echo "--mtu '$m': the value is a number"; exit 2 ;; esac
+  { [ "${m#*=}" -ge 576 ] && [ "${m#*=}" -le 9216 ]; } || { echo "--mtu '$m': between 576 and 9216"; exit 2; }
+done
+for w in "${FCT[@]:-}"; do case "$w" in "") ;; *[!0-9a-fA-F]*) echo "--fc-target must be 16 hexadecimal digits"; exit 2 ;; *) [ "${#w}" -eq 16 ] || { echo "--fc-target must be 16 hexadecimal digits"; exit 2; } ;; esac; done
+case "$PEER" in *[!0-9A-Fa-f.:]*) echo "--mgmt-peer is an address"; exit 2 ;; esac
 [ "$(id -u)" -eq 0 ] || { echo "run this as root"; exit 2; }
 CHAP_SECRET=""
 if [ "$CHAP_STDIN" -eq 1 ]; then IFS= read -r CHAP_SECRET || true; fi
@@ -109,6 +147,17 @@ if [ "$PROTO" = "iscsi" ] && command -v iscsiadm >/dev/null 2>&1; then
   if [ -f "$CONF" ]; then
     wantkey "$CONF" node.startup automatic "iscsid node.startup"
     wantkey "$CONF" node.session.timeo.replacement_timeout "$TIMEO" "iscsid replacement timeout"
+    for o in "${SESSOPTS[@]:-}"; do
+      [ -z "$o" ] && continue
+      case "${o%%=*}" in
+        login_timeout) wantkey "$CONF" node.conn[0].timeo.login_timeout "${o#*=}" "iscsid login timeout" ;;
+        noop_out_interval) wantkey "$CONF" node.conn[0].timeo.noop_out_interval "${o#*=}" "iscsid NOP-out interval" ;;
+        noop_out_timeout) wantkey "$CONF" node.conn[0].timeo.noop_out_timeout "${o#*=}" "iscsid NOP-out timeout" ;;
+        cmds_max) wantkey "$CONF" node.session.cmds_max "${o#*=}" "iscsid commands per session" ;;
+        queue_depth) wantkey "$CONF" node.session.queue_depth "${o#*=}" "iscsid queue depth" ;;
+        nr_sessions) wantkey "$CONF" node.session.nr_sessions "${o#*=}" "iscsid sessions per portal" ;;
+      esac
+    done
     if [ -n "$CHAP_USER" ]; then
       cur_u="$(getkey "$CONF" node.session.auth.username)"; cur_a="$(getkey "$CONF" node.session.auth.authmethod)"; cur_p="$(getkey "$CONF" node.session.auth.password)"
       if [ "$cur_a" = "CHAP" ] && [ "$cur_u" = "$CHAP_USER" ] && [ "$cur_p" = "$CHAP_SECRET" ]; then ok "CHAP user $CHAP_USER is set"
@@ -186,6 +235,75 @@ elif act "/etc/multipath.conf is missing"; then
   printf '# OpenMove: made because the host had none. Edit freely.\ndefaults {\n    user_friendly_names no\n    find_multipaths yes\n}\n' > /etc/multipath.conf && ok "/etc/multipath.conf made (find_multipaths yes: local disks are left alone)"
 fi
 
+
+# ---- 4b. the storage network: addresses, MTU, ARP settings ---------------------------------------------------------------------------------
+# The interface that carries the management connection is never touched: a mistake there would cut OpenMove off the host, and the host can only be reached through OpenMove.
+MGMT_NIC=""
+if command -v ip >/dev/null 2>&1; then
+  [ -n "$PEER" ] && MGMT_NIC="$(ip -o route get "$PEER" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -1)"
+  DEFNIC="$(ip -o route show default 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -1)"
+fi
+is_mgmt() { [ "$1" = "$MGMT_NIC" ] || [ "$1" = "${DEFNIC:-}" ]; }
+NETCONF=/etc/openmove/network.conf; NETUNIT=/etc/systemd/system/openmove-network.service; NETAPPLY=/usr/local/lib/openmove/apply-network.sh
+STORAGE_NICS=()
+for e in "${NICS[@]:-}"; do [ -n "$e" ] && STORAGE_NICS+=("${e%%=*}"); done
+for e in "${MTUS[@]:-}"; do [ -n "$e" ] && STORAGE_NICS+=("${e%%=*}"); done
+for e in "${IFACES[@]:-}"; do [ -n "$e" ] && STORAGE_NICS+=("$e"); done
+for n in "${STORAGE_NICS[@]:-}"; do
+  [ -z "$n" ] && continue
+  [ -d "/sys/class/net/$n" ] || { bad "the interface $n does not exist on this host"; continue; }
+  if { [ -n "${NICS[*]:-}" ] || [ -n "${MTUS[*]:-}" ]; } && is_mgmt "$n" && { printf '%s\n' "${NICS[@]:-}" "${MTUS[@]:-}" | grep -q "^$n="; }; then
+    bad "$n carries the management connection (to $PEER or the default route): its address and MTU are not changed from here"
+  fi
+done
+want_conf=""
+for e in "${NICS[@]:-}"; do [ -n "$e" ] && ! is_mgmt "${e%%=*}" && want_conf="${want_conf}addr ${e%%=*} ${e#*=}"$'\n'; done
+for e in "${MTUS[@]:-}"; do [ -n "$e" ] && ! is_mgmt "${e%%=*}" && want_conf="${want_conf}mtu ${e%%=*} ${e#*=}"$'\n'; done
+if [ -n "$want_conf" ]; then
+  while read -r kind nic val; do
+    [ -z "$kind" ] && continue
+    if [ "$kind" = "addr" ]; then
+      if ip -o addr show dev "$nic" 2>/dev/null | grep -qF " ${val%%/*}/"; then ok "$nic has $val"
+      elif act "$nic does not have $val"; then ip link set dev "$nic" up 2>/dev/null; ip addr add "$val" dev "$nic" 2>/dev/null && ok "$nic: $val added" || bad "could not add $val to $nic"; fi
+    else
+      cur="$(cat "/sys/class/net/$nic/mtu" 2>/dev/null)"
+      if [ "$cur" = "$val" ]; then ok "$nic MTU is $val"
+      elif act "$nic MTU is $cur, should be $val"; then ip link set dev "$nic" mtu "$val" 2>/dev/null && ok "$nic MTU set to $val" || bad "could not set the MTU of $nic to $val (the switch port and the driver must allow it)"; fi
+    fi
+  done <<< "$want_conf"
+  if [ "$CHECK" -eq 0 ]; then
+    mkdir -p /etc/openmove /usr/local/lib/openmove
+    printf '# OpenMove: the storage interfaces. Replaced when the script runs again.\n%s' "$want_conf" > "$NETCONF"
+    cat > "$NETAPPLY" <<'APPLY'
+#!/bin/sh
+# OpenMove: put the storage interfaces back at boot.
+[ -f /etc/openmove/network.conf ] || exit 0
+while read -r kind nic val; do
+  case "$kind" in
+    addr) ip link set dev "$nic" up 2>/dev/null; ip addr show dev "$nic" 2>/dev/null | grep -qF " ${val%%/*}/" || ip addr add "$val" dev "$nic" ;;
+    mtu) ip link set dev "$nic" mtu "$val" ;;
+  esac
+done < /etc/openmove/network.conf
+exit 0
+APPLY
+    chmod 755 "$NETAPPLY"
+    if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+      printf '[Unit]\nDescription=OpenMove storage interfaces\nAfter=network-online.target\nWants=network-online.target\nBefore=iscsid.service multipathd.service\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=%s\n\n[Install]\nWantedBy=multi-user.target\n' "$NETAPPLY" > "$NETUNIT"
+      systemctl daemon-reload >/dev/null 2>&1; systemctl enable openmove-network.service >/dev/null 2>&1 && ok "the storage interfaces are made again at every boot (openmove-network.service)"
+    else
+      warn "no systemd here: the addresses and MTU are not kept across a reboot"
+    fi
+  fi
+fi
+if [ "$SYSCTL" -eq 1 ] && [ "${#STORAGE_NICS[@]}" -gt 0 ]; then
+  SYSF=/etc/sysctl.d/90-openmove-iscsi.conf
+  tmp="$(mktemp)"; { echo "# OpenMove: several storage networks on one host. Replaced when the script runs again."
+    for n in $(printf '%s\n' "${STORAGE_NICS[@]}" | sort -u); do printf 'net.ipv4.conf.%s.arp_ignore = 1\nnet.ipv4.conf.%s.arp_announce = 2\nnet.ipv4.conf.%s.rp_filter = 2\n' "$n" "$n" "$n"; done; } > "$tmp"
+  if [ -f "$SYSF" ] && cmp -s "$tmp" "$SYSF"; then ok "ARP and reverse-path settings are in place ($SYSF)"
+  elif act "the ARP and reverse-path settings are missing"; then install -m 644 "$tmp" "$SYSF" && sysctl -p "$SYSF" >/dev/null 2>&1; ok "ARP and reverse-path settings written to $SYSF"; fi
+  rm -f "$tmp"
+fi
+
 # ---- 5. services and logins ----------------------------------------------------------------------------------------------------------
 # Starts a service when it is not running. Returns 0 when it runs. The reason is in the message when it does not (a container, a taken socket, a missing module).
 svc() {
@@ -218,20 +336,62 @@ svc multipathd
 if [ "$CHECK" -eq 0 ] && command -v multipathd >/dev/null 2>&1; then multipathd reconfigure >/dev/null 2>&1 || true; fi
 
 SESSIONS=0
+# Is there a session to this portal (and, when interfaces are named, on this interface)?
+has_session() {
+  iscsiadm -m session -P 1 2>/dev/null | awk -v p="$1," -v f="$2" '
+    /Current Portal:/ { portal = index($0, p) > 0; iface = (f == "") }
+    /Iface Name:/ { if (f != "" && $3 == f) iface = 1 }
+    /Iface Name:/ { if (portal && iface) found = 1 }
+    END { exit found ? 0 : 1 }'
+}
+in_targets() { [ "${#TARGETS[@]}" -eq 0 ] || [ -z "${TARGETS[0]:-}" ] && return 0; local t; for t in "${TARGETS[@]}"; do [ "$t" = "$1" ] && return 0; done; return 1; }
 if [ "$PROTO" = "iscsi" ] && command -v iscsiadm >/dev/null 2>&1; then
+  IFLIST=("")
+  if [ "${#IFACES[@]}" -gt 0 ] && [ -n "${IFACES[0]:-}" ]; then
+    IFLIST=()
+    for n in "${IFACES[@]}"; do
+      [ -z "$n" ] && continue
+      if [ "$CHECK" -eq 0 ]; then
+        iscsiadm -m iface -I "openmove-$n" >/dev/null 2>&1 || iscsiadm -m iface -I "openmove-$n" --op=new >/dev/null 2>&1
+        iscsiadm -m iface -I "openmove-$n" --op=update -n iface.net_ifacename -v "$n" >/dev/null 2>&1
+      fi
+      IFLIST+=("openmove-$n")
+    done
+  fi
   for p in "${PORTALS[@]:-}"; do
     [ -z "$p" ] && continue
     case "$p" in *:[0-9]*) ;; *) p="$p:3260" ;; esac
     if [ "$ISCSID_OK" -ne 1 ]; then bad "no login to $p: iscsid is not running here"; continue; fi
-    if iscsiadm -m session 2>/dev/null | grep -qF " $p,"; then ok "logged in to $p"
-    elif act "no session to $p"; then
-      out="$(iscsiadm -m discovery -t sendtargets -p "$p" 2>&1)"; rc=$?
-      if [ $rc -ne 0 ]; then bad "discovery on $p failed: $(echo "$out" | tr '\n' ' ')"; continue; fi
-      if [ -z "$out" ]; then bad "discovery on $p found no target: is the initiator name $IQN registered on the array?"; continue; fi
-      iscsiadm -m node -p "$p" -o update -n node.startup -v automatic >/dev/null 2>&1
-      lo="$(iscsiadm -m node -p "$p" --login 2>&1)"; rc=$?
-      if [ $rc -eq 0 ] || echo "$lo" | grep -q "already present"; then ok "logged in to $p"; else bad "login to $p failed: $(echo "$lo" | tr '\n' ' ')"; fi
-    fi
+    todo=0
+    for f in "${IFLIST[@]}"; do has_session "$p" "$f" || todo=1; done
+    if [ "$todo" -eq 0 ]; then ok "logged in to $p$( [ -n "${IFLIST[0]}" ] && echo " on ${IFLIST[*]}")"; continue; fi
+    act "no session to $p" || continue
+    ifargs=(); for f in "${IFLIST[@]}"; do [ -n "$f" ] && ifargs+=(-I "$f"); done
+    out="$(iscsiadm -m discovery -t sendtargets -p "$p" "${ifargs[@]}" 2>&1)"; rc=$?
+    if [ $rc -ne 0 ]; then bad "discovery on $p failed: $(echo "$out" | tr '\n' ' ')"; continue; fi
+    if [ -z "$out" ]; then bad "discovery on $p found no target: is the initiator name $IQN registered on the array?"; continue; fi
+    seen=""
+    while read -r _ tiqn; do
+      [ -z "$tiqn" ] && continue
+      seen="$seen $tiqn"
+      in_targets "$tiqn" || continue
+      for f in "${IFLIST[@]}"; do
+        has_session "$p" "$f" && continue
+        fa=(); [ -n "$f" ] && fa=(-I "$f")
+        iscsiadm -m node -T "$tiqn" -p "$p" "${fa[@]}" -o update -n node.startup -v automatic >/dev/null 2>&1
+        for o in "${SESSOPTS[@]:-}"; do
+          [ -z "$o" ] && continue
+          case "${o%%=*}" in
+            login_timeout) key=node.conn[0].timeo.login_timeout ;; noop_out_interval) key=node.conn[0].timeo.noop_out_interval ;; noop_out_timeout) key=node.conn[0].timeo.noop_out_timeout ;;
+            cmds_max) key=node.session.cmds_max ;; queue_depth) key=node.session.queue_depth ;; nr_sessions) key=node.session.nr_sessions ;; *) continue ;;
+          esac
+          iscsiadm -m node -T "$tiqn" -p "$p" "${fa[@]}" -o update -n "$key" -v "${o#*=}" >/dev/null 2>&1
+        done
+        lo="$(iscsiadm -m node -T "$tiqn" -p "$p" "${fa[@]}" --login 2>&1)"; rc=$?
+        if [ $rc -eq 0 ] || echo "$lo" | grep -q "already present"; then ok "logged in to $p ($tiqn)${f:+ on $f}"; else bad "login to $p ($tiqn) failed: $(echo "$lo" | tr '\n' ' ')"; fi
+      done
+    done <<< "$out"
+    for t in "${TARGETS[@]:-}"; do [ -n "$t" ] && case "$seen" in *"$t"*) ;; *) bad "the portal $p does not offer the target $t" ;; esac; done
   done
   [ "$CHECK" -eq 0 ] && { iscsiadm -m session --rescan >/dev/null 2>&1 || true; }
   SESSIONS="$(iscsiadm -m session 2>/dev/null | wc -l)"
@@ -253,6 +413,25 @@ if [ "$PROTO" = "fc" ]; then
   for f in /sys/class/fc_host/host*/port_name; do [ -f "$f" ] && WWPNS="$WWPNS$(sed 's/^0x//' "$f") "; done
   if [ -n "$WWPNS" ]; then ok "FC port names (zone and register these on the arrays): $WWPNS"; else bad "no FC port (HBA) was found on this host"; fi
 fi
+
+if [ "$PROTO" = "fc" ]; then
+  if [ "$FCRESCAN" -eq 1 ] && [ "$CHECK" -eq 0 ]; then
+    for h in /sys/class/fc_host/host*; do [ -d "$h" ] && echo "- - -" > "/sys/class/scsi_host/$(basename "$h")/scan" 2>/dev/null; done
+    udevadm settle >/dev/null 2>&1 || true
+  fi
+  FCSEEN=""
+  for f in /sys/class/fc_remote_ports/rport-*/port_name; do
+    [ -f "$f" ] || continue
+    st="$(cat "$(dirname "$f")/port_state" 2>/dev/null)"
+    [ "$st" = "Online" ] && FCSEEN="$FCSEEN$(sed 's/^0x//' "$f") "
+  done
+  for w in "${FCT[@]:-}"; do
+    [ -z "$w" ] && continue
+    lw="$(printf '%s' "$w" | tr 'A-F' 'a-f')"
+    case " $FCSEEN" in *" $lw "*) ok "the target port $lw is visible on the fabric" ;; *) bad "the target port $lw is not visible: check the zoning, the cabling and that the array port is online" ;; esac
+  done
+  [ -n "$FCSEEN" ] && ok "target ports online: $FCSEEN" || warn "no target port is online on the fabric yet"
+fi
 MAPS=0; MINP=0
 if command -v multipath >/dev/null 2>&1; then
   counts="$(multipath -ll 2>/dev/null | awk '/ dm-[0-9]+ /{if(m)print n; m=1; n=0; next} /[0-9]+:[0-9]+:[0-9]+:[0-9]+ +[a-z]+/{n++} END{if(m)print n}')"
@@ -270,7 +449,8 @@ if [ "$PROTO" = "iscsi" ] && [ "${#PORTALS[@]}" -gt 0 ] && [ -n "${PORTALS[0]:-}
 fi
 plist=""; for p in "${PORTALS[@]:-}"; do [ -n "$p" ] && plist="$plist\"$p\","; done
 wlist=""; for w in $WWPNS; do wlist="$wlist\"$w\","; done
-echo "OPENMOVE-JSON {\"protocol\":\"$PROTO\",\"initiator\":\"$IQN\",\"wwpns\":[${wlist%,}],\"portals\":[${plist%,}],\"sessions\":$SESSIONS,\"maps\":$MAPS,\"min_paths\":$MINP}"
+slist=""; for w in ${FCSEEN:-}; do slist="$slist\"$w\","; done
+echo "OPENMOVE-JSON {\"protocol\":\"$PROTO\",\"initiator\":\"$IQN\",\"wwpns\":[${wlist%,}],\"fc_targets_online\":[${slist%,}],\"portals\":[${plist%,}],\"sessions\":$SESSIONS,\"maps\":$MAPS,\"min_paths\":$MINP}"
 echo
 if [ "$PROBLEMS" -eq 0 ]; then echo "Storage paths ready."; else echo "$PROBLEMS item(s) need attention (see MISSING above)."; fi
 [ "$PROBLEMS" -eq 0 ]

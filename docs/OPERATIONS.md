@@ -28,7 +28,7 @@ Do these first. None needs OpenMove except the first.
 | 4 | **Project quotas** for the target type are large enough. | A retype can fail on a quota. |
 | 5 | A **backup of the Cinder database** is taken and a restore proven (check P10). With the APIs only this is an attestation by a named person. | The first thing needed if something goes wrong that OpenMove cannot see. |
 | 6 | A **maintenance window** is agreed and the owners of attached volumes are told. | The instance is locked for the duration of its move. |
-| 7 | **Snapshots**: volumes with snapshots are class C. They are moved by the staged method through a **migration host** and a **Cinder host**: register both on the Hosts tab, add OpenMove's public key to each, pin the host keys, and run the host checks until they pass (`MOVER.md`). Without them, class C volumes are held back. | The staged method needs the data mover and the Cinder helper. |
+| 7 | **Snapshots**: volumes with snapshots are class C. They are moved by the staged method through a **migration host** and a **Cinder host**: register both on the Helper servers tab, add OpenMove's public key to each, pin the host keys, and run the host checks until they pass (`MOVER.md`). Without them, class C volumes are held back. | The staged method needs the data mover and the Cinder helper. |
 | 8 | **Workloads that may break**: look at the Select tab's workload risk panel. Legacy Windows, clusters and databases are flagged. | A high-risk volume is not moved unless two people clear it with evidence. |
 | 9 | Decide the **settings**: hold before the cutover (leave on), soak days (7 or more), concurrency (start low), stop after N failures. | They can only be made stricter than the process minimums. |
 | 10 | **Back up the OpenMove data folder** if a previous run left records you need. | `INSTALL.md` section 6. |
@@ -38,11 +38,24 @@ Do these first. None needs OpenMove except the first.
 | # | Check | Why |
 |---|---|---|
 | C-1 | A **migration host** (Linux, Python 3.6 or later, root or passwordless sudo) that sees the storage of **both** back-ends, and a **Cinder host** (the machine that runs `cinder-volume` for them). One machine may be both. | The data mover copies from array to array there; the Cinder helper creates and removes records there. |
-| C-2 | OpenMove's **public key** (shown on the Hosts tab) is in `authorized_keys` of the SSH user on each host. No password is ever used. | Keys only (`MOVER.md`, section 2). |
+| C-2 | OpenMove's **public key** (shown on the Helper servers tab) is in `authorized_keys` of the SSH user on each host. No password is ever used. | Keys only (`MOVER.md`, section 2). |
 | C-3 | A person **compares the host key fingerprint** with the host's own and pins it (Check host key). | A changed key later refuses the connection. |
 | C-4 | The **host checks** (H1 to H9, C1, C2) all pass for the chosen pair of back-ends; the data mover is placed by the check. | A failed check keeps class C volumes out of the run. |
 | C-5 | Free space on the target: **size x (1 + number of snapshots)** per volume. | The staging volume holds the volume and every snapshot image. |
-| C-6 | **Support bundle settings** are decided (Diagnostics tab): the level of redaction the site needs, and a person knows how to carry a bundle out (`DIAGNOSTICS.md`). | If anything goes wrong, the data to fix it is already on the machine. |
+| C-6 | The **storage paths** of the migration host are configured and the host's names are registered on the arrays: use **Read the host** on the Helper servers tab, copy the iSCSI initiator name (or the Fibre Channel port names), register it on each array (host entry or access group), zone Fibre Channel, then apply the configuration (section "Configuring a helper server" below). | The host must see the volumes of both back-ends. OpenMove cannot register a host on an array. |
+| C-7 | **Support bundle settings** are decided (Diagnostics tab): the level of redaction the site needs, and a person knows how to carry a bundle out (`DIAGNOSTICS.md`). | If anything goes wrong, the data to fix it is already on the machine. |
+
+### Configuring a helper server
+
+A helper server is managed through OpenMove only. Once it is set up, nobody needs to log in to it to change a storage path.
+
+1. **First setup** (Helper servers tab, step 2): name, address, administrator login and password, then **read the server's key** and compare its fingerprint with the server's own. Choose iSCSI or Fibre Channel and press **Read the host**: the interfaces, the initiator name, the Fibre Channel ports and the sessions are listed. Fill in the form (portals, target names, CHAP, interfaces to bind, addresses and MTU of the storage interfaces, or the Fibre Channel target ports). Press **Check only**, read the result, then **Set up the server**. The password is used once and dropped.
+2. **Register the names on the arrays.** The names to use are shown by Read the host, with a Copy button: the iSCSI initiator name and the Fibre Channel port names. OpenMove cannot do this on the arrays; the storage administrator does. For Fibre Channel, zone the ports to the array ports.
+3. **Later changes** (step 3 of the tab): choose the server, **Read the host**, change the form, enter your name, **Check only**, then **Apply the configuration**. It needs OpenMove's key only. The CHAP secret is asked again.
+4. **Verify.** Read the host again: the sessions are `LOGGED_IN`, each multipath map shows all its paths working, the Fibre Channel target ports expected are seen. Then run the host checks (H1 to H9, C1, C2) with **Check the servers**.
+5. A server prepared before the control program existed shows "run the setup of this host once more": run step 2 once with the administrator password.
+
+The management interface (the one OpenMove connects through) is shown locked and is never changed. A change to an interface address or MTU is written to `/etc/openmove/network.conf` and applied again at every boot. `DEPLOYMENT.md` section 5.2 has the limits.
 
 ## 3. Start of the day
 
@@ -52,7 +65,7 @@ Do these first. None needs OpenMove except the first.
 
 ## 4. The procedure, step by step
 
-The numbered tabs are the steps. *Back* and *Next* at the bottom walk through them. The steps are **gated**: a step opens only when every step before it is done, and the page says what is missing. You cannot skip the pre-flight, the selection confirmation or the dry run. Screenshots of every step are in `WALKTHROUGH.md`; every option is in `OPTIONS.md`.
+The screen has seven numbered steps (Connect, Scan, Safety checks, Choose, Move, Progress, Reports). The headings below use the technical names, which are the ones in the journal and in the other documents: *Platform*, *Inventory* and *Audit* are the three parts of the screen step Scan; *Pre-flight and the gate* is Safety checks; *Select* is Choose; *the run* is Move and Progress. *Back* and *Next* sit at the top, under the tabs. Everything that waits for a person (approvals, releases, confirmations) is listed as **Open actions** in the board at the top of every page, with the button that does it. The steps are **gated**: a step opens only when every step before it is done, and the page says what is missing. You cannot skip the pre-flight, the selection confirmation or the dry run. Screenshots of every step are in `WALKTHROUGH.md`; every option is in `OPTIONS.md`.
 
 ### Step 1. Connect
 

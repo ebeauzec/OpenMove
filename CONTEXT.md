@@ -26,7 +26,7 @@ The architecture as built is in `docs/ARCHITECTURE.md`: one Python process (stan
 | `LEGAL.md` | Ownership and intellectual property declaration. |
 | `THIRD_PARTY_NOTICES.md` | Third-party licences and trademark notices. Updated whenever a dependency is added. |
 | `docs/README.md` | Index of the documents in `docs/`. |
-| `docs/WALKTHROUGH.md` | The process from the first click to the last, with screenshots (`docs/images/`) and diagrams: the nine gated steps, who does what, what happens to each volume, what to do when something goes wrong. |
+| `docs/WALKTHROUGH.md` | The process from the first click to the last, with screenshots (`docs/images/`) and diagrams: the seven gated steps, who does what, what happens to each volume, what to do when something goes wrong. |
 | `docs/OPTIONS.md` | Every option and setting in one place: launchers, command line, modes, each screen's fields, defaults and limits, gates, fixed values. |
 | `openmove/wizard.py` | The gating rules of the wizard: which step is open, the selection confirmation, the dry-run-before-run rule. Used by `server.py` (`/api/status` carries `wizard`). |
 | `tests/test_wizard.py` | The gated wizard, through the rules and through the real handlers in demonstration mode. |
@@ -87,7 +87,7 @@ The architecture as built is in `docs/ARCHITECTURE.md`: one Python process (stan
 | `openmove/lab/hosts.py` | Makes, starts, registers and checks the two lab hosts (WSL 2 distros). |
 | `tests/test_staged.py`, `test_mover.py`, `test_diag.py`, `test_redact.py`, `test_lab_hosts.py` | The staged method against the fake fabric, the data mover and the Cinder helper, the hosts registry, diagnostics and bundles, redaction, the lab host setup (calls stubbed). |
 | `tools/lab/vm/` (`build_vm.sh`, `run_vm.sh`, `make_target.sh`), `lab.py vm-up` | The lab's real virtual machine (own kernel, QEMU with KVM) as a bare host and an iSCSI target with two portals, to prove the storage paths of a host setup. |
-| `openmove/bootstrap.py`, `openmove/resources/deploy/configure_storage.sh`, `tests/test_bootstrap.py` | Set up a new host from OpenMove: one login with the administrator password (`ssh.RootLogin`), `prepare_host.sh`, the storage paths (iSCSI initiator, multipath, logins), registration, the key-only proof. Route `POST /api/hosts/setup`; the password is never kept. |
+| `openmove/bootstrap.py`, `openmove/resources/deploy/configure_storage.sh`, `tests/test_bootstrap.py` | Set up a new host from OpenMove: one login with the administrator password (`ssh.RootLogin`), `prepare_host.sh`, the storage paths (iSCSI initiator, multipath, logins), registration, the key-only proof. Route `POST /api/hosts/setup`; the password is never kept. Since 0.13.0 also the later management of a registered host with OpenMove's key only: `inspect_host.py` (read the host), `configure_storage.sh` (iSCSI targets, interface binding, session settings, storage interface addresses and MTU, Fibre Channel target ports), the control program `openmove-hostctl` installed by `prepare_host.sh` (install by SHA-256, run), routes `hosts/inspect` and `hosts/configure`. |
 | `openmove/selfcheck.py`, `openmove/resources/deploy/prepare_host.sh`, `docs/DEPLOYMENT.md`, `tests/test_deploy.py` | The installation self-check; the host setup script (account, packages, key, narrow sudo rights, sshd); the production deployment guide; their tests. |
 | `tools/lab/lab_staged.py` | Drives a real class C move against the lab. |
 | `docs/LAB.md` | The OpenStack lab: what it proves, commands, the seeded catalogue, what it has shown, troubleshooting. |
@@ -126,7 +126,7 @@ A local web interface, started with `python -m openmove`. It listens on the loop
 - The **gated wizard** (`wizard.py`): a step opens only when every earlier step is done, the selection must be confirmed for the exact pre-flight run and volume ids, a real run needs a dry run that covered the same volumes. Enforced by the server, shown by the page.
 - Access levels: OpenStack APIs only (default) or APIs, hosts and arrays.
 - Demonstration mode (three scenarios, simulated migration) and lab mode (a real OpenStack in WSL, a seeded catalogue of 26 volumes and 8 servers, Horizon sign-in, graceful stop).
-- Class C, the staged method (`engine/staged.py`), the data mover and the Cinder helper, SSH, the Hosts tab, the `lvm` adapter and a fake fabric; diagnostics and redaction for dark sites. Run against the real lab: a detached and an attached volume with a snapshot moved end to end (detached data identical), R2 on real Cinder, a resume after a crash.
+- Class C, the staged method (`engine/staged.py`), the data mover and the Cinder helper, SSH, the Helper servers tab, the `lvm` adapter and a fake fabric; diagnostics and redaction for dark sites. Run against the real lab: a detached and an attached volume with a snapshot moved end to end (detached data identical), R2 on real Cinder, a resume after a crash.
 - 403 automated tests; the real engine has moved detached, attached and boot volumes in the lab and reversed two of them.
 - Documentation: a walkthrough with screenshots and diagrams, every option, architecture, installation, operation, user guide, process, every call, safety case, classes, workload risks, playbook trace (v1.2 and v1.3), lab.
 

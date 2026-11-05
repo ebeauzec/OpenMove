@@ -44,9 +44,10 @@ Status words: **met** = built, tested, and (for the retype path) run against the
 | Reports: Word | **met** | |
 | Reports: Excel, CSV | **met** (volume list) | |
 | Reports: PDF | **not built** | Owner decision |
-| GUI: inventory, plan, job control, gates, reports, settings | **met** | A gated nine-step wizard |
+| GUI: inventory, plan, job control, gates, reports, settings | **met** | A gated wizard of seven steps (nine internally), with the open actions at the top of every page |
 | Authentication and roles | **not built** | The interface has a per-start token only. Roles (operator, second person, read-only) need the owner's decision: local users or a directory |
 | Phase 0 lab tests as guided procedures | **met** as guidance and record | `Phase 0` panel on the Move step: 26 tests, a result per test with a name and evidence, gate G0 recorded from them only when every test of the retype path has passed. A person runs the tests; OpenMove cannot |
+| Migration host configuration | **partly** | From the interface: first setup, reading the host, and changing iSCSI (portals, targets, CHAP, binding, session settings), Fibre Channel (target ports, scan), storage interfaces (IPv4 address, MTU, ARP rules) and multipath, with OpenMove's key only. Proven on WSL and a QEMU VM with iSCSI. **Not proven**: real Fibre Channel hardware, FlashArray and SolidFire multipath stanzas, NetworkManager or netplan hosts. **Not done**: registering a host on an array, zoning a fabric, bonds and VLANs, IPv6 addresses |
 | Single executable | **partly** | Windows only, never run on a clean machine |
 | Container | **partly** | File written, not built |
 

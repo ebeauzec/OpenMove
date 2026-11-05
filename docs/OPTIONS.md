@@ -88,7 +88,7 @@ The scenario can also be switched on the page; doing so forgets everything read 
 |---|---|---|
 | Source back-end | any back-end found in step 2 | Where the volumes are now |
 | Target back-end | any back-end found in step 2 | Where they go. Volumes already there are not admitted |
-| What OpenMove can reach | **The OpenStack APIs only** (default), or **APIs, hosts and arrays** | With the APIs only, class A and B are moved by Cinder and class C is held back with the cause "No data mover". With hosts registered and their checks passed (the Hosts tab) class C is admitted and moved by the staged method (built; proven on LVM only) |
+| What OpenMove can reach | **The OpenStack APIs only** (default), or **APIs, hosts and arrays** | With the APIs only, class A and B are moved by Cinder and class C is held back with the cause "No data mover". With hosts registered and their checks passed (the Helper servers tab) class C is admitted and moved by the staged method (built; proven on LVM only) |
 | Attest | per check | A named person states a warning or not-checked item was checked, with the evidence |
 | Sign as operator, Sign as reviewer | two different names | Both signatures are needed |
 | Record lab validation (gate G0) | two different people, at least 40 characters of evidence | Lifts the read-only state of a release that has no recorded validation |
@@ -172,3 +172,32 @@ A volume that hosts something that may break (a legacy Windows server, no guest 
 | Nova microversion 2.9 | Needed to see whether an instance is locked; an instance whose lock state cannot be read is never touched |
 | Soak minimum 1 day, rechecks minimum 2 times 5 minutes | The floors of the process |
 | Interface on the local machine | The page listens on `127.0.0.1` only unless `--host` says otherwise, and every call needs the token printed at start |
+
+## 11. Helper servers
+
+The fields of the Helper servers tab. Limits are enforced by the server and again by the script on the host. A value outside its limit is refused; it is never changed quietly.
+
+| Field | Values and limits | Meaning |
+|---|---|---|
+| Name, address, port | Name: letters, digits, dot, dash, underscore. Port 1 to 65535 (default 22) | The server and how OpenMove reaches it |
+| Administrator login, password | Root, or a user with passwordless `sudo` | Used once for the setup (or for reading a server that is not set up yet), then dropped. Never saved |
+| Fingerprint you checked, your name | A fingerprint of the server's key, a name of at least 3 characters | The password goes only to a server whose key was pinned |
+| Roles | Migration host, Cinder host, or both | What the server does |
+| How does the server reach the storage? | It already sees its storage, iSCSI, Fibre Channel | Chooses which of the fields below apply |
+| Array portals | `IP` or `IP:port` per line (default port 3260) | iSCSI portals of the arrays. Use two or more for several paths |
+| Target IQNs | `iqn.`, `eui.` or `naa.` names, one per line. Empty: every target the portals report | Log in only to these targets |
+| Initiator IQN | `iqn.`, `eui.` or `naa.` name. Empty: keep the host's | The initiator name. Not changed while sessions are open |
+| CHAP user, CHAP secret | Letters, digits and `. _ @ : -` for the user | The secret is used once and never saved. It is asked again for every change |
+| Bind sessions to interfaces | Interface names, one per line | One session per interface and portal, so each path uses its own interface. Empty: the routing table decides |
+| Path replacement timeout | Seconds (default 15) | Time before multipath replaces a lost path |
+| Session settings | `login_timeout` 1 to 600, `noop_out_interval` 1 to 600, `noop_out_timeout` 1 to 600, `cmds_max` 2 to 2048, `queue_depth` 1 to 1024, `nr_sessions` 1 to 32. Empty: the host's default | iSCSI session tuning |
+| Fibre Channel target ports | WWPN, 16 hexadecimal digits, with or without colons | Ports of the arrays that must be visible. Missing ones fail the check |
+| Scan the Fibre Channel ports | On or off | Scans the Fibre Channel hosts for new devices after the change. No loop initialisation |
+| Interface address | IPv4 `ADDRESS/PREFIX` | Address of a storage interface, made again at every boot. The management interface is refused |
+| Interface MTU | 576 to 9216 | MTU of a storage interface. Use 9000 only when the whole path supports it |
+| ARP and return-path rules | On or off | `arp_ignore`, `arp_announce`, `rp_filter` per storage interface, for several storage networks on one host |
+| Pure FlashArray and SolidFire settings | On or off | Ready-made multipath settings (starting values: check them against the vendor's current guide) |
+| Extra multipath text | Free text | Added to `/etc/multipath/conf.d/openmove.conf` |
+| Check only | Button | Runs the script in check mode; changes nothing |
+| Apply the configuration | Button | Needs your name. Changes the server through its control program; saves the configuration (without secrets) only if it succeeded |
+| Read the host | Button | Changes nothing. A registered server is read with OpenMove's key; a new one with the password |

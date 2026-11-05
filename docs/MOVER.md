@@ -40,7 +40,7 @@ One host can have both roles. A host may also be **local** (OpenMove runs on the
 | SolidFire | **not built** | Needs a SolidFire cluster to write and prove against |
 | Pure Storage FlashArray | **not built** | Needs a FlashArray to write and prove against |
 
-A back-end family without an adapter is recognised, but its class C volumes are held back with the cause "no adapter". The tool states this on the Hosts tab and in the support matrix (`SUPPORT_MATRIX.md`); it is never assumed. The Queens target of the owner's playbook is covered by the release profile; the lab runs a newer release (`LAB.md`).
+A back-end family without an adapter is recognised, but its class C volumes are held back with the cause "no adapter". The tool states this on the Helper servers tab and in the support matrix (`SUPPORT_MATRIX.md`); it is never assumed. The Queens target of the owner's playbook is covered by the release profile; the lab runs a newer release (`LAB.md`).
 
 ## 2. SSH
 
@@ -50,8 +50,8 @@ Rules that are not options (`connectors/ssh.py`):
 
 | Rule | Effect |
 |---|---|
-| **Keys only** | Every call to a registered host runs with `BatchMode=yes` and `PasswordAuthentication=no`. OpenMove never stores a password. The one exception is the setup of a new host (`RootLogin`): a person types the administrator password on the Hosts tab, it is used for that setup only and held in memory, and afterwards only the key is used. |
-| **Its own key** | On first use OpenMove creates an `ed25519` key pair in its data folder (`ssh/`). The Hosts tab shows the **public** key. The private key never leaves the folder and never goes into a bundle. |
+| **Keys only** | Every call to a registered host runs with `BatchMode=yes` and `PasswordAuthentication=no`. OpenMove never stores a password. The one exception is the setup of a new host (`RootLogin`): a person types the administrator password on the Helper servers tab, it is used for that setup only and held in memory, and afterwards only the key is used. |
+| **Its own key** | On first use OpenMove creates an `ed25519` key pair in its data folder (`ssh/`). The Helper servers tab shows the **public** key. The private key never leaves the folder and never goes into a bundle. |
 | **The host key is pinned by a person** | Before the first login a person compares the fingerprint the screen shows with the host's own, and presses **Trust**. The key goes into OpenMove's own `known_hosts`. Later calls use `StrictHostKeyChecking=yes`: a changed key refuses the connection. If the host presents a different key at the moment of trusting, nothing is trusted. |
 | **Bounded** | Every call has a timeout (10 s to connect; 60 s to 180 s to run) and keep-alives. |
 | **No retry of a change** | A call that was cut off after it was sent is an unknown outcome (`outcome_unknown`). The engine halts and reads the state back before it does anything else (`SAFETY.md`). |
@@ -62,11 +62,13 @@ Dark sites: nothing here needs the internet. If the migration host is reachable 
 
 ## 3. Registering a host
 
-The quickest way is **Set up a new host from here** on the Hosts tab: OpenMove logs in once with the administrator password, prepares the host, sets up its storage paths, registers it and runs the checks (`DEPLOYMENT.md`, section 4.1). That is the only use of a password; after it OpenMove has only its own key.
+The quickest way is **Set up a new helper server from here** on the Helper servers tab: OpenMove logs in once with the administrator password, prepares the host, sets up its storage paths, registers it and runs the checks (`DEPLOYMENT.md`, section 4.1). That is the only use of a password; after it OpenMove has only its own key.
 
-A new host is prepared first with `prepare_host.sh` (account, packages, key, sudo rights, `sshd`); `DEPLOYMENT.md` explains it, section 4. The Hosts tab shows the command with OpenMove's key filled in (**Prepare a host (script)**), and `python -m openmove --host-setup both` prints it.
+After the setup the host is managed through OpenMove only: **Read the host** and **Apply the configuration** (Helper servers tab, step 3) use OpenMove's key and the control program `openmove-hostctl` that `prepare_host.sh` installs on a migration host (`DEPLOYMENT.md`, section 5.2). A host prepared before this release needs the setup run once more.
 
-Hosts tab, step by step (screens are in `WALKTHROUGH.md`):
+A new host is prepared first with `prepare_host.sh` (account, packages, key, sudo rights, `sshd`); `DEPLOYMENT.md` explains it, section 4. The Helper servers tab shows the command with OpenMove's key filled in (**Prepare a host (script)**), and `python -m openmove --host-setup both` prints it.
+
+Helper servers tab, step by step (screens are in `WALKTHROUGH.md`):
 
 1. **Add the host** and press **Save host**: a name, the address and port, the login user, the roles (migration host, Cinder host or both), **use sudo**, **Cinder Python** (the interpreter that Cinder uses; empty means `python3`; in the lab it is `/opt/stack/data/venv/bin/python`) and **Cinder user** (the user that can read `cinder.conf`). Further options exist in the registry and are described in the table below the steps: `mover_python`, `mover_dir`, `jump`, `rate_mbps`, `log_paths`, `notes`.
 2. **Copy the public key** shown at the top into `~/.ssh/authorized_keys` of that user on the host.
@@ -86,7 +88,7 @@ The registry is the file `hosts.json` in the data folder. It holds no password a
 
 ## 4. Readiness checks
 
-Run from the Hosts tab, and again with every pre-flight run: the H-checks answer the pre-flight check **P8** (copy host), and the Cinder helper's C2 answers **P5** (name templates). Every check says what was seen and what to do.
+Run from the Helper servers tab, and again with every pre-flight run: the H-checks answer the pre-flight check **P8** (copy host), and the Cinder helper's C2 answers **P5** (name templates). Every check says what was seen and what to do.
 
 | ID | Check | Fails when | What to do |
 |---|---|---|---|

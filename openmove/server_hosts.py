@@ -225,6 +225,70 @@ def api_hosts_setup(state, body, query):
     return dict(res, checks=checks, hosts=api_hosts_get(state, {}, {}))
 
 
+def _strip_storage(storage):
+    """The storage description as it is kept and journaled: no secret, and not the free text."""
+    return {k: v for k, v in storage.items() if k not in ("multipath_extra", "chap_secret")}
+
+
+def api_hosts_inspect(state, body, query):
+    """Read what a host is and what it sees: initiator name, Fibre Channel ports and the target ports they see, interfaces, sessions, multipath maps.
+    A registered host is read with OpenMove's key (`name`); a host that is not set up yet with the administrator password (used for this call only).
+    Changes nothing on the host."""
+    if body.get("name"):
+        name = str(body["name"])
+        res = bootstrap.inspect(_host(state, name))
+        state.journal.record("host_inspected", name, {"ok": res["ok"], "mode": "key"})
+        return res
+    password = str(body.get("password") or "")
+    try:
+        req = bootstrap.clean(dict(body, name=body.get("name") or "new-host"))
+    except bootstrap.SetupError as exc:
+        raise _err(str(exc), 400) from None
+    if not password:
+        raise _err("give the name of a registered host, or the address and the administrator password of a host that is not set up yet", 400)
+    _pin_for_setup(state, req, body)
+    try:
+        res = bootstrap.inspect_with_password(state.home, req, password)
+    except ssh.SshError as exc:
+        state.journal.record("host_inspected", req["address"], {"ok": False, "mode": "password", "error": str(exc)})
+        raise _err(str(exc), 502) from None
+    finally:
+        password = ""
+    state.journal.record("host_inspected", req["address"], {"ok": res["ok"], "mode": "password"})
+    return res
+
+
+def api_hosts_configure(state, body, query):
+    """Change the storage configuration of a registered host (portals, target names, interfaces, addresses, MTU, session settings, Fibre Channel ports) with
+    OpenMove's key only. The host can be managed through OpenMove alone. The CHAP secret is used for this call only. With `check_only` nothing changes."""
+    name, by = str(body.get("name") or ""), str(body.get("by") or "").strip()
+    h = _host(state, name)
+    if len(by) < 3:
+        raise _err("give your name: it is saved with the change", 400)
+    try:
+        storage, secret = bootstrap.clean_storage(body.get("storage"))
+    except bootstrap.SetupError as exc:
+        raise _err(str(exc), 400) from None
+    if storage["protocol"] == "none":
+        raise _err("choose iSCSI or Fibre Channel", 400)
+    check = bool(body.get("check_only"))
+    try:
+        res = bootstrap.reconfigure(h, storage, secret, check)
+    except ssh.SshError as exc:
+        state.journal.record("host_configured", name, {"by": by, "ok": False, "check_only": check, "error": str(exc)})
+        raise _err(str(exc), 502) from None
+    finally:
+        secret = ""
+    state.journal.record("host_configured", name, {"by": by, "ok": res["ok"], "check_only": check, "storage": _strip_storage(storage),
+                                                    "steps": [{"id": s["id"], "status": s["status"]} for s in res["steps"]], "initiator": res.get("initiator") or ""})
+    if res["ok"] and not check:
+        spec = dict(h.spec)
+        spec["storage"] = _strip_storage(storage)
+        hosts_mod.upsert(state.home, spec)
+        state.fabric = None
+    return dict(res, hosts=api_hosts_get(state, {}, {}))
+
+
 def api_hosts_array(state, body, query):
     """Store, list, forget or check the login of an array on a migration host (docs/ARRAY_API.md). The password is used for this request only:
     it is sent to the host's data mover, which keeps it in a root-only file. It is not stored here, not journaled, not logged and not returned."""

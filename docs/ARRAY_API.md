@@ -135,7 +135,7 @@ Before this page the mover had only logical-volume verbs and copy, hash and comp
 | The array login on the host (`array.set`, `array.list`, `array.forget`), `POST /api/hosts/array` | **built**; the password is never returned or traced |
 | iSCSI login and logout of a named target, wait for a device | **built** (`iscsi.login`, `iscsi.logout`, `dev.wait`) |
 | Host check H10 (each stored array answers) | **built** |
-| Fields in the interface (a form on the Hosts tab) | **not built**; use `POST /api/hosts/array` |
+| Fields in the interface (a form on the Helper servers tab) | **not built**; use `POST /api/hosts/array` |
 | The adapters `solidfire` (source) and `pure` (target) that turn the method's needs into these calls | **not built**: they need the arrays to prove the device paths, the WWID rules and the Purity forms marked [confirm] |
 | ONTAP | **not built**; the Queens driver's use of LUN clones as snapshots needs a design first (section 5) |
 
