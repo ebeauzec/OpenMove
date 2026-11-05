@@ -219,14 +219,21 @@ The playbook has a second person sign three points for each volume. On the Live 
 
 ### The Move tab: run the engine
 
-The Move tab moves the selected class A and B volumes with Cinder's retype. In short:
+The Move step moves the selected class A and B volumes with Cinder's retype. It is a path of four numbered steps; a green line at the top says which one to do now.
 
-1. *Dry run*: reads the cloud and lists the exact calls (a lock, one retype with on-demand migration, an unlock), changing nothing. Read it.
-2. *Start the run*: enter your name. Each volume is validated and waits for a second person to sign G2 and G3.
-3. *Sign G2 and G3 (second person)*, then *Release all for the retype* (if the volumes are held).
-4. The engine locks the instance, sends the retype, follows it, checks the result against the before-state and unlocks.
-5. *Sign G4 (second person)* after the owner has checked the application. The soak starts.
-6. *Reverse* puts a volume back with a retype back.
+1. *Where the volumes go*: the volume types bound to the target back-end. One fitting type is chosen by itself; with several you choose; with none the page says what to fix. OpenMove never guesses.
+2. *Ready to start*: the lab tests for the release are recorded, the safety checks are approved by two people, the emergency stop is not pressed. Each line is ticked or says what is missing.
+3. *Rehearse (changes nothing)*: reads the cloud and lists the exact calls (a lock, one retype with on-demand migration, an unlock), changing nothing. Read it.
+4. *Start moving*: enter your name. Each volume is validated and waits for a second person.
+
+The rest happens on the Progress step, which names every action:
+
+* *Approve before switching* (second person: G2 and G3), then *Release all volumes that are ready to switch* (you).
+* The engine locks the instance, sends the retype, follows it, checks the result against the before-state and unlocks.
+* *Approve the result* (second person: G4) after the owner has checked the application. The safety period starts.
+* *Put back* returns a volume with a retype back.
+
+The times of day when moving may happen, and the list of every volume the move touched, are in the two closed panels under the path.
 
 A real run needs a recorded lab validation of the release (*Record lab validation (G0)*), an approved gate and no halt. Every step, every note and every checklist is in `OPERATIONS.md`.
 
@@ -275,7 +282,8 @@ Your browser saves the file; OpenMove keeps no copy. Reports built in demonstrat
 
 The Live tab shows what is happening, refreshed about once a second:
 
-* **Where every volume stands**: five tiles, and every volume is in exactly one of them. *Needs you* (a person must act), *Not moved* (stopped or put back, where it was, data intact), *Being moved* (OpenMove is working), *Waiting to start*, *Moved* (on the new storage). Click a tile to list only those volumes.
+* **One sentence on top** says how many volumes are moved and ready to use, how many are in the safety period, how many were NOT moved, and whether a person must act.
+* **Where every volume stands**: five tiles, and every volume is in exactly one of them. *Needs you* (a person must act), *Not moved* (stopped or put back, where it was, data intact; the line says why, in plain words, and what to do first), *Being moved* (OpenMove is working), *Waiting to start*, *Moved* (on the new storage and ready to use: *Moved and ready* during the safety period, *Completed* once the old copy is released). Click a tile to list only those volumes.
 * **What you need to do**: one card for each kind of action that waits: **Approval by a second person**, **Release by you** or **Your decision**, with the number of volumes and the button that does it. When nothing waits it says so.
 * **Every volume**: one line each: the place it is in, one sentence on what happens next, and what you must do (a label, or *Nothing to do*). Click a row for the detail panel.
 * The same five places, as small buttons, are on the board at the top of every page.
@@ -346,6 +354,8 @@ Everything OpenMove reads about a customer's cloud stays on the machine it runs 
 | The gate is **stale**. | The pre-flight is older than 24 hours. Run it again and sign again. |
 | The gate is **blocked** and a check cannot be attested. | A failed check cannot be waived. Fix the cause and run the pre-flight again. |
 | "all changes are halted". | Someone pressed HALT. Read the reason in the red banner; resume only when it is resolved. |
+| A volume says *Not moved*. | The Progress page says why in plain words (for example *Not enough room on the target*, *OpenMove could not tell which volume type to move to*), what happened to the source and the target, and the first thing to do. The volume is where it was, with its data intact. Fix the cause and start it again, or leave it. If the page says *Stopped for another reason*, the quoted text under it is what OpenMove stopped on: send it with the support bundle. |
+| The Move step says no volume type is bound to the target. | Make a Cinder volume type whose `volume_backend_name` is the target back-end, then rehearse again. |
 | A volume on the Move tab says "waiting for a second person to sign G2 and G3". | That is the rule. A person who is not the operator signs on the Move tab after checking the volume. |
 | The dry run says a volume is blocked. | Read the failed check beside it. The tool is refusing something unsafe (wrong back-end, a snapshot left, encrypted, a busy instance, a lock state it cannot see). |
 | "the lab validation needs two different people". | Record lab validation (G0) needs two names, and a description of at least 40 characters. |

@@ -250,10 +250,16 @@ A detached volume has no instance, so there is no lock. Cinder itself marks it `
 
 ### What you do
 
-1. **Rehearse (changes nothing).** Reads the cloud again and lists the exact calls each volume would get, with the undo for each. A volume that would be refused shows the failed check. A real start is **refused** until a rehearsal was read for the same volumes.
-2. If the release has no recorded lab validation, work through **Lab tests for this OpenStack release (gate G0)**: the playbook's tests (T1 to T23) and four that OpenMove adds (M1 to M4), each with what it proves, what passing looks like and how to do it. OpenMove cannot run them (they need real hosts and people); a person does each one and records the result with a name and what was seen. **Record gate G0 from these results** works only when every test of the retype path has passed for this release, and needs two different people.
-3. Under **Options for the move** choose **Move to this volume type** (empty means the only type that fits) and optionally **Do not start before** and **Stop starting new volumes after** (UTC). Outside that window no new volume is taken and no retype is sent; what is already moving carries on and is watched.
-4. **Start moving**, with your name. Nothing is sent for a volume yet.
+The page is a path of four numbered steps, and a green line at the top says which one to do now (*What to do now: ...*). Every step shows a mark: done, ready, or what is missing.
+
+1. **Where the volumes go.** A list of the volume types that are bound to the target back-end. If exactly one fits, OpenMove chooses it ("Chosen when the cloud is read"). If several fit, you choose; OpenMove never guesses. If none fits, the page says so and what to do, before anything is started.
+2. **Ready to start.** What must be true: the lab tests for this release are recorded, the safety checks are approved by two people, the emergency stop is not pressed. Each is ticked or says what is missing.
+3. **Rehearse (changes nothing).** Reads the cloud again and lists the exact calls each volume would get, with the undo for each. A volume that would be refused shows the failed check. A real start is **refused** until a rehearsal was read for the same volumes.
+   If the release has no recorded lab validation, work through **Lab tests for this OpenStack release (gate G0)**: the playbook's tests (T1 to T23) and four that OpenMove adds (M1 to M4), each with what it proves, what passing looks like and how to do it. OpenMove cannot run them (they need real hosts and people); a person does each one and records the result with a name and what was seen. **Record gate G0 from these results** works only when every test of the retype path has passed for this release, and needs two different people.
+4. **Start moving**, with your name. Nothing is sent for a volume yet. Under **Run only at certain times (optional)** you can set **Do not start before** and **Stop starting new volumes after** (UTC). Outside that window no new volume is taken and no retype is sent; what is already moving carries on and is watched. The list of every volume the move has touched is under **Technical detail**.
+
+Then, on the Progress step:
+
 5. Open actions appear at the top of the page. A second person presses **Approve before switching** after checking the volume and the target. That one button gives two approvals: the copy is correct, and the volume is ready to switch. The dialog lists every volume it covers, with its size, project, instance and what was compared.
 6. The operator presses **Release**. The engine switches the volumes, with at most as many copying at a time as the copy places allow, and starts the next volume at once when a place is free.
 7. After the application owner has checked the application, a second person presses **Approve the result**. The safety period starts. A volume in its safety period does not hold a copy place.
@@ -283,10 +289,12 @@ A detached volume has no instance, so there is no lock. Cinder itself marks it `
 | Place | Meaning | What you do |
 |---|---|---|
 | **Needs you** (amber) | A person has to act before the volume can go on. | The page says what, and which kind of action it is (below). |
-| **Not moved** (red) | The volume was stopped or put back. It is where it was, with its data intact. The line says why. | **Your decision**: fix the cause and move it again, or leave it. |
+| **Not moved** (red) | The volume was stopped or put back. It is where it was, with its data intact. Its line says **why in plain words**, what happened to the source and the target, and the first thing to do. | **Your decision**: fix the cause and move it again, or leave it. |
 | **Being moved** (blue) | OpenMove is working on it: copying, checking, switching or verifying. | Nothing. |
 | **Waiting to start** (grey) | Chosen, but no free place yet. | Nothing. It starts by itself. |
-| **Moved** (green) | On the new storage. The old copy is kept for the safety period and then released. | Nothing. |
+| **Moved** (green) | On the new storage and checked: the volume is **ready to use**. Each volume says whether it is *Moved and ready* (the old copy is kept for the safety period) or *Completed* (the old copy is released). | Nothing. |
+
+A sentence at the top answers the three questions at once, for example: *21 of 28 volumes are moved and ready to use on the new storage. 21 in the safety period (the old copy is kept). 7 NOT moved: see why below.* The decision card lists each cause once, with the number of volumes, so seven failures with two causes read as two lines. A volume's own line adds the detail OpenMove stopped on, quoted, for the support bundle. When a reason is one OpenMove does not know, the card says *Stopped for another reason* and still shows the quoted text; it never hides it.
 
 Three kinds of action exist, and every action on the page carries its kind as a label: **Approval by a second person** (the copy is right and ready to switch, or the switch worked), **Release by you** (you say that the switch may happen) and **Your decision** (a volume was not moved).
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.15.0 (2026-11-05)
+
+### Changed
+- When a volume is not moved, the page now says why in plain words, what happened to the source and the target, and the first thing to do. Every volume says whether it is moved, ready to use, and completed. The Move step is a path of four numbered steps with one "what to do now" line, instead of an open page of options.
+
+### Changed (detail)
+- Failures: `handling.classify_reason` reads the text an engine gave a volume up with and maps it to a cause in the catalogue (`REASON_WORDS`); five causes were added (`target_type_unclear`, `not_on_source`, `type_wrong`, `retype_undone`, `host_step_failed`). Unknown text becomes "Stopped for another reason" and is still quoted, never hidden. The volume line shows title, why, source, target, steps and who; the decision card lists each cause once with its count.
+- Moved, ready, completed: every volume has an `outcome` (`needs_you`, `not_moved`, `being_moved`, `waiting`, `moved_ready`, `completed`). A volume in its safety period is "Moved and ready"; once the old copy is released it is "Completed". `/api/live` carries `summary` (moved, ready, completed, in_safety_period, not_moved, needs_you, being_moved, waiting, total), and a sentence at the top of the Progress page says it in words. When only decisions are left the sentence says "You decide what happens to the volumes not moved", not "nothing needs you".
+- Move step: (1) where the volumes go (the volume types bound to the target; one fitting type is chosen by itself, several are chosen by you, none is explained before anything starts; `GET /api/engine` carries `target`), (2) ready to start, (3) rehearse, (4) start. The times of day and the list of every volume the move touched moved into two closed panels. In the demonstration the types are not read, so the page does not block on what it cannot know.
+- Tests: `tests/test_progress_state.py` now has 18 (failure classification, the summary, the target types).
+
+### Not done, and not proven
+- Checked in the demonstration (simulated move, all places and the decision card) and by unit tests. Not seen with the real engine on the lab; narrow-screen layout not checked.
+
 ## 0.14.1 (2026-11-05)
 
 ### Changed

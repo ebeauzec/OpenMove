@@ -238,6 +238,33 @@ CAUSES = {
     "not_started": ("Admitted but not started", "The volume was admitted but the run ended or has not reached it yet.",
                     SAFE_SRC, NO_TGT, ["Start or resume the run.", "If it stays here, check that the gate is approved."], "Operator"),
     "in_progress": ("Still in progress", "The volume is part-way through the order.", "Untouched until the cutover.", "A copy is in sync.", ["Wait for it to finish; nothing is needed from anyone."], "Nobody yet"),
+    # what the engines give up with, in plain words (classify_reason reads the engine's own text)
+    "target_type_unclear": ("OpenMove could not tell which volume type to move to",
+                            "The target back-end has more than one volume type, or none, and no type was chosen for this move. OpenMove does not guess.",
+                            SAFE_SRC, NO_TGT,
+                            ["Go to step 5, Move, and choose the target volume type in \"Move to which volume type\".",
+                             "Rehearse again, then start. Volumes already given up are started again by the move.",
+                             "If the back-end has no volume type at all, make one in Cinder and bind it to the target back-end first."], "Operator"),
+    "not_on_source": ("The volume is not on the source back-end",
+                      "The move takes volumes from the source back-end chosen in the safety checks. This volume is on another back-end, often because it was moved before or the choice was the other way round.",
+                      "Untouched.", NO_TGT,
+                      ["Check the source and the target chosen in step 3, Safety checks.",
+                       "If the volume was moved already, there is nothing to do. If not, correct the choice and run the safety checks again."], "Operator"),
+    "type_wrong": ("The volume type does not belong to the target back-end",
+                   "The volume type chosen for the move is bound to another back-end than the target, or the volume already has that type.",
+                   SAFE_SRC, NO_TGT,
+                   ["Choose a volume type that is bound to the target back-end (step 5, Move).",
+                    "Check the type's volume_backend_name in Cinder if the list shows no type."], "Operator"),
+    "retype_undone": ("Cinder accepted the retype and then undid it",
+                      "Cinder answered yes and later put the volume back, which it does when the back-end cannot take the volume. The volume is on the old back-end, intact.",
+                      "Untouched, back on the old back-end.", "Nothing kept.",
+                      ["Read the cinder-volume log of the target back-end around the time of the move (Support, diagnostics bundle).",
+                       "Fix the cause (room, capabilities, host), then start the volume again."], "Cinder administrator"),
+    "host_step_failed": ("A step on the migration host failed",
+                         "The migration host refused or failed a step several times in a row, so OpenMove stopped the volume before the switch.",
+                         SAFE_SRC, "The staging copy was discarded.",
+                         ["Open Helper servers, read the migration host and look at the readiness result.",
+                          "Read the last error on the volume's line and the support bundle, fix the host, then start the volume again."], "Cloud administrator"),
     "aborted_other": ("Stopped for another reason", "The volume was aborted. The reason is quoted in this record.", "Untouched before the cutover.", "Discarded.",
                       ["Read the reason in the timeline.", "Fix the cause, then add the volume to a later batch."], "Operator"),
 }
@@ -246,6 +273,28 @@ CAUSES = {
 _REASONS = (("image-cache", "image_cache"), ("encrypted", "encrypted"), ("multiattach", "multiattach"), ("group", "grouped"), ("replication", "replicated"),
             ("migration_status", "migration_in_flight"), ("status ", "bad_status"), ("provider_id", "bad_provider_id"),
             ("root-wait", "instance_not_running"), ("instance ", "instance_not_running"))
+
+
+# (words in the engine's text, in lower case) -> cause code. The first match wins; nothing matches -> aborted_other, and the text is still shown.
+REASON_WORDS = (
+    ("several volume types belong", "target_type_unclear"), ("no volume type is bound", "target_type_unclear"), ("target type", "type_wrong"),
+    ("is bound to", "type_wrong"), ("already have the target type", "type_wrong"), ("is on the source back-end", "not_on_source"),
+    ("the volume is on ", "not_on_source"), ("did not rotate away", "rotation_timeout"), ("snapshot(s) remain", "snapshot_appeared"),
+    ("not encrypted", "encrypted"), ("is encrypted", "encrypted"), ("multi-attach", "multiattach"),
+    ("replication", "replicated"), ("belongs to a group", "grouped"), ("only available and in-use", "bad_status"), ("move is in flight", "migration_in_flight"),
+    ("migration status is", "migration_in_flight"), ("no pool for the target", "no_room"), ("room", "no_room"), ("not identical", "copy_not_verified"),
+    ("(s1)", "copy_not_verified"), ("(s3)", "copy_not_verified"), ("migration host failed", "host_step_failed"), ("copy of snapshot", "host_step_failed"),
+    ("did not take effect", "retype_undone"), ("undone", "retype_undone"), ("the volume type was changed", "type_wrong"), ("shrink", "copy_not_verified"),
+    ("snapshot", "snapshot_appeared"))
+
+
+def classify_reason(text):
+    """The cause code for what an engine wrote when it gave a volume up ('' -> aborted_other)."""
+    low = (text or "").lower()
+    for words, code in REASON_WORDS:
+        if words in low:
+            return code
+    return "aborted_other"
 
 
 def cause_title(code):

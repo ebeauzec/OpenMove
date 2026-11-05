@@ -42,16 +42,24 @@ class PlaceTests(unittest.TestCase):
         self.assertEqual((s["group"], s["action"]["do"], s["action"]["type"]), ("you", "g4", "approval"))
         self.assertEqual(self.one(vol("postcheck", ALL))["group"], "moving")
 
-    def test_moved_volumes_need_nothing(self):
+    def test_moved_volumes_need_nothing_and_say_whether_they_are_ready_and_completed(self):
+        s = self.one(vol("soak", ALL))
+        self.assertEqual((s["group"], s["label"], s["outcome"], s["ready"], s["completed"], s["action"]), ("moved", "Moved and ready", "moved_ready", True, False, None))
+        self.assertIn("ready to use", s["next"])
+        self.assertIn("old copy is kept", s["next"])
+        s = self.one(vol("done", ALL))
+        self.assertEqual((s["group"], s["label"], s["outcome"], s["ready"], s["completed"], s["action"]), ("moved", "Completed", "completed", True, True, None))
+        self.assertIn("old copy is released", s["next"])
         for ph in ("soak", "done"):
-            s = self.one(vol(ph, ALL))
-            self.assertEqual((s["group"], s["label"], s["action"]), ("moved", "Moved", None))
-            self.assertIn("Nothing to do", s["next"])
+            self.assertIn("Nothing to do", self.one(vol(ph, ALL))["next"])
 
     def test_a_volume_that_was_not_moved_is_a_decision_with_the_reason_and_its_state(self):
         s = self.one(vol("aborted", note="the target pool has no room"))
         self.assertEqual((s["group"], s["label"], s["action"]["type"]), ("stopped", "Not moved", "decision"))
-        self.assertIn("the target pool has no room.", s["next"])
+        self.assertEqual(s["failure"]["title"], "Not enough room on the target")
+        self.assertEqual(s["failure"]["detail"], "the target pool has no room")
+        self.assertIn("Not enough room on the target", s["next"])
+        self.assertIn("To fix:", s["next"])
         self.assertIn("data intact", s["next"])
         s = self.one(vol("rollback"))
         self.assertEqual((s["group"], s["label"]), ("stopped", "Put back"))
@@ -85,6 +93,93 @@ class PlaceTests(unittest.TestCase):
         self.assertEqual(S.plain_note({"note": "no room."}), "no room.")
         self.assertEqual(S.plain_note({"error": "broke", "note": "x"}), "broke.")
         self.assertEqual(S.plain_note({}), "")
+
+
+class FailureTests(unittest.TestCase):
+    """A volume that was not moved says WHY in plain words, what state it is in, and what to do first."""
+
+    def one(self, r):
+        return S._volume_state(st(), r, True, "Olive")
+
+    def test_the_reasons_the_engines_give_have_a_plain_cause(self):
+        from openmove import handling as H
+        cases = {"several volume types belong to the target back-end (a, b); choose one for type x": "target_type_unclear",
+                 "no volume type is bound to the target back-end pure": "target_type_unclear",
+                 "the volume is on sf-sim, not on pure": "not_on_source",
+                 "2 snapshot(s) remain; Cinder moves a volume with snapshots only by copying": "snapshot_appeared",
+                 "the snapshots did not rotate away within 72 hours": "rotation_timeout",
+                 "the volume is encrypted": "encrypted", "the volume is multi-attach": "multiattach", "the volume belongs to a group": "grouped",
+                 "the scheduler reports no pool for the target back-end pure": "no_room",
+                 "the image of snapshot abc on the target is not identical to the one read (S3)": "copy_not_verified",
+                 "a step on the migration host failed 3 times in a row: boom": "host_step_failed",
+                 "something nobody foresaw": "aborted_other", "": "aborted_other"}
+        for text, code in cases.items():
+            self.assertEqual(H.classify_reason(text), code, text)
+            d = H.describe_cause(code)
+            self.assertTrue(d["title"] and d["why"] and d["steps"] and d["who"])
+
+    def test_the_screenshot_case_names_the_fix(self):
+        s = self.one(vol("aborted", failed=True, error="given up: several volume types belong to the target back-end (sf-gold, sf-sim); choose one for type pure-sim"))
+        self.assertEqual(s["group"], "stopped")
+        self.assertEqual(s["failure"]["title"], "OpenMove could not tell which volume type to move to")
+        self.assertIn("Move", s["failure"]["steps"][0])
+        self.assertIn("several volume types belong", s["failure"]["detail"])
+        self.assertNotIn("given up:", s["failure"]["detail"])
+        self.assertIn("data intact", s["next"])
+
+    def test_an_unknown_reason_is_still_shown(self):
+        s = self.one(vol("aborted", note="given up: the moon is in the wrong phase"))
+        self.assertEqual(s["failure"]["title"], "Stopped for another reason")
+        self.assertEqual(s["failure"]["detail"], "the moon is in the wrong phase")
+
+    def test_a_put_back_volume_says_it_is_on_the_old_storage(self):
+        s = self.one(vol("rollback"))
+        self.assertEqual((s["label"], s["outcome"]), ("Put back", "not_moved"))
+        self.assertIn("back on the old storage", s["next"])
+
+
+class SummaryTests(unittest.TestCase):
+    def test_the_summary_answers_what_has_moved_what_is_ready_and_what_is_not(self):
+        phases = ["queued", "sync", "validate", "soak", "soak", "done", "aborted"]
+        states = [S._volume_state(st(), vol(p, ALL if p in ("soak", "done") else None, vid=str(i)), True, "") for i, p in enumerate(phases)]
+        sm = S._summary(states)
+        self.assertEqual(sm, {"moved": 3, "ready": 3, "completed": 1, "in_safety_period": 2, "not_moved": 1, "needs_you": 1, "being_moved": 1, "waiting": 1, "total": 7})
+
+
+class TargetTypeTests(unittest.TestCase):
+    """The Move step shows the volume types bound to the target; it must never claim to know what it has not read."""
+
+    class Session:
+        def __init__(self, types=None, boom=False):
+            self.types, self.boom = types, boom
+
+        def get(self, service, path):
+            if self.boom:
+                raise RuntimeError("no answer")
+            return {"volume_types": self.types}
+
+    def state(self, session, demo=False, target="pure-prod"):
+        return SimpleNamespace(checks={"target_backend": target} if target else {}, demo=demo, session=session)
+
+    def types(self, *pairs):
+        return [{"name": n, "extra_specs": {"volume_backend_name": b}} for n, b in pairs]
+
+    def test_exactly_one_bound_type_is_chosen_by_itself(self):
+        out = S._target_types(self.state(self.Session(self.types(("fa", "pure-prod"), ("sf", "sf-prod")))))
+        self.assertEqual((out["backend"], out["types"], out["auto"]), ("pure-prod", ["fa"], "fa"))
+
+    def test_several_bound_types_are_listed_and_none_is_guessed(self):
+        out = S._target_types(self.state(self.Session(self.types(("fa-a", "pure-prod"), ("fa-b", "pure-prod")))))
+        self.assertEqual((out["types"], out["auto"]), (["fa-a", "fa-b"], None))
+
+    def test_no_bound_type_is_reported_as_empty_not_as_unknown(self):
+        out = S._target_types(self.state(self.Session(self.types(("sf", "sf-prod")))))
+        self.assertEqual((out["backend"], out["types"], out["auto"]), ("pure-prod", [], None))
+
+    def test_unread_types_leave_the_backend_empty_so_the_page_does_not_block(self):
+        for s in (self.state(self.Session(boom=True)), self.state(None), self.state(self.Session(self.types()), demo=True), self.state(self.Session(self.types()), target=None)):
+            out = S._target_types(s)
+            self.assertEqual((out["backend"], out["types"], out["auto"]), (None, [], None))
 
 
 if __name__ == "__main__":

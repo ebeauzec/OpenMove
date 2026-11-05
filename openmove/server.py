@@ -597,10 +597,29 @@ def _refusals(fn):
         raise ApiError(str(exc), 409) from None
 
 
+def _target_types(state):
+    """The volume types bound to the target back-end, for the Move step: {backend, types, auto}. auto is the one type OpenMove uses by itself when exactly one fits."""
+    c = state.checks or {}
+    tb = c.get("target_backend")
+    out = {"backend": None, "types": [], "auto": None}      # backend stays empty until the types are really read: the page then does not block on what it cannot know
+    if not tb or state.demo or state.session is None:
+        return out
+    try:
+        from .connectors.openstack import BLOCK_STORAGE_TYPES
+        types = state.session.get(BLOCK_STORAGE_TYPES, "/types")["volume_types"]
+    except Exception:
+        return out
+    out["backend"] = tb
+    out["types"] = sorted(t["name"] for t in types if (t.get("extra_specs") or {}).get("volume_backend_name") == tb)
+    out["auto"] = out["types"][0] if len(out["types"]) == 1 else None
+    return out
+
+
 def api_engine_get(state, body, query):
     if state.engine is None:
-        return {"status": "idle", "ticks": 0, "queued": 0, "active": 0, "finished": 0, "failed": 0, "volumes": [], "more": 0, "access": state.access}
-    return dict(state.engine.view(), access=state.access)
+        return {"status": "idle", "ticks": 0, "queued": 0, "active": 0, "finished": 0, "failed": 0, "volumes": [], "more": 0, "access": state.access,
+                "target": _target_types(state)}
+    return dict(state.engine.view(), access=state.access, target=_target_types(state))
 
 
 def api_engine_dry_run(state, body, query):
@@ -803,33 +822,48 @@ def _volume_state(state, r, mine, who=""):
     ph, other = r["phase"], (" %s started the move and cannot approve." % who if who else " The person who started the move cannot approve.")
     kind = _wait_kind(state, r, mine)
     if kind == "g23":
-        return {"group": "you", "label": "Waiting for approval", "action": dict(ACTIONS["g23"], who="a second person"),
+        return {"group": "you", "outcome": "needs_you", "label": "Waiting for approval", "action": dict(ACTIONS["g23"], who="a second person"),
                 "next": "Copied and checked. A second person must approve it before it can be switched." + other}
     if kind == "release":
-        return {"group": "you", "label": "Waiting for your release", "action": dict(ACTIONS["release"], who="you"),
+        return {"group": "you", "outcome": "needs_you", "label": "Waiting for your release", "action": dict(ACTIONS["release"], who="you"),
                 "next": "Approved. Nothing is switched until you release it."}
     if kind == "g4":
-        return {"group": "you", "label": "Waiting for approval", "action": dict(ACTIONS["g4"], who="a second person"),
+        return {"group": "you", "outcome": "needs_you", "label": "Waiting for approval", "action": dict(ACTIONS["g4"], who="a second person"),
                 "next": "Switched. A second person must confirm that it works on the new storage." + other}
     reason = plain_note(r)
     if ph in ("aborted", "rollback") or r.get("failed"):
         put_back = ph == "rollback"
-        return {"group": "stopped", "label": "Put back" if put_back else "Not moved", "action": dict(ACTIONS["decide"], who="you"),
-                "next": (reason + " " if reason else "") + ("It is back on the old storage with its data intact." if put_back else
-                                                           "It was stopped before the switch: it is where it was, with its data intact.") + " Decide: fix the cause and move it again, or leave it."}
+        raw = (r.get("error") or r.get("note") or "").strip()
+        raw = raw[len("given up: "):] if raw.startswith("given up: ") else raw
+        f = handling.describe_cause(handling.classify_reason(raw) if not put_back else "swap_refused")
+        failure = {"title": f["title"], "why": f["why"], "source": f["source"], "target": f["target"], "steps": f["steps"], "who": f["who"], "detail": raw}
+        data = "It is back on the old storage with its data intact." if put_back else "It was stopped before the switch: it is where it was, with its data intact."
+        return {"group": "stopped", "outcome": "not_moved", "label": "Put back" if put_back else "Not moved", "action": dict(ACTIONS["decide"], who="you"),
+                "failure": failure, "next": "%s. %s To fix: %s" % (f["title"], data, f["steps"][0])}
     if ph == "queued":
-        return {"group": "queued", "label": "Waiting", "action": None, "next": "Waiting for a free place. OpenMove starts it by itself. Nothing to do."}
+        return {"group": "queued", "outcome": "waiting", "label": "Waiting", "action": None, "next": "Waiting for a free place. OpenMove starts it by itself. Nothing to do."}
     if ph == "soak":
-        return {"group": "moved", "label": "Moved", "action": None,
-                "next": "On the new storage. The old copy is kept for the safety period and then released. Nothing to do."}
+        return {"group": "moved", "outcome": "moved_ready", "label": "Moved and ready", "ready": True, "completed": False, "action": None,
+                "next": "On the new storage and checked: ready to use. The old copy is kept for the safety period, then released. Nothing to do."}
     if ph == "done":
-        return {"group": "moved", "label": "Moved", "action": None, "next": "Finished. Nothing to do."}
-    return {"group": "moving", "label": "Being moved", "action": None, "next": "OpenMove is working on it: %s. Nothing to do." % WORKING.get(ph, ph)}
+        return {"group": "moved", "outcome": "completed", "label": "Completed", "ready": True, "completed": True, "action": None,
+                "next": "Finished: on the new storage, checked, and the old copy is released. Nothing to do."}
+    return {"group": "moving", "outcome": "being_moved", "label": "Being moved", "action": None, "next": "OpenMove is working on it: %s. Nothing to do." % WORKING.get(ph, ph)}
 
 
 def plain_note(r):
     n = (r.get("error") or r.get("note") or "").strip()
     return n + "." if n and n[-1] not in ".!?" else n
+
+
+def _summary(states):
+    """The answer to 'what has moved?' in numbers: moved (on the new storage), ready (checked and usable there), completed (old copy released), not moved, needs you."""
+    o = {}
+    for st in states:
+        o[st.get("outcome") or st["group"]] = o.get(st.get("outcome") or st["group"], 0) + 1
+    ready, done = o.get("moved_ready", 0), o.get("completed", 0)
+    return {"moved": ready + done, "ready": ready + done, "completed": done, "in_safety_period": ready, "not_moved": o.get("not_moved", 0),
+            "needs_you": o.get("needs_you", 0), "being_moved": o.get("being_moved", 0), "waiting": o.get("waiting", 0), "total": len(states)}
 
 
 def _group_counts(states):
@@ -1024,6 +1058,13 @@ def api_live(state, body, query):
         if a:
             t = todo.setdefault(a["do"], dict(a, count=0))
             t["count"] += 1
+            f = r["state"].get("failure")
+            if f:                                      # the decisions come with their causes: what failed, in words, and the first thing to do
+                c = t.setdefault("causes", {}).setdefault(f["title"], {"title": f["title"], "why": f["why"], "fix": f["steps"][0], "who": f["who"], "count": 0})
+                c["count"] += 1
+    for t in todo.values():
+        if "causes" in t:
+            t["causes"] = sorted(t["causes"].values(), key=lambda c: -c["count"])
     total = len(mine) if mine else (len(admitted) or len(st))
     done = sum(r["progress"] for r in rows)
     active = [r for r in rows if r["phase"] not in ("soak", "done", "aborted", "rollback") and not (mine and r["phase"] == "queued")]
@@ -1037,6 +1078,7 @@ def api_live(state, body, query):
             "simulation": {"status": sim.status, "running": sim.running, "throughput_mb_s": round(sim.throughput),
                            "rate_cap_mb_s": opts["rate_cap_mb_s"], "virtual_time": sim.vnow.strftime("%Y-%m-%d %H:%M"), "ticks": sim.ticks} if sim else None,
             "groups": [{"id": k, "label": label, "count": groups[k]} for k, label in GROUPS], "todo": list(todo.values()), "operator": who,
+            "summary": _summary([r["state"] for r in rows]),
             "total": total, "started": len(st), "active": len(active), "counts": counts, "ready": held if mine else len(ready), "need_g23": need_g23, "need_g4": wait4 if mine else len(g4wait), "auto_sign": state.auto_sign, "options": opts,
             "by_class": {k: sum(1 for v in admitted if inv.get(v, {}).get("class") == k) for k in "ABC"} if admitted else {},
             "overall": min(100.0, round(done / total, 1)) if total else 0, "volumes": rows[:150], "volumes_more": max(0, len(rows) - 150),

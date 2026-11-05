@@ -1,8 +1,8 @@
 {
-  "version": "0.14.1",
+  "version": "0.15.0",
   "major": 0,
-  "minor": 14,
-  "patch": 1,
+  "minor": 15,
+  "patch": 0,
   "date": "2026-11-05",
-  "notes": "Progress page: one place, one next step and one kind of action for every volume"
+  "notes": "Plain-words failures, moved/ready/completed for every volume, a guided Move step"
 }

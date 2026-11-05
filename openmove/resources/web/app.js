@@ -152,7 +152,7 @@
     select: { title: 'Choose what to move', what: 'Tick the volumes to move. You can tick a whole project, a whole instance or a single volume. Volumes that cannot be moved are shown with the reason, and they stay where they are.',
       todo: ['Tick what you want to move. The suggested choice is already ticked.', 'Check the volumes that may break if they are moved.', 'Press "Confirm my choice".'], after: 'Your choice is confirmed. Go on to the move.' },
     move: { title: 'Move the volumes', what: 'First rehearse: OpenMove lists every call it would make and sends none. Then start the move for real. A second person approves each volume before it is switched.',
-      todo: ['Press "1. Rehearse" and read the result.', 'Press "2. Start moving".'], after: 'The move has been rehearsed. Press "2. Start moving", or watch the Progress step.' },
+      todo: ['Step 1: choose the volume type on the new storage, if it asks.', 'Step 3: press "Rehearse" and read the result.', 'Step 4: press "Start moving".'], after: 'The move has been rehearsed. Press "Start moving" (step 4), or watch the Progress step.' },
     live: { title: 'Progress', what: 'Shows each volume as it is copied, checked and switched, and everything that was refused. A second person approves each volume here.',
       todo: ['Watch the progress.', 'The second person presses Approve when volumes are ready.'], after: '' },
     reports: { title: 'Reports', what: 'Word documents and spreadsheets built from the same data the tool holds, so a report cannot disagree with what OpenMove knows.',
@@ -1060,6 +1060,7 @@
     $('live-stop').classList.toggle('hidden', !(sim && sim.running));
     $('live-status').textContent = sim ? 'Simulation: ' + sim.status + '  |  virtual time ' + sim.virtual_time : '';
     drawGroups(l);
+    drawHeadline(l);
     var pipe = $('live-pipe'); clear(pipe);
     PHASES.forEach(function (p) {
       var n = l.counts[p[0]] || 0;
@@ -1082,12 +1083,18 @@
       var s = v.state || { group: 'moving', label: STAGE_NAME[v.phase] || v.phase, next: plain(v.note), action: null };
       if (liveFilter && s.group !== liveFilter) return;
       shown++;
-      var where = el('td', {}, [el('span', { class: 'gchip gchip-' + s.group, text: s.label, title: PHASE_HELP[v.phase] || '' })]);
+      var where = el('td', {}, [el('span', { class: 'gchip gchip-' + s.group + (s.completed ? ' gchip-completed' : ''), text: (s.ready ? '\u2713 ' : '') + s.label, title: PHASE_HELP[v.phase] || '' })]);
       if (s.group === 'moving') { where.appendChild(bar(v.progress, v.phase === 'recheck' ? 'warn' : '')); }
+      var nextCell = el('td', { text: plain(s.next) });
+      if (s.failure) {                         // why it was not moved, in words, with the first thing to do; the engine's own text stays below as detail
+        nextCell = el('td', {}, [el('div', { class: 'fail-title', text: s.failure.title }), el('div', { class: 'fail-why', text: s.failure.why }),
+          el('div', { class: 'fail-fix', text: 'First: ' + s.failure.steps[0] }), el('div', { class: 'fail-state', text: 'State: ' + s.failure.source + ' ' + s.failure.target })]);
+        if (s.failure.detail) nextCell.appendChild(el('div', { class: 'fail-detail mono small muted', text: 'OpenMove reported: ' + s.failure.detail }));
+      }
       var act = s.action ? el('td', {}, [el('span', { class: 'atype atype-' + s.action.type, text: s.action.type_text })]) : el('td', {}, [el('span', { class: 'atype atype-none', text: 'Nothing to do' })]);
       tb.appendChild(el('tr', { 'data-id': v.id, class: 'clickrow grow-' + s.group }, [
         el('td', {}, [el('div', { class: 'vname', text: v.name || 'Unnamed volume' }), el('div', { class: 'mono muted small', text: v.id.slice(-12) + (v.size == null ? '' : '  ' + v.size + ' GiB') })]),
-        where, el('td', { text: plain(s.next) }), act]));
+        where, nextCell, act]));
     });
     var lf = $('live-filter'); clear(lf);
     if (liveFilter) {
@@ -1107,11 +1114,30 @@
   // ---- the five places, and what a person has to do ----
   var liveFilter = '';
   var GROUP_SHORT = { you: 'a person must act', stopped: 'left where it was', moving: 'OpenMove is working', queued: 'starts by itself', moved: 'on the new storage' };
+  // One sentence that answers: what has moved, what has not, is anything waiting for me.
+  function drawHeadline(l) {
+    var m = l.summary, h = $('live-headline'); if (!h) return;
+    if (!m || !m.total) { h.textContent = ''; h.className = 'headline hidden'; return; }
+    var bits = [];
+    bits.push(m.moved + ' of ' + m.total + ' volume' + (m.total === 1 ? ' is' : 's are') + ' moved' + (m.moved ? ' and ready to use on the new storage' : ''));
+    if (m.completed) bits.push(m.completed + ' completed (the old copy is released)');
+    if (m.in_safety_period) bits.push(m.in_safety_period + ' in the safety period (the old copy is kept)');
+    if (m.being_moved) bits.push(m.being_moved + ' being moved now');
+    if (m.waiting) bits.push(m.waiting + ' waiting to start');
+    if (m.not_moved) bits.push(m.not_moved + ' NOT moved: see why below');
+    if (m.needs_you) bits.push(m.needs_you + ' need' + (m.needs_you === 1 ? 's' : '') + ' a person' + (m.not_moved ? ', and you decide what happens to the ones not moved' : ''));
+    else bits.push(m.not_moved ? 'You decide what happens to the volumes not moved' : 'Nothing needs you');
+    bits[bits.length - 1] = bits[bits.length - 1].charAt(0).toUpperCase() + bits[bits.length - 1].slice(1);
+    h.className = 'headline ' + (m.not_moved ? 'bad' : (m.needs_you ? 'warn' : 'ok'));
+    h.textContent = bits.join('. ') + '.';
+  }
   function drawGroups(l) {
     var box = $('live-tiles'); clear(box);
     (l.groups || []).forEach(function (g) {
+      var hint = GROUP_SHORT[g.id];
+      if (g.id === 'moved' && l.summary && g.count) hint = l.summary.completed + ' completed, ' + l.summary.in_safety_period + ' in the safety period';
       var t = el('button', { type: 'button', class: 'gt gt-' + g.id + (liveFilter === g.id ? ' on' : '') + (g.count ? '' : ' zero'), 'aria-pressed': liveFilter === g.id ? 'true' : 'false',
-        title: 'Show only the volumes that are in this place' }, [el('span', { class: 'gt-n', text: String(g.count) }), el('span', { class: 'gt-l', text: g.label }), el('span', { class: 'gt-h', text: GROUP_SHORT[g.id] })]);
+        title: 'Show only the volumes that are in this place' }, [el('span', { class: 'gt-n', text: String(g.count) }), el('span', { class: 'gt-l', text: g.label }), el('span', { class: 'gt-h', text: hint })]);
       t.addEventListener('click', function () { liveFilter = liveFilter === g.id ? '' : g.id; if (lastLive) renderLive(lastLive); });
       box.appendChild(t);
     });
@@ -1127,6 +1153,13 @@
     card('g4', by.g4, function (n) { return vols(n) + (n === 1 ? ' is' : ' are') + ' switched and wait for a second person to approve the result. ' + who; });
     card('decide', by.open, function (n) { return vols(n) + (n === 1 ? ' was' : ' were') + ' not moved. It is for you to decide what happens to ' + (n === 1 ? 'it.' : 'them.'); });
     $('todo-none').classList.toggle('hidden', !!(l.todo || []).length);
+    var why = $('todo-decide-causes'); clear(why);
+    (l.todo || []).forEach(function (t) {
+      if (t.do !== 'open') return;
+      (t.causes || []).forEach(function (c) {
+        why.appendChild(el('li', {}, [el('b', { text: c.title }), document.createTextNode(' (' + vols(c.count) + '). ' + c.why + ' '), el('i', { text: 'First: ' + c.fix })]));
+      });
+    });
   }
   $('todo-decide-go').addEventListener('click', function () { liveFilter = 'stopped'; if (lastLive) renderLive(lastLive); });
   // One plain sentence about what is going on, so a person who comes back to the screen knows at once whether anything needs them.
@@ -1216,7 +1249,7 @@
     var box = $('mv-prereq'); if (!box) return; clear(box);
     if (!s || !s.connected) { box.className = 'prereq hidden'; return; }
     box.className = 'prereq';
-    box.appendChild(el('div', { class: 'k', text: 'Before a real move can start' }));
+    box.appendChild(el('div', { class: 'k', text: 'What must be true before a real move starts' }));
     function row(ok, text, label, go) {
       var r = el('div', { class: 'prow ' + (ok ? 'ok' : 'open') }, [el('span', { class: 'tick', text: ok ? '\u2713' : '\u2022' }), el('span', { text: ' ' + text })]);
       if (!ok && go) { var b = el('button', { class: 'secondary', type: 'button', text: label, title: go.tip }); b.addEventListener('click', go.run); r.appendChild(b); }
@@ -1231,11 +1264,7 @@
     var w = wizardInfo('move');
     if (w) { drawSelConfirm(); }
     drawPrereq(lastStatus);
-    var st = $('mv-start');
-    if (st) {                                       // a real run needs a rehearsal first; the server enforces it too
-      st.disabled = !wizardDone('move');
-      st.title = st.disabled ? 'Rehearse first (button 1).' : '';
-    }
+    drawMovePath();                                 // a real run needs a rehearsal first; the server enforces it too
   }
   function loadSelection() {
     api('GET', 'selection').then(renderSelection).catch(function (e) {
@@ -1455,7 +1484,7 @@
     'opt-reset': 'Set every setting back to its safe value.',
     'mv-dry': 'List every call the move would make, in order, with its undo. Nothing is sent. A real run requires a rehearsal first.', 'mv-start': 'Start moving the chosen volumes. Each volume still waits for two approvals and for your release before it is switched.',
     'mv-stop': 'Stop taking new volumes. Volumes already sent carry on in the cloud.', 'mv-refresh': 'Read the state of the move again.',
-    'mv-type': 'The volume type on the new storage. Leave empty if only one type fits.', 'mv-from': 'No volume is started before this time (UTC).', 'mv-until': 'No new volume is started after this time (UTC).',
+    'mv-type': 'The volume type the moved volumes get on the new storage. When only one type belongs to the new storage OpenMove uses it by itself.', 'mv-from': 'No volume is started before this time (UTC).', 'mv-until': 'No new volume is started after this time (UTC).',
     'mv-rev-preview': 'Show what putting the whole move back would do. Nothing is changed.', 'mv-rev-all': 'Put every moved volume back on its original storage.',
     'p0-g0': 'Record the lab validation for this OpenStack release from the results above. Without it OpenMove only reads.', 'mv-validate': 'Record the lab validation by typing the evidence yourself.',
     'rep-customer': 'Shown on the first page and in the footer of every report.', 'rep-by': 'Shown as the author of the report.', 'rep-audit': 'Add the health check of the cloud to the report before the move.',
@@ -1964,6 +1993,41 @@
   // ---- move (the engine) ----
   var moveTimer = null;
   function typeMap() { var t = $('mv-type').value.trim(); return t ? { '*': t } : {}; }
+  // The Move step as a path of four steps. Each shows done, your turn or locked, and one sentence says what to do now.
+  var moveTarget = null;
+  function drawTarget(t) {
+    moveTarget = t || null;
+    var sel = $('mv-type'), keep = sel.value; clear(sel);
+    var types = (t && t.types) || [];
+    if (types.length === 1) sel.appendChild(el('option', { value: '', text: 'Automatic: ' + types[0] }));
+    else sel.appendChild(el('option', { value: '', text: types.length ? 'Choose a type ...' : (t && t.backend ? 'No volume type is bound to ' + t.backend : 'Chosen when the cloud is read') }));
+    types.forEach(function (n) { if (types.length > 1 || n !== types[0]) sel.appendChild(el('option', { value: n, text: n })); });
+    if (types.length > 1 && keep && types.indexOf(keep) >= 0) sel.value = keep;
+    $('mv-type-note').textContent = !t || !t.backend ? '' : (types.length === 1 ? 'Only one volume type belongs to the new storage (' + t.backend + '), so OpenMove uses it.' :
+      types.length > 1 ? 'The new storage (' + t.backend + ') has ' + types.length + ' volume types. OpenMove does not guess: choose the one the volumes should get.' :
+      'Make a volume type in Cinder and bind it to ' + t.backend + ' (its volume_backend_name), then press Refresh.');
+    drawMovePath();
+  }
+  function typeOk() {
+    var t = moveTarget; if (!t || !t.backend) return true;
+    return (t.types || []).length === 1 || ((t.types || []).length > 1 && !!$('mv-type').value);
+  }
+  function drawMovePath() {
+    var s = lastStatus || {}, dry = wizardDone('move'), tOk = typeOk();
+    var pre = !s.read_only && s.gate === 'approved' && !s.halted;
+    var steps = [tOk, pre, dry, false], now = steps.indexOf(false) + 1, labels = [tOk ? 'chosen' : 'choose a type', pre ? 'ready' : 'not yet', dry ? 'done' : 'not yet', ''];
+    for (var i = 1; i <= 4; i++) {
+      var li = $('mvp-' + i); if (!li) return;
+      li.className = 'mvp ' + (steps[i - 1] ? 'done' : (i === now ? 'now' : 'locked'));
+      $('mvp-' + i + '-s').textContent = i === 4 ? '' : (steps[i - 1] ? '\u2713 ' + labels[i - 1] : (i === now ? 'your turn' : 'waiting for the step before'));
+    }
+    var next = !tOk ? 'Choose the volume type in step 1.' : (!pre ? (s.read_only ? 'Record the lab tests for this OpenStack release (step 2) so that changes are allowed.' : (s.halted ? 'The emergency stop is pressed: allow changes again first.' :
+      'Get the safety checks approved by two people (step 2).')) : (!dry ? 'Press "Rehearse" (step 3). It changes nothing.' : 'Press "Start moving" (step 4). Then watch the Progress step.'));
+    var nb = $('mv-next'); if (nb) { nb.className = 'banner static ' + (!tOk || !pre ? 'warn' : 'ok'); nb.textContent = 'What to do now: ' + next; }
+    var d = $('mv-dry'), st = $('mv-start');
+    if (d) { d.disabled = !tOk || !pre; d.title = !tOk ? 'Choose the volume type first (step 1).' : (!pre ? 'Step 2 is not ready yet.' : ''); }
+    if (st) { st.disabled = !(tOk && pre && dry); st.title = st.disabled ? 'Do the steps before this one first.' : ''; }
+  }
   function drawMove(m) {
     var cards = $('mv-cards'); clear(cards);
     [['Run', m.status], ['Queued', m.queued], ['Active', m.active], ['Finished', m.finished], ['Failed', m.failed]].forEach(function (x) { cards.appendChild(card(x[0], x[1])); });
@@ -1987,6 +2051,7 @@
         what, act]));
     });
     $('mv-more').textContent = m.more ? m.more + ' more volume(s) not shown.' : '';
+    if (m.target) drawTarget(m.target);
     $('mv-status').textContent = m.halted ? 'HALTED by ' + m.halted.by + ': ' + m.halted.reason : '';
     if (moveTimer) { clearTimeout(moveTimer); moveTimer = null; }
     if (m.status === 'running' && currentTab === 'move') moveTimer = setTimeout(loadMove, 4000);
@@ -1994,7 +2059,8 @@
   function loadMove() { return api('GET', 'engine').then(drawMove).catch(function () {}); }
   function drawDry(d) {
     var v = $('mv-dry-view'); clear(v);
-    v.appendChild(el('div', { class: 'banner ok static', text: 'Rehearsal done. Nothing was sent. ' + d.counts.ok + ' ready, ' + d.counts.wait + ' waiting, ' + d.counts.blocked + ' blocked. ' + d.note }));
+    v.appendChild(el('div', { class: 'banner ' + (d.counts.blocked ? 'warn' : 'ok') + ' static', text: 'Rehearsal done. Nothing was sent. ' + d.counts.ok + ' volume' + (d.counts.ok === 1 ? ' is' : 's are') + ' ready to move, ' + d.counts.wait +
+      ' will wait, ' + d.counts.blocked + ' cannot be moved yet (the reason is on its line). ' + d.note }));
     var t = el('table', {}, [el('thead', {}, [el('tr', {}, ['Volume', 'Group', 'Result', 'Move to type', 'Why not, or what would be sent'].map(function (h) { return el('th', { text: h }); }))]), el('tbody')]);
     d.volumes.forEach(function (r) {
       var why = r.error ? r.error : r.checks.filter(function (c) { return !c.ok; }).map(function (c) { return c.detail; }).join('; ');
@@ -2033,6 +2099,7 @@
   });
   $('mv-stop').addEventListener('click', function () { guard($('mv-stop'), function () { return api('POST', 'engine/stop', {}).then(drawMove); }); });
   $('mv-refresh').addEventListener('click', loadMove);
+  $('mv-type').addEventListener('change', drawMovePath);
   $('pf-to-hosts').addEventListener('click', function () { showTab('hosts', true); });
   $('mv-validate').addEventListener('click', function () {
     ask({ title: 'Record gate G0: the lab tests passed',
